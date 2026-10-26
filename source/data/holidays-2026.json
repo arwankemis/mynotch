@@ -1,0 +1,32 @@
+{
+  "year": 2026,
+  "officialSourceUrl": "https://www.setneg.go.id/baca/index/inilah_skb_3_menteri_libur_nasional_dan_cuti_bersama_2026",
+  "verifiedAt": "2026-10-24",
+  "holidays": [
+    {"date":"2026-01-01","name":"Tahun Baru"},
+    {"date":"2026-01-16","name":"Isra Mikraj"},
+    {"date":"2026-02-17","name":"Imlek"},
+    {"date":"2026-03-19","name":"Nyepi"},
+    {"date":"2026-03-21","name":"Idulfitri"},
+    {"date":"2026-03-22","name":"Idulfitri"},
+    {"date":"2026-04-03","name":"Wafat Yesus Kristus"},
+    {"date":"2026-04-05","name":"Paskah"},
+    {"date":"2026-05-01","name":"Hari Buruh"},
+    {"date":"2026-05-14","name":"Kenaikan Yesus Kristus"},
+    {"date":"2026-05-27","name":"Iduladha"},
+    {"date":"2026-05-31","name":"Waisak"},
+    {"date":"2026-06-01","name":"Hari Lahir Pancasila"},
+    {"date":"2026-06-16","name":"Tahun Baru Islam"},
+    {"date":"2026-08-17","name":"Kemerdekaan Indonesia"},
+    {"date":"2026-08-25","name":"Maulid Nabi Muhammad"},
+    {"date":"2026-12-25","name":"Natal"},
+    {"date":"2026-02-16","name":"Cuti bersama Imlek","collective_leave":true},
+    {"date":"2026-03-18","name":"Cuti bersama Nyepi","collective_leave":true},
+    {"date":"2026-03-20","name":"Cuti bersama Idulfitri","collective_leave":true},
+    {"date":"2026-03-23","name":"Cuti bersama Idulfitri","collective_leave":true},
+    {"date":"2026-03-24","name":"Cuti bersama Idulfitri","collective_leave":true},
+    {"date":"2026-05-15","name":"Cuti bersama Kenaikan","collective_leave":true},
+    {"date":"2026-05-28","name":"Cuti bersama Iduladha","collective_leave":true},
+    {"date":"2026-12-24","name":"Cuti bersama Natal","collective_leave":true}
+  ]
+}

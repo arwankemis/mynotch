@@ -1,0 +1,3 @@
+use std::path::{Path,PathBuf};
+pub fn storage_root(executable:&Path,preview:bool)->Result<PathBuf,String>{let parent=executable.parent().ok_or("Folder aplikasi tidak ditemukan.")?;Ok(parent.join(if preview{"preview-data"}else{"data"}))}
+#[cfg(test)]mod tests{use super::*;#[test]fn data_follows_the_executable_after_relocation(){for directory in ["C:/portable-one","D:/Folder With Spaces/mynotch"]{let root=Path::new(directory);assert_eq!(storage_root(&root.join("mynotch.exe"),false).unwrap(),root.join("data"));assert_eq!(storage_root(&root.join("mynotch.exe"),true).unwrap(),root.join("preview-data"));}}}

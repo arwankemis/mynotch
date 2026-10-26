@@ -1,0 +1,7 @@
+/data/
+/preview-data/
+*.log
+*.tmp
+/target/
+/source/target/
+/*.zip
