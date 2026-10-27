@@ -1159,17 +1159,9 @@ impl Shell {
                         }else{
                             p.fill_notch(width,height,ear,radius,body_bg);
                         }
-                        if self.settings.frosted_glass && (self.settings.opacity < 255 || self.hover_stage >= 1) {
-                            p.stroke_notch_alpha(width, height, ear, radius, 0xffffff, 0.14, 1.);
-                            p.fill_notch_gradient(width, (height * 0.4).max(8.), ear, radius, 0xffffff, 0x000000, 0.04, 0.0);
-                        }
                     }else{
                         p.fill(0.,0.,width,height,radius,body_bg);
                         if !self.settings_open&&self.settings.glow&&self.expanded&&self.tab=="Musik"{let accent=self.cover.as_ref().map(|c|c.accent).unwrap_or(0x1a2e3b);p.fill_alpha(0.,0.,width,height,radius,accent,0.12);}
-                        if self.settings.frosted_glass && (self.settings.opacity < 255 || self.hover_stage >= 1) {
-                            p.stroke_alpha(0.5, 0.5, width - 1., height - 1., radius - 0.5, 0xffffff, 0.16, 1.);
-                            p.fill_alpha(1., 1., width - 2., (height * 0.4).max(6.), radius - 1., 0xffffff, 0.035);
-                        }
                     }
                     self.draw(&mut p);
                     p.reset_transform();

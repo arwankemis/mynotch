@@ -71,8 +71,6 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "appearance.gap.desc" => if en { "0 px keeps notch flush against screen." } else { "0 px membuat notch menempel layar." },
         "appearance.opacity" => if en { "Background opacity" } else { "Kepekatan latar" },
         "appearance.opacity.desc" => if en { "Higher value makes background denser." } else { "Nilai tinggi membuat latar lebih pekat." },
-        "appearance.frosted" => if en { "Frosted Glass effect" } else { "Efek Frosted Glass" },
-        "appearance.frosted.desc" => if en { "Glass sheen and crystal inner rim when translucent." } else { "Kilau kaca dan garis tepi kristal saat transparan." },
 
         // Settings Audio
         "audio.visualizer" => if en { "Music visualizer" } else { "Visualizer musik" },
@@ -119,7 +117,7 @@ mod tests {
             "cat.general", "cat.appearance", "cat.tabs", "cat.audio", "cat.reminders", "cat.mods",
             "general.language", "general.fullscreen", "general.minimal", "general.default_tab",
             "appearance.position", "appearance.top", "appearance.bottom", "appearance.scale",
-            "appearance.gap", "appearance.opacity", "appearance.frosted",
+            "appearance.gap", "appearance.opacity",
             "audio.visualizer", "audio.glow", "audio.romanize", "audio.open_music",
             "reminders.disabled", "reminders.enable", "reminders.configure",
             "stage1.no_music", "stage1.clips", "stage1.notes", "stage1.new_note",

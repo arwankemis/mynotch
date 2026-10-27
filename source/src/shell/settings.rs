@@ -74,24 +74,22 @@ impl Shell{
     }}
     fn settings_appearance(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
-        self.st_row_compact(p,114.,t("appearance.position",&lang),t("appearance.position.desc",&lang));
+        self.st_row_compact(p,116.,t("appearance.position",&lang),t("appearance.position.desc",&lang));
         for (label,x,bottom) in [(t("appearance.top",&lang),418.,false),(t("appearance.bottom",&lang),482.,true)]{
             let selected=self.settings.bottom==bottom;
             let action=Action::Bottom(bottom);
-            let hover=self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+60.&&b>=118.&&b<=148.);
-            p.fill(x,118.,60.,30.,7.,if selected{0x303039}else if hover{0x22222a}else{0x18181e});
-            p.text_centered(label,x,118.,60.,30.,11.,if selected||hover{FG}else{MUTED},1.,false);
-            if self.focused.as_ref()==Some(&action){p.stroke(x-1.,117.,62.,32.,8.,ACCENT,1.);}
-            self.st_hit(x,118.,60.,30.,action,true);
+            let hover=self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+60.&&b>=124.&&b<=154.);
+            p.fill(x,124.,60.,30.,7.,if selected{0x303039}else if hover{0x22222a}else{0x18181e});
+            p.text_centered(label,x,124.,60.,30.,11.,if selected||hover{FG}else{MUTED},1.,false);
+            if self.focused.as_ref()==Some(&action){p.stroke(x-1.,123.,62.,32.,8.,ACCENT,1.);}
+            self.st_hit(x,124.,60.,30.,action,true);
         }
-        self.st_row_compact(p,156.,t("appearance.scale",&lang),t("appearance.scale.desc",&lang));
-        self.st_select(p,"scale",&format!("{:.0}%",self.settings.scale*100.),418.,162.,124.,true);
-        self.st_row_compact(p,198.,t("appearance.gap",&lang),t("appearance.gap.desc",&lang));
-        self.st_select(p,"gap",&format!("{} px",self.settings.edge_gap),418.,204.,124.,true);
-        self.st_row_compact(p,240.,t("appearance.opacity",&lang),t("appearance.opacity.desc",&lang));
-        self.st_select(p,"opacity",&format!("{}%",(self.settings.opacity as f32/255.*100.).round()as u32),418.,246.,124.,true);
-        self.st_row_compact(p,282.,t("appearance.frosted",&lang),t("appearance.frosted.desc",&lang));
-        self.st_toggle(p,512.,293.,self.settings.frosted_glass,Action::Toggle("frosted_glass"),true);
+        self.st_row_compact(p,162.,t("appearance.scale",&lang),t("appearance.scale.desc",&lang));
+        self.st_select(p,"scale",&format!("{:.0}%",self.settings.scale*100.),418.,170.,124.,true);
+        self.st_row_compact(p,208.,t("appearance.gap",&lang),t("appearance.gap.desc",&lang));
+        self.st_select(p,"gap",&format!("{} px",self.settings.edge_gap),418.,216.,124.,true);
+        self.st_row_compact(p,254.,t("appearance.opacity",&lang),t("appearance.opacity.desc",&lang));
+        self.st_select(p,"opacity",&format!("{}%",(self.settings.opacity as f32/255.*100.).round()as u32),418.,262.,124.,true);
     }}
     fn settings_tabs(&mut self,p:&mut Painter){unsafe{
         let mut order=self.settings.tab_order.clone();for &m in MODULES{if !order.iter().any(|v|v==m){order.push(m.into());}}order.retain(|t|MODULES.contains(&t.as_str()));

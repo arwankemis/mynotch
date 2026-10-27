@@ -181,27 +181,6 @@ impl Painter {
             self.fill_alpha(0.,0.,width,height,radius,rgb,alpha);
         }
     }}
-    pub unsafe fn stroke_notch_alpha(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32,alpha:f32,thickness:f32){unsafe{
-        if let Ok(path)=self.d2d.CreatePathGeometry(){
-            let closed=if let Ok(sink)=path.Open(){
-                sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_HOLLOW);
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
-                sink.AddLine(pt(0.,height-radius));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
-                sink.AddLine(pt(width-radius,height));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
-                sink.AddLine(pt(width,ear));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
-                sink.AddLine(pt(-ear,0.));
-                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-                sink.Close().is_ok()
-            }else{false};
-            if closed{
-                self.brush.SetColor(&color(rgb,alpha));
-                self.context.DrawGeometry(&path,&self.brush,thickness,None);
-            }
-        }
-    }}
     pub unsafe fn fill_notch_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,top_rgb:u32,bottom_rgb:u32,top_alpha:f32,bottom_alpha:f32){unsafe{
         if let Ok(path)=self.d2d.CreatePathGeometry(){
             let closed=if let Ok(sink)=path.Open(){
@@ -514,10 +493,6 @@ impl Painter {
     }}
     pub unsafe fn stroke(&self,x:f32,y:f32,width:f32,height:f32,radius:f32,rgb:u32,thickness:f32){unsafe{
         self.brush.SetColor(&color(rgb,1.));
-        self.context.DrawRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x,y,width,height),radiusX:radius,radiusY:radius},&self.brush,thickness,None);
-    }}
-    pub unsafe fn stroke_alpha(&self,x:f32,y:f32,width:f32,height:f32,radius:f32,rgb:u32,alpha:f32,thickness:f32){unsafe{
-        self.brush.SetColor(&color(rgb,alpha));
         self.context.DrawRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x,y,width,height),radiusX:radius,radiusY:radius},&self.brush,thickness,None);
     }}
     pub unsafe fn cover(&mut self,art:Option<&crate::artwork::Artwork>,key:u64,x:f32,y:f32,size:f32,glow:bool)->bool{unsafe{
