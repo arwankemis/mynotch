@@ -1,6 +1,6 @@
 use super::*;
 const FG:u32=0xf3f3f5;const MUTED:u32=0x92929d;const ACCENT:u32=0x69d2e5;
-const CATEGORIES:[(&str,&str,&str);5]=[("Umum","settings","mynotch 0.0.1 alpha · Portable Windows."),("Tampilan","monitor","Posisi dan kenyamanan tampilan."),("Tab & navigasi","layout","Atur urutan; sisakan satu tab aktif."),("Musik","music","Pemutar, lirik, dan visualisasi audio."),("Reminder","bell","Buka pengaturan pengingat harian.")];
+const CATEGORIES:[(&str,&str,&str);6]=[("Umum","settings","mynotch 0.0.1 alpha · Portable Windows."),("Tampilan","monitor","Posisi dan kenyamanan tampilan."),("Tab & navigasi","layout","Atur urutan; sisakan satu tab aktif."),("Musik","music","Pemutar, lirik, dan visualisasi audio."),("Reminder","bell","Buka pengaturan pengingat harian."),("Mod & Ekstensi","package","Pasang atau lepas fitur modular opsional.")];
 #[derive(Clone)]pub(super) struct SettingsPopup{pub key:&'static str,pub x:f32,pub y:f32,pub width:f32,pub cursor:usize}
 pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{if lead==0{format!("{city} · Tepat waktu")}else{format!("{city} · {lead} menit sebelumnya")}}
 impl Shell{
@@ -35,14 +35,14 @@ impl Shell{
         p.outline_icon("settings",18.,18.,18.,0xc5c5ce);p.text("Pengaturan",44.,15.,200.,25.,17.,FG,false);p.text("Perubahan tersimpan otomatis",44.,40.,250.,14.,10.,0x777781,false);
         self.st_button(p,"Kembali",462.,15.,80.,Action::Back,true);p.outline_icon("left",447.,24.,13.,MUTED);
         p.fill(176.,65.,1.,279.,0.,0x26262c);
-        for (i,(label,icon,_)) in CATEGORIES.iter().enumerate(){let y=66.+i as f32*47.;let selected=i==self.settings_cat;let hover=self.pointer.is_some_and(|(a,b)|a>=18.&&a<=160.&&b>=y&&b<=y+39.);
-            if selected||hover{p.fill(18.,y,142.,39.,9.,if selected{0x1c1d22}else{0x111115});}
-            p.outline_icon(icon,30.,y+11.,17.,if selected{0xefeff3}else{0x777782});p.text(label,56.,y+10.,103.,22.,12.,if selected{FG}else{MUTED},selected);
-            if self.focused.as_ref()==Some(&Action::SettingsCategory(i)){p.stroke(18.,y,142.,39.,9.,ACCENT,1.);}
-            self.st_hit(18.,y,142.,39.,Action::SettingsCategory(i),true);
+        for (i,(label,icon,_)) in CATEGORIES.iter().enumerate(){let y=66.+i as f32*44.;let selected=i==self.settings_cat;let hover=self.pointer.is_some_and(|(a,b)|a>=18.&&a<=160.&&b>=y&&b<=y+37.);
+            if selected||hover{p.fill(18.,y,142.,37.,9.,if selected{0x1c1d22}else{0x111115});}
+            p.outline_icon(icon,30.,y+10.,17.,if selected{0xefeff3}else{0x777782});p.text(label,56.,y+9.,103.,22.,12.,if selected{FG}else{MUTED},selected);
+            if self.focused.as_ref()==Some(&Action::SettingsCategory(i)){p.stroke(18.,y,142.,37.,9.,ACCENT,1.);}
+            self.st_hit(18.,y,142.,37.,Action::SettingsCategory(i),true);
         }
-        let category=self.settings_cat.min(4);p.text(CATEGORIES[category].0,196.,66.,346.,25.,17.,FG,false);p.text(CATEGORIES[category].2,196.,92.,346.,16.,10.5,MUTED,false);
-        match category{0=>self.settings_general(p),1=>self.settings_appearance(p),2=>self.settings_tabs(p),3=>self.settings_audio(p),_=>self.settings_reminders(p)}
+        let category=self.settings_cat.min(5);p.text(CATEGORIES[category].0,196.,66.,346.,25.,17.,FG,false);p.text(CATEGORIES[category].2,196.,92.,346.,16.,10.5,MUTED,false);
+        match category{0=>self.settings_general(p),1=>self.settings_appearance(p),2=>self.settings_tabs(p),3=>self.settings_audio(p),4=>self.settings_reminders(p),_=>self.settings_mods(p)}
         if let Some(popup)=self.settings_popup.clone(){self.draw_settings_popup(p,&popup);}
     }}
 
@@ -96,6 +96,25 @@ impl Shell{
         let row_h=if enabled{53.}else{45.};
         for (i,(name,icon,summary,on)) in rows.iter().enumerate(){let y=top+i as f32*row_h;p.outline_icon(icon,196.,y+10.,18.,0xa8a8b2);p.text(name,224.,y+1.,164.,22.,12.,FG,false);p.text_ellipsis(summary,224.,y+23.,198.,17.,10.,MUTED,false);p.text(if *on{"Aktif"}else{"Mati"},423.,y+11.,42.,16.,10.,if *on{ACCENT}else{MUTED},false);self.st_button(p,"Atur",474.,y+4.,68.,Action::SettingsOpenTab("Reminder".into(),i),enabled);if i<3{p.fill(196.,y+row_h-1.,346.,1.,0.,0x222229);}}
     }}
+    fn settings_mods(&mut self, p: &mut Painter) { unsafe {
+        let available = crate::mods::available_mods();
+        for (i, m) in available.iter().enumerate() {
+            let y = 116. + i as f32 * 68.;
+            let installed = self.settings.installed_mods.contains(&m.id);
+            p.outline_icon(&m.icon, 196., y + 10., 18., if installed { 0x6ee7b7 } else { 0xa8a8b2 });
+            let title = format!("{}  v{}", m.name, m.version);
+            p.text(&title, 224., y + 2., 180., 20., 12., FG, false);
+            p.text_ellipsis(&m.description, 224., y + 24., 200., 16., 10., MUTED, false);
+            let btn_w = 78.;
+            let btn_x = 542. - btn_w;
+            if installed {
+                self.st_button(p, "Lepas", btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
+            } else {
+                self.st_button(p, "Pasang", btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
+            }
+            p.fill(196., y + 56., 346., 1., 0., 0x222229);
+        }
+    }}
     fn settings_options(&self,key:&str)->Vec<(u32,String)>{match key{
         "default_tab"=>self.settings.active_tab_order().iter().filter_map(|tab|MODULES.iter().position(|m|*m==tab).map(|i|(i as u32,tab.clone()))).collect(),
         "scale"=>[80,100,110,125,135].iter().map(|&v|(v,format!("{v}%"))).collect(),
@@ -118,7 +137,7 @@ impl Shell{
             0x0d|0x20=>{let key=popup.key;let i=popup.cursor;if let Some((value,_))=self.settings_options(key).get(i){self.action(Action::SettingsValue(key,*value));}},0x1b=>self.settings_popup=None,0x09=>{self.settings_popup=None;self.invalidate();return false},_=>return false}
             self.invalidate();return true
         }
-        match key{0x1b=>{self.action(Action::Back);true},0x20=>{if let Some(action)=self.focused.clone(){self.action(action);}true},0x26|0x28|0x24|0x23 if self.focused.as_ref().is_none_or(|a|matches!(a,Action::SettingsCategory(..)))=>{let cat=match key{0x24=>0,0x23=>4,0x26=>self.settings_cat.saturating_sub(1),_=>(self.settings_cat+1).min(4)};self.action(Action::SettingsCategory(cat));true},_=>false}
+        match key{0x1b=>{self.action(Action::Back);true},0x20=>{if let Some(action)=self.focused.clone(){self.action(action);}true},0x26|0x28|0x24|0x23 if self.focused.as_ref().is_none_or(|a|matches!(a,Action::SettingsCategory(..)))=>{let cat=match key{0x24=>0,0x23=>5,0x26=>self.settings_cat.saturating_sub(1),_=>(self.settings_cat+1).min(5)};self.action(Action::SettingsCategory(cat));true},_=>false}
     }
     fn draw_settings_popup(&mut self,p:&mut Painter,popup:&SettingsPopup){unsafe{
         let options=self.settings_options(popup.key);let h=options.len()as f32*26.+8.;let top=if popup.y+34.+h<=self.height-12.{popup.y+34.}else{(popup.y-h-4.).max(56.)};let x=popup.x;let w=popup.width;

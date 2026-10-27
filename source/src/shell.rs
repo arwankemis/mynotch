@@ -46,6 +46,7 @@ enum Action {
     ConfirmWater,SelectClip(usize),CopyClip(usize),DeleteClip(u64),ClearClips,ClipPage(i32),
     MoveTab(String, i32),
     SettingsCategory(usize),SetDefaultTab(String),SettingsMenu(&'static str,f32,f32,f32),SettingsValue(&'static str,u32),SettingsOpenTab(String,usize),
+    InstallMod(String),UninstallMod(String),NoteAdd,NoteSelect(usize),NoteDelete(u64),NoteColor(u8),NoteExport(u8),NotePopout,
 }
 #[allow(dead_code)]
 #[derive(Clone, Debug)]

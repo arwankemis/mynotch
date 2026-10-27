@@ -574,7 +574,30 @@ impl Shell {
                 self.save();
                 self.invalidate();
             },
-            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(4);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
+            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(5);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
+            Action::InstallMod(id)=>{
+                let root=self.store.root.clone();
+                match crate::mods::install_mod(&root,&mut self.settings,&id){
+                    Ok(())=>{self.save();self.notice("Mod berhasil dipasang! Tab baru tersedia.");}
+                    Err(e)=>self.notice(format!("Gagal memasang mod: {e}")),
+                }
+                self.invalidate();
+            },
+            Action::UninstallMod(id)=>{
+                let root=self.store.root.clone();
+                match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
+                    Ok(())=>{
+                        if self.tab=="Catatan"{
+                            self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
+                            self.make_inputs();
+                        }
+                        self.save();
+                        self.notice("Mod berhasil dilepas.");
+                    }
+                    Err(e)=>self.notice(format!("Gagal melepas mod: {e}")),
+                }
+                self.invalidate();
+            },
             Action::SettingsMenu(key,x,y,w)=>self.open_settings_menu(key,x,y,w),
             Action::SettingsValue(key,value)=>{self.apply_settings_value(key,value);self.settings_popup=None;},
             Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}let from=self.geometry();self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.start_morph_timer();self.make_inputs();self.update_window_region();},
@@ -707,6 +730,7 @@ impl Shell {
                 4=>{self.settings.minimal=true;self.set_expanded(false);},
                 _=>{}
             },
+            Action::NoteAdd | Action::NoteSelect(..) | Action::NoteDelete(..) | Action::NoteColor(..) | Action::NoteExport(..) | Action::NotePopout => {},
         }
         for module in MODULES{if !self.settings.enabled(module){self.cancel_job(module);}}
         if !self.settings.enabled("Musik"){self.cancel_job("Artwork");self.cover=None;self.cover_key=0;self.lyrics_key.clear();self.plain_lyrics.clear();self.lyric_offset=0;}
