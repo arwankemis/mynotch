@@ -1,7 +1,8 @@
 use super::*;
 const FG:u32=0xf3f3f5;const MUTED:u32=0x92929d;const ACCENT:u32=0x69d2e5;
-const CATEGORIES:[(&str,&str,&str);5]=[("Umum","settings","mynotch 0.0.1 alpha · Portable Windows."),("Tampilan","monitor","Posisi dan kenyamanan tampilan."),("Tab & navigasi","layout","Atur urutan; sisakan satu tab aktif."),("Musik","music","Pemutar dan visualisasi audio."),("Reminder","bell","Buka pengaturan pengingat harian.")];
+const CATEGORIES:[(&str,&str,&str);5]=[("Umum","settings","mynotch 0.0.1 alpha · Portable Windows."),("Tampilan","monitor","Posisi dan kenyamanan tampilan."),("Tab & navigasi","layout","Atur urutan; sisakan satu tab aktif."),("Musik","music","Pemutar, lirik, dan visualisasi audio."),("Reminder","bell","Buka pengaturan pengingat harian.")];
 #[derive(Clone)]pub(super) struct SettingsPopup{pub key:&'static str,pub x:f32,pub y:f32,pub width:f32,pub cursor:usize}
+pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{if lead==0{format!("{city} · Tepat waktu")}else{format!("{city} · {lead} menit sebelumnya")}}
 impl Shell{
     fn st_hit(&mut self,x:f32,y:f32,w:f32,h:f32,action:Action,enabled:bool){if self.hit_enabled&&enabled{self.hits.push(Hit{rect:render::rect(x,y,w,h),action});}}
     unsafe fn st_button(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,w:f32,action:Action,enabled:bool){unsafe{
@@ -11,7 +12,8 @@ impl Shell{
         if !enabled{p.pop_alpha();}self.st_hit(x,y,w,30.,action,enabled);
     }}
     unsafe fn st_toggle(&mut self,p:&mut Painter,x:f32,y:f32,on:bool,action:Action,enabled:bool){unsafe{
-        if !enabled{p.push_alpha(0.3);}p.fill(x,y,30.,17.,8.5,if on{ACCENT}else{0x35353d});p.fill(x+if on{15.}else{2.},y+2.,13.,13.,6.5,if on{0x101015}else{0xaaaab3});if !enabled{p.pop_alpha();}
+        let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x-6.&&a<=x+36.&&b>=y-7.&&b<=y+24.);
+        if !enabled{p.push_alpha(0.3);}p.fill(x,y,30.,17.,8.5,if on{ACCENT}else if hover{0x454550}else{0x35353d});p.fill(x+if on{15.}else{2.},y+2.,13.,13.,6.5,if on{0x101015}else{0xaaaab3});if !enabled{p.pop_alpha();}
         if self.focused.as_ref()==Some(&action){p.stroke(x-4.,y-5.,38.,27.,10.,ACCENT,1.);}
         self.st_hit(x-6.,y-7.,42.,31.,action,enabled);
     }}
@@ -19,8 +21,13 @@ impl Shell{
         p.text(title,196.,y+3.,210.,20.,12.,FG,false);p.text_ellipsis(description,196.,y+24.,210.,16.,10.,MUTED,false);
         p.fill(196.,y+47.,346.,1.,0.,0x222229);
     }}
+    unsafe fn st_row_compact(&self,p:&mut Painter,y:f32,title:&str,description:&str){unsafe{
+        p.text(title,196.,y+2.,210.,18.,12.,FG,false);p.text_ellipsis(description,196.,y+21.,210.,15.,10.,MUTED,false);
+        p.fill(196.,y+41.,346.,1.,0.,0x222229);
+    }}
     unsafe fn st_select(&mut self,p:&mut Painter,key:&'static str,value:&str,x:f32,y:f32,w:f32,enabled:bool){unsafe{
-        if !enabled{p.push_alpha(0.3);}p.fill(x,y,w,30.,7.,0x18181e);p.stroke(x,y,w,30.,7.,0x303039,1.);p.text_ellipsis(value,x+8.,y+7.,w-29.,18.,11.,0xdddde5,false);p.outline_icon("down",x+w-20.,y+8.,13.,0xaaaab4);
+        let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=y&&b<=y+30.);
+        if !enabled{p.push_alpha(0.3);}p.fill(x,y,w,30.,7.,if hover{0x22222a}else{0x18181e});p.stroke(x,y,w,30.,7.,if hover{0x454552}else{0x303039},1.);p.text_ellipsis(value,x+8.,y+7.,w-29.,18.,11.,0xdddde5,false);p.outline_icon("down",x+w-20.,y+8.,13.,0xaaaab4);
         if self.focused.as_ref()==Some(&Action::SettingsMenu(key,x,y,w)){p.stroke(x-1.,y-1.,w+2.,32.,8.,ACCENT,1.);}
         if !enabled{p.pop_alpha();}self.st_hit(x,y,w,30.,Action::SettingsMenu(key,x,y,w),enabled);
     }}
@@ -46,7 +53,15 @@ impl Shell{
     }}
     fn settings_appearance(&mut self,p:&mut Painter){unsafe{
         self.st_row(p,116.,"Posisi notch","Pilih tepi layar untuk notch.");
-        for (label,x,bottom) in [("Atas",418.,false),("Bawah",482.,true)]{let selected=self.settings.bottom==bottom;p.fill(x,124.,60.,30.,7.,if selected{0x303039}else{0x18181e});p.text_centered(label,x,124.,60.,30.,11.,if selected{FG}else{MUTED},1.,false);self.st_hit(x,124.,60.,30.,Action::Bottom(bottom),true);}
+        for (label,x,bottom) in [("Atas",418.,false),("Bawah",482.,true)]{
+            let selected=self.settings.bottom==bottom;
+            let action=Action::Bottom(bottom);
+            let hover=self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+60.&&b>=124.&&b<=154.);
+            p.fill(x,124.,60.,30.,7.,if selected{0x303039}else if hover{0x22222a}else{0x18181e});
+            p.text_centered(label,x,124.,60.,30.,11.,if selected||hover{FG}else{MUTED},1.,false);
+            if self.focused.as_ref()==Some(&action){p.stroke(x-1.,123.,62.,32.,8.,ACCENT,1.);}
+            self.st_hit(x,124.,60.,30.,action,true);
+        }
         self.st_row(p,162.,"Ukuran antarmuka","Teks dan kontrol diperbesar bersama.");self.st_select(p,"scale",&format!("{:.0}%",self.settings.scale*100.),418.,170.,124.,true);
         self.st_row(p,208.,"Jarak dari tepi","0 px membuat notch menempel layar.");self.st_select(p,"gap",&format!("{} px",self.settings.edge_gap),418.,216.,124.,true);
         self.st_row(p,254.,"Kepekatan latar","Nilai tinggi membuat latar lebih pekat.");self.st_select(p,"opacity",&format!("{}%",(self.settings.opacity as f32/255.*100.).round()as u32),418.,262.,124.,true);
@@ -55,21 +70,29 @@ impl Shell{
         let mut order=self.settings.tab_order.clone();for &m in MODULES{if !order.iter().any(|v|v==m){order.push(m.into());}}order.retain(|t|MODULES.contains(&t.as_str()));
         let count=order.len();let active=self.settings.active_tab_order().len();
         for (i,module) in order.iter().enumerate(){let y=116.+i as f32*36.;let on=self.settings.enabled(module);p.outline_icon(ui::module_icon(module),196.,y+9.,17.,if on{0xd9d9e0}else{0x62626e});p.text(module,224.,y+8.,168.,22.,12.,if on{FG}else{MUTED},false);
-            for (icon,x,d,ok) in [("up",412.,-1,i>0),("down",442.,1,i+1<count)]{if !ok{p.push_alpha(0.25);}p.outline_icon(icon,x+5.,y+9.,14.,MUTED);if !ok{p.pop_alpha();}self.st_hit(x,y+2.,25.,31.,Action::MoveTab(module.clone(),d),ok);}
+            for (icon,x,d,ok) in [("up",412.,-1,i>0),("down",442.,1,i+1<count)]{
+                let action=Action::MoveTab(module.clone(),d);
+                let hover=ok&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+25.&&b>=y+2.&&b<=y+33.);
+                if hover{p.fill(x,y+4.,25.,24.,6.,0x22222a);}
+                if !ok{p.push_alpha(0.25);}p.outline_icon(icon,x+5.,y+9.,14.,if hover{FG}else{MUTED});if !ok{p.pop_alpha();}
+                if self.focused.as_ref()==Some(&action){p.stroke(x,y+4.,25.,24.,6.,ACCENT,1.);}
+                self.st_hit(x,y+2.,25.,31.,action,ok);
+            }
             self.st_toggle(p,512.,y+9.,on,Action::ToggleModule(module.clone()),!(on&&active<=1));if i+1<count{p.fill(196.,y+35.,346.,1.,0.,0x222229);}
         }
     }}
 
     fn settings_audio(&mut self,p:&mut Painter){unsafe{
-        self.st_row(p,116.,"Visualizer musik","Animasi mengikuti audio yang diputar.");self.st_toggle(p,512.,129.,self.settings.visualizer,Action::Toggle("visualizer"),true);
-        self.st_row(p,169.,"Efek warna sampul","Gunakan warna sampul pada pemutar.");self.st_toggle(p,512.,182.,self.settings.glow,Action::Toggle("glow"),true);
-        self.st_row(p,222.,"Pemutar dan lirik","Kontrol musik yang sedang diputar.");self.st_button(p,"Buka Musik",418.,230.,124.,Action::SettingsOpenTab("Musik".into(),0),self.settings.enabled("Musik"));
+        self.st_row_compact(p,116.,"Visualizer musik","Animasi mengikuti audio yang diputar.");self.st_toggle(p,512.,127.,self.settings.visualizer,Action::Toggle("visualizer"),true);
+        self.st_row_compact(p,162.,"Efek warna sampul","Gunakan warna sampul pada pemutar.");self.st_toggle(p,512.,173.,self.settings.glow,Action::Toggle("glow"),true);
+        self.st_row_compact(p,208.,"Romanisasi lirik CJK","Ubah aksara Jepang/Korea/Mandarin ke Latin.");self.st_toggle(p,512.,219.,self.settings.romanize_lyrics,Action::Toggle("romanize_lyrics"),true);
+        self.st_row_compact(p,254.,"Pemutar dan lirik","Kontrol musik yang sedang diputar.");self.st_button(p,"Buka Musik",418.,260.,124.,Action::SettingsOpenTab("Musik".into(),0),self.settings.enabled("Musik"));
     }}
     fn settings_reminders(&mut self,p:&mut Painter){unsafe{
         let enabled=self.settings.enabled("Reminder");
         if !enabled{p.text("Tab Reminder sedang dimatikan.",196.,116.,210.,18.,11.,MUTED,false);self.st_button(p,"Aktifkan",448.,112.,94.,Action::ToggleModule("Reminder".into()),true);}
         let top=if enabled{116.}else{153.};
-        let rows=[("Fokus","timer",format!("{} menit · istirahat {} menit",self.settings.focus_minutes,self.settings.break_minutes),self.settings.focus_enabled),("Hidrasi","droplet",format!("{} ml · setiap {} menit",self.settings.water_target,self.settings.water_interval),self.settings.water_reminder),("Peregangan","person",format!("Jeda setiap {} menit",self.settings.move_interval),self.settings.move_reminder),("Sholat","moon",format!("{} · {} menit sebelumnya",self.settings.prayer_city,self.settings.prayer_lead),self.settings.prayer_enabled)];
+        let rows=[("Fokus","timer",format!("{} menit · istirahat {} menit",self.settings.focus_minutes,self.settings.break_minutes),self.settings.focus_enabled),("Hidrasi","droplet",format!("{} ml · setiap {} menit",self.settings.water_target,self.settings.water_interval),self.settings.water_reminder),("Peregangan","person",format!("Jeda setiap {} menit",self.settings.move_interval),self.settings.move_reminder),("Sholat","moon",prayer_lead_summary(&self.settings.prayer_city,self.settings.prayer_lead),self.settings.prayer_enabled)];
         let row_h=if enabled{53.}else{45.};
         for (i,(name,icon,summary,on)) in rows.iter().enumerate(){let y=top+i as f32*row_h;p.outline_icon(icon,196.,y+10.,18.,0xa8a8b2);p.text(name,224.,y+1.,164.,22.,12.,FG,false);p.text_ellipsis(summary,224.,y+23.,198.,17.,10.,MUTED,false);p.text(if *on{"Aktif"}else{"Mati"},423.,y+11.,42.,16.,10.,if *on{ACCENT}else{MUTED},false);self.st_button(p,"Atur",474.,y+4.,68.,Action::SettingsOpenTab("Reminder".into(),i),enabled);if i<3{p.fill(196.,y+row_h-1.,346.,1.,0.,0x222229);}}
     }}

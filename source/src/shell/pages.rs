@@ -1,5 +1,5 @@
 use super::*;
-use render::{TEXT,MUTED,ACCENT,CARD,DIM};
+use render::MUTED;
 use chrono::Datelike;
 
 impl Shell {
@@ -53,11 +53,19 @@ impl Shell {
         let scrub_y=114.;
         p.text(&time_label(position),24.,scrub_y,34.,16.,11.,0xffffff,false);
         let track_x=62.;let track_w=self.width-124.;
-        p.fill(track_x,scrub_y+6.,track_w,4.,2.,0x3e4948);
+        let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+18.);
+        p.fill(track_x,scrub_y+6.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
         if ratio>0.{
             p.fill(track_x,scrub_y+6.,track_w*ratio as f32,4.,2.,0xffffff);
         }
-        if self.track.can_seek{
+        if scrub_hov{
+            let thumb_x=(track_x+track_w*ratio as f32-5.).clamp(track_x-2.,track_x+track_w-8.);
+            p.fill(thumb_x,scrub_y+3.,10.,10.,5.,0xffffff);
+        }
+        if self.focused.as_ref()==Some(&Action::SeekPointer){
+            p.stroke(track_x-2.,scrub_y+2.,track_w+4.,12.,4.,0xd5d5dc,1.);
+        }
+        if self.track.can_seek&&self.hit_enabled{
             self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,18.),action:Action::SeekPointer});
         }
         let remaining=(duration-position).max(0.);
@@ -66,13 +74,13 @@ impl Shell {
         // 3. Transport Controls (At y=138, below scrubber)
         let trans_y=138.;
         // Lyrics toggle quote button at x=24
-        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,self.lyric_mode);
+        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,self.lyric_mode,true);
         // Centered Previous / Play / Next
         let mid_x=self.width/2.;
-        self.transport_btn(p,"⏮",mid_x-52.,trans_y,28.,28.,Action::Previous,false);
+        self.transport_btn(p,"⏮",mid_x-52.,trans_y,28.,28.,Action::Previous,false,self.track.can_previous);
         let play_symbol=if self.track.playing{"⏸"}else{"▶"};
-        self.transport_btn(p,play_symbol,mid_x-14.,trans_y,28.,28.,Action::Play,false);
-        self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false);
+        self.transport_btn(p,play_symbol,mid_x-14.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
+        self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
     }}
 
     fn draw_mockup_lyrics(&mut self,p:&mut Painter){unsafe{
@@ -103,11 +111,19 @@ impl Shell {
         let scrub_y=114.;
         p.text(&time_label(position),24.,scrub_y,30.,14.,10.,0xffffff,false);
         let track_x=58.;let track_w=128.;
-        p.fill(track_x,scrub_y+5.,track_w,4.,2.,0x3e4948);
+        let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+16.);
+        p.fill(track_x,scrub_y+5.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
         if ratio>0.{
             p.fill(track_x,scrub_y+5.,track_w*ratio as f32,4.,2.,0xffffff);
         }
-        if self.track.can_seek{
+        if scrub_hov{
+            let thumb_x=(track_x+track_w*ratio as f32-4.5).clamp(track_x-2.,track_x+track_w-7.);
+            p.fill(thumb_x,scrub_y+2.5,9.,9.,4.5,0xffffff);
+        }
+        if self.focused.as_ref()==Some(&Action::SeekPointer){
+            p.stroke(track_x-2.,scrub_y+1.,track_w+4.,12.,4.,0xd5d5dc,1.);
+        }
+        if self.track.can_seek&&self.hit_enabled{
             self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,16.),action:Action::SeekPointer});
         }
         let remaining=(duration-position).max(0.);
@@ -115,11 +131,11 @@ impl Shell {
 
         // Transport Controls
         let trans_y=138.;
-        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,true);
-        self.transport_btn(p,"⏮",64.,trans_y,28.,28.,Action::Previous,false);
+        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,true,true);
+        self.transport_btn(p,"⏮",64.,trans_y,28.,28.,Action::Previous,false,self.track.can_previous);
         let play_symbol=if self.track.playing{"⏸"}else{"▶"};
-        self.transport_btn(p,play_symbol,104.,trans_y,28.,28.,Action::Play,false);
-        self.transport_btn(p,"⏭",144.,trans_y,28.,28.,Action::Next,false);
+        self.transport_btn(p,play_symbol,104.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
+        self.transport_btn(p,"⏭",144.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
 
         // Subtle vertical divider (x = 238)
         p.fill_alpha(238.,44.,1.,122.,0.,0xffffff,0.12);
@@ -128,32 +144,64 @@ impl Shell {
         let lyrics_x=252.;
         let lyrics_w=w-272.;
         if self.lyrics.is_empty(){
-            p.text(if self.plain_lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini."}else{&self.plain_lyrics},lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+            if self.jobs.contains_key("Musik"){
+                p.text("Memuat lirik…",lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
+            }else if !self.plain_lyrics.is_empty()&&self.plain_lyrics!="Lirik belum tersedia untuk lagu ini."{
+                let plain_lines:Vec<&str>=self.plain_lyrics.lines().filter(|l|!l.trim().is_empty()).collect();
+                if plain_lines.is_empty(){
+                    p.text(&self.plain_lyrics,lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+                }else{
+                    let start=self.lyric_offset.saturating_sub(1).min(plain_lines.len().saturating_sub(1));
+                    for (i,line) in plain_lines.iter().skip(start).take(4).enumerate(){
+                        let ly=46.+i as f32*26.;
+                        let col=if i==0{0xe2e8f0}else{0x8a9291};
+                        p.text_ellipsis(line,lyrics_x,ly,lyrics_w,22.,12.5,col,i==0);
+                    }
+                    if self.lyric_offset>0{
+                        self.button_h(p,"Reset",w-64.,144.,46.,20.,Action::LyricsFollow,false);
+                    }
+                }
+            }else{
+                p.text("Lirik belum tersedia untuk lagu ini.",lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+            }
         }else{
-            let active=crate::lyrics::active_line(&self.lyrics,position);
-            let curr=active.unwrap_or(0);
+            let curr=super::lyric_display_index(&self.lyrics,position,self.lyric_offset);
             if curr>0{
                 let prev_line=&self.lyrics[curr-1];
-                p.text_ellipsis(&prev_line.text,lyrics_x,46.,lyrics_w,24.,13.,0x72777b,false);
-                if self.track.can_seek{
+                let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=lyrics_x&&px<=lyrics_x+lyrics_w&&py>=44.&&py<=70.);
+                p.text_ellipsis(&prev_line.text,lyrics_x,46.,lyrics_w,24.,13.,if hov{0xb0b5ba}else{0x72777b},false);
+                if self.focused.as_ref()==Some(&Action::Lyric(curr-1)){
+                    p.stroke(lyrics_x-2.,44.,lyrics_w+4.,24.,4.,0xd5d5dc,1.);
+                }
+                if self.track.can_seek&&self.hit_enabled{
                     self.hits.push(Hit{rect:render::rect(lyrics_x,44.,lyrics_w,26.),action:Action::Lyric(curr-1)});
                 }
             }
             let active_line=&self.lyrics[curr];
             p.text_ellipsis(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true);
-            if self.track.can_seek{
+            if self.focused.as_ref()==Some(&Action::Lyric(curr)){
+                p.stroke(lyrics_x-2.,72.,lyrics_w+4.,28.,4.,0xd5d5dc,1.);
+            }
+            if self.track.can_seek&&self.hit_enabled{
                 self.hits.push(Hit{rect:render::rect(lyrics_x,72.,lyrics_w,30.),action:Action::Lyric(curr)});
             }
             if curr+1<self.lyrics.len(){
                 let next_line=&self.lyrics[curr+1];
-                p.text_ellipsis(&next_line.text,lyrics_x,104.,lyrics_w,24.,13.,0x72777b,false);
-                if self.track.can_seek{
+                let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=lyrics_x&&px<=lyrics_x+lyrics_w&&py>=102.&&py<=128.);
+                p.text_ellipsis(&next_line.text,lyrics_x,104.,lyrics_w,24.,13.,if hov{0xb0b5ba}else{0x72777b},false);
+                if self.focused.as_ref()==Some(&Action::Lyric(curr+1)){
+                    p.stroke(lyrics_x-2.,102.,lyrics_w+4.,24.,4.,0xd5d5dc,1.);
+                }
+                if self.track.can_seek&&self.hit_enabled{
                     self.hits.push(Hit{rect:render::rect(lyrics_x,102.,lyrics_w,26.),action:Action::Lyric(curr+1)});
                 }
             }
             if curr+2<self.lyrics.len(){
                 let next2_line=&self.lyrics[curr+2];
                 p.text_ellipsis(&next2_line.text,lyrics_x,130.,lyrics_w,20.,11.,0x555555,false);
+            }
+            if self.lyric_offset>0{
+                self.button_h(p,"Ikuti",w-64.,144.,46.,20.,Action::LyricsFollow,true);
             }
         }
     }}
@@ -199,11 +247,16 @@ impl Shell {
             let is_leave=holiday.is_some_and(|h|h.collective_leave);
             let is_selected=self.day==day;
             let is_today=date==today;
+            let day_act=Action::Day(day);
+            let day_hov=self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+col_w&&py>=y-2.&&py<=y+22.);
 
             if is_selected{
                 p.fill(x+4.,y-1.,col_w-8.,22.,6.,0xeaeaea);
                 p.text_centered(&day.to_string(),x+4.,y-1.,col_w-8.,22.,12.,0x090909,1.0,true);
             }else{
+                if day_hov{
+                    p.fill_alpha(x+4.,y-1.,col_w-8.,22.,6.,0xffffff,0.08);
+                }
                 if is_today{
                     p.stroke(x+4.,y-1.,col_w-8.,22.,6.,0x555555,1.0);
                 }
@@ -211,10 +264,15 @@ impl Shell {
                     0xff7d7d
                 }else if is_leave&&self.settings.collective_leave{
                     0xffa46b
+                }else if day_hov{
+                    0xffffff
                 }else{
                     0xc6c6cc
                 };
                 p.text_centered(&day.to_string(),x+4.,y-1.,col_w-8.,22.,12.,color,1.0,is_today);
+            }
+            if self.focused.as_ref()==Some(&day_act){
+                p.stroke(x+3.,y-2.,col_w-6.,24.,7.,0xd5d5dc,1.0);
             }
 
             // Dot indicators below date
@@ -224,7 +282,9 @@ impl Shell {
                 p.fill(x+col_w*0.5-1.5,y+18.,3.,3.,1.5,0xffa46b);
             }
 
-            self.hits.push(Hit{rect:render::rect(x,y-2.,col_w,24.),action:Action::Day(day)});
+            if self.hit_enabled{
+                self.hits.push(Hit{rect:render::rect(x,y-2.,col_w,24.),action:day_act});
+            }
         }
 
         // Calendar legend at y = 232
@@ -236,8 +296,14 @@ impl Shell {
         // Footer at y = 254
         p.text(if self.year==2026{"Indonesia · data libur 2026"}else{"Data libur tahun ini belum tersedia"},24.,254.,184.,16.,9.,0x909096,false);
         let leave_label=if self.settings.collective_leave{"☑ Cuti bersama"}else{"☐ Cuti bersama"};
-        p.text(leave_label,200.,254.,90.,16.,9.,0x9c9ca3,false);
-        self.hits.push(Hit{rect:render::rect(198.,250.,94.,20.),action:Action::CalendarLeaveToggle});
+        let leave_hov=self.pointer.is_some_and(|(px,py)|px>=198.&&px<=292.&&py>=250.&&py<=270.);
+        p.text(leave_label,200.,254.,90.,16.,9.,if leave_hov{0xefeff3}else{0x9c9ca3},false);
+        if self.focused.as_ref()==Some(&Action::CalendarLeaveToggle){
+            p.stroke(198.,250.,94.,20.,4.,0xd5d5dc,1.0);
+        }
+        if self.hit_enabled{
+            self.hits.push(Hit{rect:render::rect(198.,250.,94.,20.),action:Action::CalendarLeaveToggle});
+        }
 
         // Vertical Divider line between columns (x = 308)
         p.fill_alpha(308.,44.,1.,226.,0.,0xffffff,0.08);
@@ -264,10 +330,16 @@ impl Shell {
             p.text_ellipsis(&status_text,324.,122.,188.,18.,11.,status_color,false);
 
             // Button "Hari ini"
-            p.fill(324.,146.,64.,24.,6.,0x222222);
-            p.stroke(324.,146.,64.,24.,6.,0x333333,1.0);
-            p.text_centered("Hari ini",324.,146.,64.,24.,10.,0xdddddd,1.0,false);
-            self.hits.push(Hit{rect:render::rect(324.,146.,64.,24.),action:Action::CalendarToday});
+            let today_hov=self.pointer.is_some_and(|(px,py)|px>=324.&&px<=388.&&py>=146.&&py<=170.);
+            p.fill(324.,146.,64.,24.,6.,if today_hov{0x2b2b30}else{0x222222});
+            p.stroke(324.,146.,64.,24.,6.,if today_hov{0x484852}else{0x333333},1.0);
+            p.text_centered("Hari ini",324.,146.,64.,24.,10.,if today_hov{0xffffff}else{0xdddddd},1.0,false);
+            if self.focused.as_ref()==Some(&Action::CalendarToday){
+                p.stroke(322.,144.,68.,28.,8.,0xd5d5dc,1.0);
+            }
+            if self.hit_enabled{
+                self.hits.push(Hit{rect:render::rect(324.,146.,64.,24.),action:Action::CalendarToday});
+            }
 
             // Divider
             p.fill_alpha(324.,178.,188.,1.,0.,0xffffff,0.08);
@@ -279,8 +351,10 @@ impl Shell {
             let next_h=self.holidays.iter().filter(|h|h.date>=today&&!h.collective_leave).min_by_key(|h|h.date);
             if let Some(nh)=next_h{
                 let card_y=202.;
-                p.fill(324.,card_y,188.,42.,8.,0x181517);
-                p.stroke(324.,card_y,188.,42.,8.,0x292022,1.0);
+                let jump_act=Action::JumpToDate(nh.date.year(),nh.date.month(),nh.date.day());
+                let card_hov=self.pointer.is_some_and(|(px,py)|px>=324.&&px<=512.&&py>=card_y&&py<=card_y+42.);
+                p.fill(324.,card_y,188.,42.,8.,if card_hov{0x221c1f}else{0x181517});
+                p.stroke(324.,card_y,188.,42.,8.,if card_hov{0x3d2e31}else{0x292022},1.0);
 
                 // Date badge
                 p.fill(328.,card_y+3.,34.,36.,6.,0x2f171a);
@@ -295,17 +369,20 @@ impl Shell {
                 p.text_ellipsis(&date_desc,368.,card_y+22.,124.,14.,10.,0x83838a,false);
 
                 // Arrow icon
-                p.text("↗",494.,card_y+12.,14.,16.,12.,0x888888,false);
+                p.text("↗",494.,card_y+12.,14.,16.,12.,if card_hov{0xffffff}else{0x888888},false);
 
-                // Clicking holiday card jumps to that date!
-                let delta=nh.date.year()*12+nh.date.month() as i32 - (self.year*12+self.month as i32);
-                self.hits.push(Hit{rect:render::rect(324.,card_y,188.,42.),action:Action::Month(delta)});
+                if self.focused.as_ref()==Some(&jump_act){
+                    p.stroke(322.,card_y-2.,192.,46.,10.,0xd5d5dc,1.0);
+                }
+
+                // Clicking holiday card jumps directly to that exact holiday date!
+                if self.hit_enabled{
+                    self.hits.push(Hit{rect:render::rect(324.,card_y,188.,42.),action:jump_act});
+                }
             }
         }
     }}
 
-
-    fn music_control(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,width:f32,action:Action,primary:bool,enabled:bool){if enabled{self.button(p,label,x,y,width,action,primary);}else{unsafe{p.fill(x,y,width,32.,9.,0x202c34);p.text(label,x+10.,y+6.,width-16.,22.,12.,0x637481,false);}}}
     fn clipboard_page(&mut self, p: &mut Painter) { unsafe {
         let w = self.width;
         let total_clips = self.state.clipboard_history.len();
@@ -344,6 +421,7 @@ impl Shell {
             for (i, (abs_idx, item)) in visible_items.into_iter().enumerate() {
                 let item_y = 68. + i as f32 * 36.;
                 let is_selected = abs_idx == self.selected_clip;
+                let item_act = Action::SelectClip(abs_idx);
                 let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
 
                 if is_selected {
@@ -356,6 +434,9 @@ impl Shell {
                     p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.03);
                     p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.05);
                 }
+                if self.focused.as_ref() == Some(&item_act) {
+                    p.stroke(left_x - 1., item_y - 1., left_w + 2., 34., 7., 0xd5d5dc, 1.0);
+                }
 
                 let first_line = item.text.lines().next().unwrap_or("").trim();
                 let display_title = if first_line.is_empty() { "(Teks kosong)" } else { first_line };
@@ -367,7 +448,7 @@ impl Shell {
                 if self.hit_enabled {
                     self.hits.push(Hit {
                         rect: render::rect(left_x, item_y, left_w, 32.),
-                        action: Action::SelectClip(abs_idx),
+                        action: item_act,
                     });
                 }
             }
@@ -445,13 +526,19 @@ impl Shell {
             },
             Action::ToStage1=>{
                 self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
-                self.set_hover_stage(1);
+                self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
             },
             Action::CalendarToday=>{
                 let now=Local::now().date_naive();
                 self.year=now.year();
                 self.month=now.month();
                 self.day=now.day();
+                self.load_holidays();
+            },
+            Action::JumpToDate(y,m,d)=>{
+                self.year=y;
+                self.month=m;
+                self.day=d;
                 self.load_holidays();
             },
             Action::CalendarLeaveToggle=>{
@@ -461,7 +548,7 @@ impl Shell {
                 self.reminder_menu=None;
                 if self.tab == tab && self.hover_stage >= 2 {
                     self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
-                    self.set_hover_stage(1);
+                    self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
                     return;
                 }
                 if self.tab!=tab{
@@ -495,7 +582,9 @@ impl Shell {
             Action::Settings=>{self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.settings_open=true;self.set_expanded(true);let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
             Action::Back=>{self.settings_popup=None;self.focused=None;self.settings_open=false;let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
             Action::Close=>self.set_expanded(false),Action::Exit=>unsafe{let _=DestroyWindow(self.hwnd);},
-            Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},Action::Minimal=>{self.settings.minimal=!self.settings.minimal;self.sync_visualizer();self.save();},Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(165,255)as u8;self.save();self.invalidate();},
+            Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},
+            Action::Minimal=>{self.settings.minimal=!self.settings.minimal;if !self.expanded{self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));}self.sync_visualizer();self.save();},
+            Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(165,255)as u8;self.save();self.invalidate();},
             Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice("Sisakan setidaknya satu tab aktif.");return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
                 "auto_break"=>self.settings.auto_break=!self.settings.auto_break,
@@ -507,11 +596,22 @@ impl Shell {
                 "fullscreen"=>{self.settings.hide_fullscreen=!self.settings.hide_fullscreen;self.save();},
                 "glow"=>{self.settings.glow=!self.settings.glow;self.save();},
                 "visualizer"=>{self.settings.visualizer=!self.settings.visualizer;self.sync_visualizer();self.save();},
+                "romanize_lyrics"=>{
+                    self.settings.romanize_lyrics=!self.settings.romanize_lyrics;
+                    self.lyrics_key.clear();
+                    if !self.track.title.is_empty(){
+                        let key=serde_json::to_string(&(&self.track.title,&self.track.artist,&self.track.album,self.track.duration_seconds.round()as u64)).unwrap_or_default();
+                        self.lyrics_key=key.clone();
+                        let api=self.online.clone();
+                        let track=self.track.clone();
+                        self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));
+                    }
+                    self.save();
+                },
                 "water_reminder"=>{self.settings.water_reminder=!self.settings.water_reminder;self.last_water=Instant::now();self.save();},
                 "move_reminder"=>{self.settings.move_reminder=!self.settings.move_reminder;self.last_move=Instant::now();self.save();},
                 "lyrics_below"=>self.settings.lyrics_below=!self.settings.lyrics_below,
                 "save_schedule"=>{let schedule=self.input(100);let times:Vec<String>=schedule.split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();if times.iter().any(|t|chrono::NaiveTime::parse_from_str(t,"%H:%M").is_err()){self.notice("Format jadwal harus HH:MM, misalnya 09:00,14:00.");return}self.settings.focus_schedule=times;let tab=self.input(101);if MODULES.contains(&tab.trim()){self.settings.default_tab=tab.trim().into();}self.notice("Jadwal dan tab default disimpan.");},
-                
                 _=>{}
             },
             Action::SeekPointer=>{},Action::LyricsFollow=>self.lyric_offset=0,
@@ -605,7 +705,6 @@ impl Shell {
                 2=>{self.settings.minimal=false;self.set_expanded(false);},
                 3=>{self.settings.minimal=false;self.set_expanded(false);},
                 4=>{self.settings.minimal=true;self.set_expanded(false);},
-                
                 _=>{}
             },
         }
@@ -618,4 +717,3 @@ impl Shell {
     fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice("Feed kalender dilepas.");return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
     fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice("Simpan API key dan model terlebih dahulu.");return}};if self.settings.ai_model.trim().is_empty(){self.notice("Nama model belum diisi.");return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
 }
-

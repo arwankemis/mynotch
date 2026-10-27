@@ -264,7 +264,7 @@ fn parse_chat_response(kind: ChatKind, body: &[u8]) -> Result<String, String> {
     Ok(text)
 }
 
-pub fn weather_label(code: u32) -> &'static str {
+#[allow(dead_code)] pub fn weather_label(code: u32) -> &'static str {
     match code { 0 => "Cerah", 1 | 2 => "Cerah berawan", 3 => "Berawan", 45 | 48 => "Berkabut", 51 | 53 | 55 | 56 | 57 => "Gerimis", 61 | 63 | 65 | 66 | 67 | 80 | 81 | 82 => "Hujan", 71 | 73 | 75 | 77 | 85 | 86 => "Salju", 95 | 96 | 99 => "Badai petir", _ => "Cuaca" }
 }
 

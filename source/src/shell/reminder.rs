@@ -3,7 +3,6 @@ const NAMES:[&str;4]=["Fokus","Hidrasi","Peregangan","Sholat"];
 const ICONS:[&str;4]=["timer","droplet","person","moon"];
 const COLORS:[u32;4]=[0xffad78,0x69d2e5,0x92cfac,0xe8c87f];
 const WHITE:u32=0xf3f3f5;
-const MUTED:u32=0x85858f;
 const PRAYERS:[&str;5]=["Subuh","Zuhur","Asar","Magrib","Isya"];
 pub(super) fn jakarta_today()->String{jakarta_now().format("%Y-%m-%d").to_string()}
 fn jakarta_now()->chrono::DateTime<chrono::FixedOffset>{chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(7*3600).unwrap())}
@@ -67,7 +66,7 @@ impl Shell{
         let api=self.online.clone();self.job("Reminder",move||{let result=api.prayers(&city,&date);Event::Prayers(city,date,result)});
     }
     pub(super) fn tick_reminder(&mut self){
-        if self.stretch_deadline.is_some_and(|d|Instant::now()>=d){self.stretch_deadline=None;self.last_move=Instant::now();self.notice("Peregangan selesai. Tubuh siap kembali beraktivitas.");}
+        if self.stretch_deadline.is_some_and(|d|Instant::now()>=d){self.stretch_deadline=None;self.last_move=Instant::now();self.show_toast(ToastKind::Stretch,"Peregangan selesai. Tubuh siap kembali beraktivitas.",8000);}
         if !self.settings.enabled("Reminder"){return}
         if self.settings.prayer_enabled||(self.tab=="Reminder"&&self.reminder_index==3){self.refresh_prayers(false);}
         if !self.settings.prayer_enabled{return}
@@ -83,21 +82,33 @@ impl Shell{
         let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=y&&b<=y+28.);
         let bg=if primary{COLORS[self.reminder_index]}else{if hover{0x2b2b34}else{0x1e1e25}};
         if !enabled{p.push_alpha(0.3);}
-        p.fill(x,y,w,28.,7.,bg);p.text_centered(label,x,y,w,28.,11.,if primary{0x101018}else{0x92929e},1.,false);
+        p.fill(x,y,w,28.,7.,bg);
+        if primary&&hover{p.fill_alpha(x,y,w,28.,7.,0xffffff,0.12);}
+        p.text_centered(label,x,y,w,28.,11.,if primary{0x101018}else if hover{WHITE}else{0x92929e},1.,false);
+        if self.focused.as_ref()==Some(&action){p.stroke(x-1.,y-1.,w+2.,30.,8.,COLORS[self.reminder_index],1.2);}
         self.rw_hit(x,y,w,28.,action,enabled);if !enabled{p.pop_alpha();}
     }}
     unsafe fn rw_icon_button(&mut self,p:&mut Painter,icon:&str,x:f32,y:f32,action:Action,enabled:bool){unsafe{
-        if !enabled{p.push_alpha(0.3);}p.fill(x,y,26.,28.,7.,0x1e1e25);p.outline_icon(icon,x+6.5,y+7.,13.,0x92929e);if !enabled{p.pop_alpha();}self.rw_hit(x,y,26.,28.,action,enabled);
+        let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+26.&&b>=y&&b<=y+28.);
+        if !enabled{p.push_alpha(0.3);}p.fill(x,y,26.,28.,7.,if hover{0x2b2b34}else{0x1e1e25});p.outline_icon(icon,x+6.5,y+7.,13.,if hover{WHITE}else{0x92929e});
+        if self.focused.as_ref()==Some(&action){p.stroke(x-1.,y-1.,28.,30.,8.,COLORS[self.reminder_index],1.2);}
+        if !enabled{p.pop_alpha();}self.rw_hit(x,y,26.,28.,action,enabled);
     }}
     unsafe fn rw_select(&mut self,p:&mut Painter,key:&'static str,label:&str,value:&str,x:f32,y:f32,w:f32){unsafe{
+        let action=Action::ReminderMenu(key);
+        let hover=self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=y&&b<=y+30.);
         if !label.is_empty(){p.text(label,x,y-21.,w,15.,10.,0x93939f,false);}
-        p.fill(x,y,w,30.,7.,0x18181e);p.stroke(x,y,w,30.,7.,0x303039,1.);
+        p.fill(x,y,w,30.,7.,if hover{0x22222a}else{0x18181e});p.stroke(x,y,w,30.,7.,if hover{0x454552}else{0x303039},1.);
         p.text_ellipsis(value,x+8.,y+7.,w-29.,18.,11.,0xdddde5,false);p.outline_icon("down",x+w-20.,y+8.,13.,0xa2a2ad);
-        self.rw_hit(x,y,w,30.,Action::ReminderMenu(key),true);
+        if self.focused.as_ref()==Some(&action){p.stroke(x-1.,y-1.,w+2.,32.,8.,COLORS[self.reminder_index],1.2);}
+        self.rw_hit(x,y,w,30.,action,true);
     }}
     unsafe fn rw_check(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,checked:bool,action:Action,enabled:bool){unsafe{
-        p.fill(x,y+2.,12.,12.,2.,if checked{COLORS[self.reminder_index]}else{0x18181e});if checked{p.outline_icon("check",x+1.,y+3.,10.,0x101018);}else{p.stroke(x,y+2.,12.,12.,2.,0x50505b,1.);}
-        p.text(label,x+19.,y,280.,18.,10.,0x9d9da9,false);self.rw_hit(x,y,290.,20.,action,enabled);
+        let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+290.&&b>=y&&b<=y+20.);
+        p.fill(x,y+2.,12.,12.,2.,if checked{COLORS[self.reminder_index]}else if hover{0x25252e}else{0x18181e});if checked{p.outline_icon("check",x+1.,y+3.,10.,0x101018);}else{p.stroke(x,y+2.,12.,12.,2.,if hover{0x757585}else{0x50505b},1.);}
+        p.text(label,x+19.,y,280.,18.,10.,if hover{WHITE}else{0x9d9da9},false);
+        if self.focused.as_ref()==Some(&action){p.stroke(x-3.,y-1.,296.,20.,5.,COLORS[self.reminder_index],1.);}
+        self.rw_hit(x,y,290.,20.,action,enabled);
     }}
     pub(super) fn reminder_page(&mut self,p:&mut Painter){unsafe{
         if self.width<440.{return}
@@ -111,19 +122,31 @@ impl Shell{
         for i in 0..4{
             let distance=(i as f32-pos).abs();let y=158.+picker_shift+(i as f32-pos)*56.;if y+56.<74.+picker_shift||y>298.+picker_shift{continue}
             let selected=i==self.reminder_index;
-            let fade=(1.-distance*0.5).clamp(0.04,1.);p.push_alpha(if selected{1.}else{fade.min(0.52)});
+            let action=Action::ReminderSelect(i);
+            let hover=self.pointer.is_some_and(|(a,b)|a>=18.&&a<=188.&&b>=y.max(74.+picker_shift)&&b<=(y+56.).min(298.+picker_shift));
+            let fade=(1.-distance*0.5).clamp(0.04,1.);p.push_alpha(if selected{1.}else if hover{0.8}else{fade.min(0.52)});
+            if !selected&&hover{p.fill(18.,y,170.,56.,11.,0x141519);}
             p.outline_icon(ICONS[i],32.,y+18.,20.,if selected{accent}else{0x8a8a95});
             p.text(NAMES[i],64.,y+10.,120.,20.,13.,if selected{0xf4f4f6}else{0x8a8a95},selected);
             p.text(&summaries[i],64.,y+32.,120.,14.,10.,if selected{0xa2a2ac}else{0x7d7d88},false);
-            self.rw_hit(18.,y,170.,56.,Action::ReminderSelect(i),true);p.pop_alpha();
+            if self.focused.as_ref()==Some(&action){p.stroke(19.,y+1.,168.,54.,10.,accent,1.);}
+            self.rw_hit(18.,y,170.,56.,action,true);p.pop_alpha();
         }
         for hit in &mut self.hits[first_hit..]{hit.rect.top=hit.rect.top.max(74.+picker_shift);hit.rect.bottom=hit.rect.bottom.min(298.+picker_shift);}
         p.unclip();
-        for (icon,y,delta,ok) in [("up",52.+picker_shift,-1,self.reminder_index>0),("down",298.+picker_shift,1,self.reminder_index<3)]{p.outline_icon(icon,96.,y+4.,14.,if ok{0x5d5d69}else{0x282830});self.rw_hit(18.,y,170.,22.,Action::ReminderStep(delta),ok);}
+        for (icon,y,delta,ok) in [("up",52.+picker_shift,-1,self.reminder_index>0),("down",298.+picker_shift,1,self.reminder_index<3)]{
+            let hover=ok&&self.pointer.is_some_and(|(a,b)|a>=18.&&a<=188.&&b>=y&&b<=y+22.);
+            p.outline_icon(icon,96.,y+4.,14.,if !ok{0x282830}else if hover{WHITE}else{0x5d5d69});
+            self.rw_hit(18.,y,170.,22.,Action::ReminderStep(delta),ok);
+        }
         p.fill(208.,52.,1.,if self.reminder_index==3{284.}else{268.},0.,0x26262c);
         p.text(NAMES[self.reminder_index],229.,54.,240.,25.,17.,WHITE,false);
-        p.fill(504.,57.,28.,16.,8.,if enabled{accent}else{0x35353d});p.fill(if enabled{518.}else{506.},59.,12.,12.,6.,if enabled{0x101015}else{0xaaaab3});
-        let toggle=match self.reminder_index{0=>"focus_enabled",1=>"water_reminder",2=>"move_reminder",_=>"prayer_enabled"};self.rw_hit(496.,49.,40.,32.,Action::Toggle(toggle),true);
+        let toggle=match self.reminder_index{0=>"focus_enabled",1=>"water_reminder",2=>"move_reminder",_=>"prayer_enabled"};
+        let toggle_action=Action::Toggle(toggle);
+        let toggle_hover=self.pointer.is_some_and(|(a,b)|a>=496.&&a<=536.&&b>=49.&&b<=81.);
+        p.fill(504.,57.,28.,16.,8.,if enabled{accent}else if toggle_hover{0x454550}else{0x35353d});p.fill(if enabled{518.}else{506.},59.,12.,12.,6.,if enabled{0x101015}else{0xaaaab3});
+        if self.focused.as_ref()==Some(&toggle_action){p.stroke(500.,53.,36.,24.,10.,accent,1.);}
+        self.rw_hit(496.,49.,40.,32.,toggle_action,true);
         match self.reminder_index{
             0=>{
                 if !enabled{p.push_alpha(0.35);}
@@ -149,9 +172,22 @@ impl Shell{
                 p.fill(229.,265.,303.,1.,0.,0x24242a);p.text("Takaran sekali minum",229.,282.,200.,18.,10.,0x9494a0,false);self.rw_select(p,"serving","",&format!("{} ml",self.settings.water_serving),446.,276.,86.);
             }
             2=>{
-                let ratio=1.-(self.last_move.elapsed().as_secs_f32()/(self.settings.move_interval as f32*60.)).min(1.);p.progress_ring(281.,137.,44.7,ratio,accent);p.outline_icon("person",264.5,112.,33.,accent);p.text_centered("jeda bergerak",239.,151.,84.,15.,9.,0x8d8d99,1.,false);
-                p.text("Bangun dari kursi",346.,101.,186.,20.,12.,0xdddde5,false);p.text(&format!("Jeda {} menit setiap {} menit.",self.settings.stretch_seconds/60,self.settings.move_interval),346.,126.,186.,16.,10.,0x83838e,false);
-                self.rw_button(p,"Sudah peregangan",346.,148.,136.,Action::StretchDone,true,enabled);
+                if let Some(deadline)=self.stretch_deadline{
+                    let rem=deadline.saturating_duration_since(Instant::now()).as_secs_f32();
+                    let ratio=(rem/(self.settings.stretch_seconds as f32).max(1.)).clamp(0.,1.);
+                    p.progress_ring(281.,137.,44.7,ratio,accent);
+                    p.text_centered(&time_label(rem as f64),235.,116.,92.,31.,24.,WHITE,1.,false);
+                    p.text_centered("peregangan",239.,148.,84.,15.,9.,0x8d8d99,1.,false);
+                    p.text("Sedang peregangan",346.,101.,186.,20.,12.,0xdddde5,false);
+                    p.text("Gerakkan bahu, leher, & punggung.",346.,126.,186.,16.,10.,0x83838e,false);
+                    self.rw_button(p,"Sudah peregangan",346.,148.,136.,Action::StretchDone,true,enabled);
+                }else{
+                    let ratio=1.-(self.last_move.elapsed().as_secs_f32()/(self.settings.move_interval as f32*60.)).min(1.);
+                    p.progress_ring(281.,137.,44.7,ratio,accent);p.outline_icon("person",264.5,112.,33.,accent);p.text_centered("jeda bergerak",239.,151.,84.,15.,9.,0x8d8d99,1.,false);
+                    p.text("Bangun dari kursi",346.,101.,186.,20.,12.,0xdddde5,false);p.text(&format!("Jeda {} menit setiap {} menit.",self.settings.stretch_seconds/60,self.settings.move_interval),346.,126.,186.,16.,10.,0x83838e,false);
+                    self.rw_button(p,"Mulai jeda",346.,148.,82.,Action::StretchStart,true,enabled);
+                    self.rw_button(p,"Sudah",434.,148.,64.,Action::StretchDone,false,enabled);
+                }
                 self.rw_select(p,"move_interval","Ingatkan setiap",&format!("{} menit",self.settings.move_interval),229.,224.,146.);self.rw_select(p,"stretch_duration","Durasi jeda",&if self.settings.stretch_seconds<60{format!("{} detik",self.settings.stretch_seconds)}else{format!("{} menit",self.settings.stretch_seconds/60)},386.,224.,146.);
                 self.rw_check(p,"Pengingat saat sesi fokus selesai",229.,277.,self.settings.stretch_after_focus,Action::Toggle("stretch_after_focus"),true);
             }
@@ -166,7 +202,10 @@ impl Shell{
                 p.fill(229.,232.,303.,1.,0.,0x25252c);p.fill(229.,287.,303.,1.,0.,0x25252c);
                 for i in 0..5{let x=229.+i as f32*60.6;p.text_centered(PRAYERS[i],x,243.,60.6,14.,9.,0x93939f,1.,false);p.text_centered(times.as_ref().map(|t|t[i].as_str()).unwrap_or("—"),x,262.,60.6,20.,13.,if times.is_some(){0xdddde5}else{0x737380},1.,false);}
                 self.rw_check(p,"Suara pengingat",229.,303.,self.settings.prayer_sound,Action::Toggle("prayer_sound"),true);
-                let note=if self.prayer_error.is_some(){"Gagal memuat · klik untuk mencoba lagi"}else{"myQuran · sumber Kemenag · WIB"};p.text(note,229.,326.,303.,14.,9.,0x737380,false);self.rw_hit(229.,322.,303.,19.,Action::PrayerRefresh,true);
+                let refresh_hover=self.pointer.is_some_and(|(a,b)|a>=229.&&a<=532.&&b>=322.&&b<=341.);
+                let note=if self.prayer_error.is_some(){"Gagal memuat · klik untuk mencoba lagi"}else{"myQuran · sumber Kemenag · WIB"};p.text(note,229.,326.,303.,14.,9.,if refresh_hover{WHITE}else{0x737380},false);
+                if self.focused.as_ref()==Some(&Action::PrayerRefresh){p.stroke(227.,322.,305.,19.,5.,accent,1.);}
+                self.rw_hit(229.,322.,303.,19.,Action::PrayerRefresh,true);
             }
         }
         if let Some(key)=self.reminder_menu{self.reminder_dropdown(p,key);}

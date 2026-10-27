@@ -17,6 +17,7 @@ unsafe extern "system" {
     fn CloseClipboard() -> BOOL;
     fn EmptyClipboard() -> BOOL;
     fn IsClipboardFormatAvailable(format: u32) -> BOOL;
+    fn RegisterClipboardFormatW(lpszFormat: *const u16) -> u32;
     fn GetClipboardData(uFormat: u32) -> HANDLE;
     fn SetClipboardData(uFormat: u32, hMem: HANDLE) -> HANDLE;
     fn GetClipboardSequenceNumber() -> u32;
@@ -27,6 +28,7 @@ unsafe extern "system" {
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn GlobalAlloc(uFlags: u32, dwBytes: usize) -> HANDLE;
+    fn GlobalFree(hMem: HANDLE) -> HANDLE;
     fn GlobalLock(hMem: HANDLE) -> *mut std::ffi::c_void;
     fn GlobalUnlock(hMem: HANDLE) -> BOOL;
     fn GlobalSize(hMem: HANDLE) -> usize;
@@ -35,9 +37,22 @@ unsafe extern "system" {
 const CF_UNICODETEXT: u32 = 13;
 const GMEM_MOVEABLE: u32 = 0x0002;
 
+fn is_sensitive_clipboard() -> bool {
+    unsafe {
+        for name in ["ExcludeClipboardContentFromMonitorProcessing", "ClipboardHistoryIgnore"] {
+            let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+            let fmt = RegisterClipboardFormatW(wide.as_ptr());
+            if fmt != 0 && IsClipboardFormatAvailable(fmt).as_bool() {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 pub fn read_clipboard_text() -> Option<String> {
     unsafe {
-        if !IsClipboardFormatAvailable(CF_UNICODETEXT).as_bool() {
+        if !IsClipboardFormatAvailable(CF_UNICODETEXT).as_bool() || is_sensitive_clipboard() {
             return None;
         }
         if !OpenClipboard(HWND::default()).as_bool() {
@@ -78,18 +93,24 @@ pub fn set_clipboard_text(text: &str) -> bool {
         }
         let ptr = GlobalLock(h_mem) as *mut u16;
         if ptr.is_null() {
+            let _ = GlobalFree(h_mem);
             return false;
         }
         std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
         let _ = GlobalUnlock(h_mem);
 
         if !OpenClipboard(HWND::default()).as_bool() {
+            let _ = GlobalFree(h_mem);
             return false;
         }
         let _ = EmptyClipboard();
         let res = SetClipboardData(CF_UNICODETEXT, h_mem);
+        let ok = !res.is_invalid() && !res.0.is_null();
+        if !ok {
+            let _ = GlobalFree(h_mem);
+        }
         let _ = CloseClipboard();
-        !res.is_invalid() && !res.0.is_null()
+        ok
     }
 }
 
