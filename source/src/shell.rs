@@ -1,19 +1,21 @@
 use crate::{core::*, ui, media::{MediaService,MediaEvent,MediaSnapshot}, visualizer::Visualizer, render::{self,Painter}, online::{OnlineService,WeatherReport,LyricsResult}, ical::CalendarEvent};
 use chrono::{Local,Datelike,Timelike,NaiveDate};
-use std::{cell::RefCell,collections::BTreeMap,sync::{Arc,Mutex,mpsc},time::{Duration,Instant},thread,path::PathBuf};
+use std::{cell::RefCell,collections::BTreeMap,sync::{Arc,Mutex,mpsc},time::{Duration,Instant},thread};
 use windows::core::{w,PCWSTR};
 use windows::Win32::{Foundation::*,System::{LibraryLoader::GetModuleHandleW,Com::*},Graphics::Gdi::*,Media::{timeSetEvent,timeKillEvent,TIME_PERIODIC},UI::{Controls::WM_MOUSELEAVE,WindowsAndMessaging::*,Input::KeyboardAndMouse::*,HiDpi::*}};
 
 mod pages;
 mod reminder;
 mod settings;
-const WAKE:u32=WM_APP+1;const TRAY:u32=WM_APP+2;const MORPH_MSG:u32=WM_APP+5;
+mod sticky_window;
+pub(crate) use sticky_window::spawn_floating_sticky_note;
+const WAKE:u32=WM_APP+1;const TRAY:u32=WM_APP+2;const MORPH_MSG:u32=WM_APP+5;const EM_SETSEL:u32=0x00B1;
 unsafe extern "system" {
     fn MessageBeep(utype: u32) -> i32;
 }
 thread_local!{static APP:RefCell<Option<Shell>>=const{RefCell::new(None)};}
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToastKind {
     Water,
     Stretch,
@@ -22,6 +24,7 @@ pub enum ToastKind {
     Generic,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ToastNotification {
     pub kind: ToastKind,
@@ -31,12 +34,13 @@ pub struct ToastNotification {
     pub confirmed_at: Option<Instant>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone,PartialEq)]
 enum Action {
     Tab(String),Settings,Back,Close,Exit,Bottom(bool),Minimal,Gap(i32),Scale(f32),Opacity(i32),ToggleModule(String),Toggle(&'static str),
     Play,Next,Previous,Seek(f64),SeekPointer,LyricsFollow,Lyric(usize),FocusStart,FocusPause,FocusReset,FocusBreak,FocusLength(i32),BreakLength(i32),
     AddTodo,Todo(u64),DeleteTodo(u64),TodoPage(i32),SaveNote,Water,UndoWater,WaterTarget(i32),WaterServing(i32),Breath,
-    Month(i32),Day(u32),CalendarSave,CalendarRefresh,WeatherSave,WeatherRefresh,AiSave,AiSend,AiClear,
+    Month(i32),Day(u32),JumpToDate(i32,u32,u32),CalendarSave,CalendarRefresh,WeatherSave,WeatherRefresh,AiSave,AiSend,AiClear,
     ToggleLyrics,SelectMode(usize),
     CalendarToday,CalendarLeaveToggle,
     TogglePin,ToStage0,ToStage1,
@@ -44,7 +48,9 @@ enum Action {
     ConfirmWater,SelectClip(usize),CopyClip(usize),DeleteClip(u64),ClearClips,ClipPage(i32),
     MoveTab(String, i32),
     SettingsCategory(usize),SetDefaultTab(String),SettingsMenu(&'static str,f32,f32,f32),SettingsValue(&'static str,u32),SettingsOpenTab(String,usize),
+    InstallMod(String),UninstallMod(String),NoteAdd,NoteSelect(usize),NoteDelete(u64),NoteColor(u8),NoteExport(u8),NotePopout,
 }
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct TabDragState {
     pub tab: String,
@@ -58,6 +64,7 @@ pub struct TabDragState {
 #[derive(Clone)]struct LyricAnim{prev_text:String,started:Instant}
 #[derive(Clone)]struct Poster{queue:Arc<Mutex<Vec<Event>>>,hwnd:usize}
 impl Poster{fn send(&self,event:Event){if let Ok(mut q)=self.queue.lock(){if q.len()>64{q.remove(0);}q.push(event);}unsafe{let _=PostMessageW(Some(HWND(self.hwnd as *mut _)),WAKE,WPARAM(0),LPARAM(0));}}}
+#[allow(dead_code)]
 enum Event {
     Prayers(String,String,Result<crate::online::PrayerSchedule,String>),
     Artwork(u64,Result<crate::artwork::Artwork,String>),
@@ -66,6 +73,7 @@ enum Event {
     Agenda(Result<Vec<CalendarEvent>,String>),Ai(Result<String,String>),Notice(String),
 }
 
+#[allow(dead_code)]
 pub(super) struct Shell {
     suspended:bool,
     render_ready:bool,
@@ -92,6 +100,7 @@ pub(super) struct Shell {
     /// Startup fade-in: ramps 0→1 over ~300 ms (20 ticks × 16 ms via timer 11).
     /// Permanently 1.0 once fully visible; timer 11 is killed at that point.
     startup_alpha:f32,
+    pub stage1_temporary_until: Option<Instant>,
 }
 #[derive(Clone,serde::Deserialize)]struct HolidayRecord{date:NaiveDate,name:String,#[serde(default)]collective_leave:bool}
 #[derive(serde::Deserialize)]struct HolidayFile{holidays:Vec<HolidayRecord>}
@@ -125,18 +134,19 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
     let inputs_hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST,w!("mynotch.Inputs"),None,WS_POPUP,0,0,0,0,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
     let live_preview=args.iter().any(|s|s=="--live-preview");
     let preview=live_preview||args.iter().any(|s|s=="--preview");
-    let hwnd=CreateWindowExW(if preview{WS_EX_NOREDIRECTIONBITMAP|WS_EX_APPWINDOW|WS_EX_TOPMOST}else{WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_TOPMOST},w!("mynotch.Native"),w!("mynotch 0.0.1 alpha"),WS_POPUP,0,0,400,112,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
+    let hwnd=CreateWindowExW(if preview{WS_EX_NOREDIRECTIONBITMAP|WS_EX_APPWINDOW|WS_EX_TOPMOST}else{WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_TOPMOST},w!("mynotch.Native"),w!("mynotch 0.0.1.1 alpha"),WS_POPUP,0,0,400,112,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
     SetWindowLongPtrW(inputs_hwnd,GWLP_HWNDPARENT,hwnd.0 as isize);
     let executable=std::env::current_exe().map_err(|_|"Lokasi aplikasi tidak ditemukan.")?;
     let root=crate::app::storage_root(&executable,preview)?;
     let mut store=Store::new(root)?;let mut settings:Settings=store.load("settings.json");settings.normalize();if preview&&args.iter().any(|a|a=="--edge-check"){settings.bottom=false;settings.edge_gap=0;if let Some(scale)=args.iter().find_map(|a|a.strip_prefix("--ui-scale=").and_then(|v|v.parse::<f32>().ok())){settings.scale=scale;settings.normalize();}}let state:State=store.load("state.json");
     let now=Local::now();let queue=Arc::new(Mutex::new(Vec::new()));let online=OnlineService::new(store.root.clone());
+    let init_stage=initial_hover_stage(preview,settings.minimal);
     let mut app=Shell{
         suspended:false,
         render_ready:false,
         cover:None,cover_key:0,preview_silent:preview&&!live_preview,
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-            hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:if preview{2}else{1},pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,};
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,stage1_temporary_until:None,};
     app.tab=app.settings.default_tab.clone();
     if !app.settings.enabled(&app.tab)||!MODULES.contains(&app.tab.as_str()){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
     app.load_holidays();
@@ -153,14 +163,41 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
     if !app.preview_silent{app.start_media();}
     
     app.clock_timer();
+    if !app.preview && app.hover_stage == 1 && app.should_revert_stage1_to_calendar() {
+        app.trigger_stage1_temporary(5);
+    }
     if !app.preview{SetTimer(Some(hwnd),11,16,None);}
     SetTimer(Some(hwnd),5,150,None);
     if args.iter().any(|s|s=="--suspend-fixture"){SetTimer(Some(hwnd),7,4000,None);SetTimer(Some(hwnd),8,7500,None);}
     APP.with(|cell|*cell.borrow_mut()=Some(app));
     let _=ShowWindow(hwnd,SW_SHOWNOACTIVATE);let _=InvalidateRect(Some(hwnd),None,false);
-    let mut message=MSG::default();while GetMessageW(&mut message,None,0,0).as_bool(){let _=TranslateMessage(&message);DispatchMessageW(&message);}
+    let mut message=MSG::default();
+    while GetMessageW(&mut message,None,0,0).as_bool(){
+        if message.message == WM_KEYDOWN && message.wParam.0 == 0x41 {
+            let ctrl = (GetKeyState(0x11) as u16 & 0x8000) != 0;
+            if ctrl && is_edit_control(message.hwnd) {
+                let _ = SendMessageW(message.hwnd, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+                continue;
+            }
+        }
+        let _=TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
     APP.with(|cell|{cell.borrow_mut().take();});CoUninitialize();Ok(())
 }}
+
+fn is_edit_control(hwnd: HWND) -> bool {
+    unsafe {
+        let mut buf = [0u16; 16];
+        let len = GetClassNameW(hwnd, &mut buf);
+        if len > 0 {
+            let s = String::from_utf16_lossy(&buf[..len as usize]);
+            s.eq_ignore_ascii_case("EDIT")
+        } else {
+            false
+        }
+    }
+}
 
 unsafe extern "system" fn wndproc(hwnd:HWND,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{
     // DestroyWindow dispatches WM_DESTROY reentrantly while the command handler
@@ -192,8 +229,23 @@ unsafe extern "system" fn morph_tick(_id:u32,_msg:u32,user:usize,_dw1:usize,_dw2
 impl Shell {
     fn power_state(&mut self,suspended:bool){
         if suspended==self.suspended{return}self.suspended=suspended;
-        if suspended{self.cancel_jobs();unsafe{for id in [1,2,4,10]{let _=KillTimer(Some(self.hwnd),id);}if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);self.morph_timer=0;}}self.morph=None;self.tab_fade=None;if let Some(mut media)=self.media.take(){media.stop();}if let Some(mut capture)=self.visualizer.take(){capture.stop();}self.track.playing=false;self.levels.fill(0.);self.save();}
-        else{self.lyrics_key.clear();self.start_media();self.clock_timer();self.tick();}
+        if suspended{
+            self.cancel_jobs();
+            unsafe{
+                for id in [1,2,3,4,5,6,10,11,12]{let _=KillTimer(Some(self.hwnd),id);}
+                if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);self.morph_timer=0;}
+            }
+            self.morph=None;self.tab_fade=None;
+            if let Some(mut media)=self.media.take(){media.stop();}
+            if let Some(mut capture)=self.visualizer.take(){capture.stop();}
+            self.track.playing=false;self.levels.fill(0.);self.save();
+        }else{
+            self.lyrics_key.clear();
+            self.start_media();
+            self.clock_timer();
+            unsafe{SetTimer(Some(self.hwnd),5,150,None);}
+            self.tick();
+        }
         // A morph that was cut short by suspend must not leave the window at an in-between size.
         self.layout();
         if self.preview{eprintln!("suspended={} capture={}",self.suspended,self.visualizer.is_some());}
@@ -212,20 +264,16 @@ impl Shell {
     fn save(&mut self){if let Err(e)=self.store.save("settings.json",&self.settings){self.notice(e);}if let Err(e)=self.store.save("state.json",&self.state){self.notice(e);}}
     fn notice(&mut self,text:impl Into<String>){
         let msg=text.into();
-        let kind = if msg.contains("💧") || msg.contains("minum") {
-            ToastKind::Water
-        } else if msg.contains("🧘") || msg.contains("regang") {
-            ToastKind::Stretch
-        } else if msg.contains("🎯") || msg.contains("fokus") {
-            ToastKind::Focus
-        } else {
-            ToastKind::Generic
-        };
+        let kind = classify_notice_kind(&msg);
         self.show_toast(kind, msg, 8000);
     }
     fn show_water_toast(&mut self){
         let serving = self.settings.water_serving;
-        let msg = format!("Waktunya minum air! (+{} ml)", serving);
+        let msg = if self.settings.language == "en" {
+            format!("Time to drink water! (+{} ml)", serving)
+        } else {
+            format!("Waktunya minum air! (+{} ml)", serving)
+        };
         self.show_toast(ToastKind::Water, msg, 12000);
     }
     fn show_toast(&mut self, kind: ToastKind, text: impl Into<String>, timeout_ms: u32){
@@ -275,6 +323,12 @@ impl Shell {
                         self.state.clipboard_history.truncate(50);
                     }
                     let _ = self.store.save("state.json", &self.state);
+                    if self.hover_stage == 1 && self.tab == "Clipboard" {
+                        self.trigger_stage1_temporary(5);
+                        let from = self.geometry();
+                        self.morph = Some(ui::Morph::new(from, self.target_geometry()));
+                        self.start_morph_timer();
+                    }
                     self.invalidate();
                 }
             }
@@ -325,6 +379,8 @@ impl Shell {
                 (550.,if self.reminder_index==3{362.}else{346.},27.)
             }else if self.tab=="Clipboard"{
                 (530.,236.,24.)
+            }else if self.tab=="Catatan"{
+                (540.,280.,24.)
             }else{
                 (ui::EXPANDED_WIDTH,ui::EXPANDED_HEIGHT,24.)
             }
@@ -342,16 +398,18 @@ impl Shell {
         }else if self.hover_stage==1{
             if self.lyric_mode{
                 (300.,30.,15.)
+            }else if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
+                (158.,30.,15.)
             }else if self.tab == "Kalender" {
                 (158.,30.,15.)
             }else if self.tab == "Reminder" {
                 (158.,30.,15.)
             }else if self.tab == "Clipboard" {
                 (195.,30.,15.)
+            }else if self.tab == "Catatan" {
+                (180.,30.,15.)
             }else if self.tab == "Musik" {
-                if !self.track.playing && self.track.title.is_empty() {
-                    (158.,30.,15.)
-                } else {
+                if self.track.playing || !self.track.title.is_empty() {
                     let len = if !self.track.artist.is_empty() {
                         self.track.title.chars().count() + self.track.artist.chars().count() + 3
                     } else {
@@ -359,6 +417,8 @@ impl Shell {
                     };
                     let w = (len as f32 * 7.2 + 110.).clamp(180., 340.);
                     (w, 30., 15.)
+                } else {
+                    (158.,30.,15.)
                 }
             }else{
                 (180.,30.,15.)
@@ -367,50 +427,40 @@ impl Shell {
             (50.,10.,5.)
         }
     }
+    pub fn should_revert_stage1_to_calendar(&self) -> bool {
+        should_revert_stage1(&self.tab, self.reminder_index, self.lyric_mode)
+    }
+    pub fn is_stage1_temporary_active(&self) -> bool {
+        self.stage1_temporary_until.is_some_and(|until| Instant::now() < until)
+    }
+    pub fn trigger_stage1_temporary(&mut self, duration_secs: u64) {
+        self.stage1_temporary_until = Some(Instant::now() + Duration::from_secs(duration_secs));
+        unsafe {
+            SetTimer(Some(self.hwnd), 6, (duration_secs * 1000) as u32, None);
+        }
+    }
     fn set_hover_stage(&mut self,stage:u8){
         if self.fullscreen{return}
         if self.hover_stage==stage{return}
         if stage==0{
             self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
         }
+        if stage == 1 && self.should_revert_stage1_to_calendar() {
+            self.trigger_stage1_temporary(5);
+        }
         let from=self.geometry();
         self.hover_stage=stage;
         self.expanded=stage>=2;
+        if stage<2{
+            self.settings_open=false;
+            self.settings_popup=None;
+            self.reminder_menu=None;
+            self.focused=None;
+        }
         self.morph=Some(ui::Morph::new(from,self.target_geometry()));
         self.update_window_region();
         if self.hover_stage<2{self.make_inputs();}
         self.sync_visualizer();self.clock_timer();self.start_morph_timer();self.invalidate();
-    }
-    fn collapsed_height(&self)->f32{
-        if self.settings.minimal{
-            ui::TINY_HEIGHT
-        }else if self.track.playing{
-            ui::STRIP_HEIGHT
-        }else{
-            ui::CLOCK_HEIGHT
-        }
-    }
-    fn collapsed_width(&self)->f32{
-        if self.settings.minimal{
-            ui::TINY_WIDTH
-        }else if let Some(toast)=&self.toast{
-            if toast.kind == ToastKind::Water {
-                if toast.confirmed { 280. } else { 320. }
-            } else {
-                (toast.message.chars().count()as f32*7.5+64.).clamp(200.,460.)
-            }
-        }else if self.track.playing{
-            let len=if let Some(lyric)=self.active_lyric(){
-                lyric.chars().count()
-            }else if !self.track.artist.is_empty(){
-                self.track.title.chars().count()+self.track.artist.chars().count()+3
-            }else{
-                self.track.title.chars().count()
-            };
-            (len as f32*7.6+80.).clamp(ui::STRIP_WIDTH,430.)
-        }else{
-            ui::CLOCK_WIDTH
-        }
     }
     fn geometry(&self)->(f32,f32,f32){match &self.morph{Some(morph)=>morph.sample(),None=>self.target_geometry()}}
     fn capsule_origin(&self)->(f32,f32){
@@ -551,12 +601,26 @@ impl Shell {
         }
     }
     fn set_expanded(&mut self,value:bool){
-        self.set_hover_stage(if value{2}else{1});
+        self.set_hover_stage(if value{2}else{collapse_target_stage(self.settings.minimal)});
     }
     fn clock_timer(&self){unsafe{let now=Local::now();let delay=if !self.fullscreen&&(self.focus.running()||self.breathing.is_some()||self.expanded||self.lyric_mode||self.track.playing||self.settings.water_reminder||self.settings.move_reminder||self.settings.prayer_enabled||self.stretch_deadline.is_some()){1000}else{(60-now.second()).max(1)*1000};SetTimer(Some(self.hwnd),1,delay,None);}}
     fn make_inputs(&mut self){unsafe{
-        for &id in self.inputs.keys(){self.drafts.insert((self.input_page.clone(),id),self.input(id));}
+        for &id in self.inputs.keys(){
+            if self.input_page != "Catatan" {
+                self.drafts.insert((self.input_page.clone(),id),self.input(id));
+            }
+        }
         if self.input_page=="Tugas"{if let Some(note)=self.drafts.get(&("Tugas".into(),12)){self.state.notes=note.clone();}}
+        if self.input_page=="Catatan" && (self.tab != "Catatan" || self.settings_open || !self.expanded) {
+            let title=self.input(50);let content=self.input(51);
+            if let Some(note)=self.state.sticky_notes.get_mut(self.state.selected_note){
+                if !title.is_empty()||!content.is_empty(){
+                    note.title=if title.trim().is_empty(){"Catatan Baru".into()}else{title};
+                    note.content=content;
+                    note.updated_at=chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                }
+            }
+        }
         for(_,hwnd)in std::mem::take(&mut self.inputs){let _=DestroyWindow(hwnd);}if !self.expanded{self.rebuild_input_region();self.sync_input_host();return}
         self.input_page=if self.settings_open{"Pengaturan".into()}else{self.tab.clone()};
         if self.settings_open{
@@ -567,12 +631,28 @@ impl Shell {
             "Tugas"=>{self.edit(10,"",16.,46.,220.,28.,false,false);self.edit(11,"",244.,46.,100.,28.,false,false);let notes=self.state.notes.clone();self.edit(12,&notes,16.,184.,330.,68.,false,true);},
             "Cuaca"=>{let city=self.settings.weather_city.clone();self.edit(30,&city,28.,172.,140.,28.,false,false);self.edit(31,&self.settings.latitude.to_string(),176.,172.,86.,28.,false,false);self.edit(32,&self.settings.longitude.to_string(),270.,172.,86.,28.,false,false);},
             "AI"=>{let w=self.width;self.edit(40,"",28.,124.,w-56.,50.,false,true);self.edit(41,&self.settings.ai_endpoint.clone(),28.,72.,240.,26.,false,false);self.edit(42,&self.settings.ai_model.clone(),276.,72.,140.,26.,false,false);self.edit(43,"",28.,104.,240.,26.,true,false);},
+            "Catatan"=>{
+                if let Some(note)=self.state.sticky_notes.get(self.state.selected_note){
+                    let title = if note.title == "Catatan Baru" && self.settings.language == "en" {
+                        "New Note".to_string()
+                    } else {
+                        note.title.clone()
+                    };
+                    let content=note.content.clone();
+                    self.edit(50,&title,256.,44.,140.,24.,false,false);
+                    self.edit(51,&content,256.,74.,self.width-276.,140.,false,true);
+                }
+            },
             _=>{}
         }
         self.rebuild_input_region();self.sync_input_host();
     }}
     unsafe fn edit(&mut self,id:u16,value:&str,x:f32,y:f32,width:f32,height:f32,password:bool,multiline:bool){unsafe{
-        let value=self.drafts.get(&(self.input_page.clone(),id)).map(|v|v.as_str()).unwrap_or(value);
+        let value=if self.input_page != "Catatan" {
+            self.drafts.get(&(self.input_page.clone(),id)).map(|v|v.as_str()).unwrap_or(value)
+        } else {
+            value
+        };
         let value:Vec<u16>=value.encode_utf16().chain(Some(0)).collect();
         let style=WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_BORDER|WINDOW_STYLE(if multiline{(ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN)as u32|WS_VSCROLL.0}else{ES_AUTOHSCROLL as u32})|WINDOW_STYLE(if password{ES_PASSWORD as u32}else{0});
         // Parent is the input host, not the composition window: child HWNDs do not render on a
@@ -657,11 +737,9 @@ impl Shell {
                     }
                 }
 
-                
-
                 if self.hover_stage==0 && Instant::now() > self.hover_blocked_until {
-                    // Hover on tiny notch smoothly reveals Stage 1 (Compact glance or Compact lyrics)!
-                    self.set_hover_stage(1);
+                    // Debounced hover on Stage 0 reveals Stage 1 after 140 ms so incidental top-edge cursor travel doesn't flicker.
+                    SetTimer(Some(self.hwnd), 4, 140, None);
                 }
                 return LRESULT(0)
             },
@@ -676,9 +754,8 @@ impl Shell {
                     }
                 }
                 self.pressed=None;
-                if !self.preview && !self.pinned && self.hover_stage==2 {
-                    let delay=if self.lyric_mode{400}else{800};
-                    SetTimer(Some(self.hwnd),2,delay,None);
+                if !self.preview && !self.pinned && self.hover_stage==2 && self.settings_popup.is_none() && self.reminder_menu.is_none() {
+                    SetTimer(Some(self.hwnd),2,800,None);
                 }
                 return LRESULT(0)
             },
@@ -719,20 +796,10 @@ impl Shell {
                     if let Some(hit)=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).cloned(){
                         if pressed_action==hit.action{
                             match hit.action{
-                                Action::ToStage0=>{
-                                    self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
-                                    self.set_hover_stage(0);
-                                },
-                                Action::ToStage1=>{
-                                    self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
-                                    self.set_hover_stage(1);
-                                },
-                                Action::TogglePin=>{self.pinned=!self.pinned;self.invalidate();},
                                 Action::SeekPointer=>{
                                     let ratio=((x-hit.rect.left)/(hit.rect.right-hit.rect.left)).clamp(0.,1.)as f64;
                                     self.action(Action::Seek(ratio*self.track.duration_seconds));
                                 },
-                                
                                 other=>self.action(other),
                             }
                             return LRESULT(0);
@@ -741,12 +808,13 @@ impl Shell {
                     return LRESULT(0);
                 }
                 // When in Stage 0, clicking capsule reveals Stage 1. When in Stage 1, clicking capsule body opens Stage 2!
-                
                 if let Some(t) = self.toast.take() {
                     let _ = KillTimer(Some(self.hwnd), 3);
                     self.toast_from_stage0 = false;
-                    if t.kind == ToastKind::Water || t.kind == ToastKind::Stretch || t.kind == ToastKind::Focus {
+                    if let Some(idx) = toast_target_reminder(t.kind) {
                         self.tab = "Reminder".into();
+                        self.reminder_index = idx;
+                        self.settings_open = false;
                     }
                     self.set_hover_stage(2);
                     return LRESULT(0);
@@ -781,12 +849,25 @@ impl Shell {
                 }
                 if self.tab=="Reminder"&&self.reminder_menu.is_some()&&rel_x>=229.{self.handle_reminder_menu_key(if wheel_delta>0{0x26}else{0x28});return LRESULT(0);}
                 if self.tab=="Reminder"&&rel_x<208.&&rel_y>48.{self.action(Action::ReminderStep(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
-                if self.tab=="Musik"&&!self.lyrics.is_empty()&&rel_x>=250.{
-                    let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
-                    let base=if self.lyric_offset==0{crate::lyrics::active_line(&self.lyrics,position).unwrap_or(0).saturating_sub(2)}else{self.lyric_offset-1};
-                    let delta=if wheel_delta>0{-2}else{2};
-                    self.lyric_offset=(base as i32+delta).clamp(0,self.lyrics.len().saturating_sub(1)as i32)as usize+1;
-                    self.invalidate();
+                if self.tab=="Kalender"&&rel_x<308.&&rel_y>42.{self.action(Action::Month(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
+                if self.tab=="Clipboard"&&rel_y>42.{self.action(Action::ClipPage(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
+                if self.tab=="Catatan"&&rel_y>42.{let total=self.state.sticky_notes.len();if total>0{let delta=if wheel_delta>0{-1}else{1};let next=(self.state.selected_note as i32+delta).clamp(0,(total-1)as i32)as usize;if next!=self.state.selected_note{self.action(Action::NoteSelect(next));}}return LRESULT(0);}
+                if self.tab=="Musik"&&self.lyric_mode&&rel_x>=250.{
+                    if !self.lyrics.is_empty(){
+                        let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
+                        let base=if self.lyric_offset==0{crate::lyrics::active_line(&self.lyrics,position).unwrap_or(0)}else{self.lyric_offset-1};
+                        let delta=if wheel_delta>0{-1}else{1};
+                        self.lyric_offset=(base as i32+delta).clamp(0,self.lyrics.len().saturating_sub(1)as i32)as usize+1;
+                        self.invalidate();
+                    }else if !self.plain_lyrics.is_empty(){
+                        let count=self.plain_lyrics.lines().filter(|l|!l.trim().is_empty()).count();
+                        if count>0{
+                            let base=self.lyric_offset.saturating_sub(1);
+                            let delta=if wheel_delta>0{-1}else{1};
+                            self.lyric_offset=(base as i32+delta).clamp(0,count.saturating_sub(1)as i32)as usize+1;
+                            self.invalidate();
+                        }
+                    }
                 }
                 return LRESULT(0)
             },
@@ -797,8 +878,8 @@ impl Shell {
                 2=>{
                     let _=KillTimer(Some(self.hwnd),2);
                     let focused=GetFocus();
-                    if !self.inputs.values().any(|&h|h==focused) && !self.pinned && self.hover_stage==2 {
-                        self.set_hover_stage(1);
+                    if !self.inputs.values().any(|&h|h==focused) && !self.pinned && self.hover_stage==2 && self.settings_popup.is_none() && self.reminder_menu.is_none() {
+                        self.set_hover_stage(collapse_target_stage(self.settings.minimal));
                     }
                 },
                 3=>{
@@ -817,11 +898,16 @@ impl Shell {
                         self.invalidate();
                     }
                 },
-                4=>{let _=KillTimer(Some(self.hwnd),4);},
+                4=>{
+                    let _=KillTimer(Some(self.hwnd),4);
+                    if self.hover_stage==0 && self.pointer.is_some() && Instant::now()>self.hover_blocked_until {
+                        self.set_hover_stage(1);
+                    }
+                },
                 5=>{if !self.suspended{self.sync_foreground();}},
                 6=>{
                     let _=KillTimer(Some(self.hwnd),6);
-
+                    self.stage1_temporary_until = None;
                     if self.hover_stage<2{
                         let from=self.geometry();
                         self.morph=Some(ui::Morph::new(from,self.target_geometry()));
@@ -865,13 +951,19 @@ impl Shell {
                     };
                     self.invalidate();return LRESULT(0)
                 }
-                0x0D=>{ // VK_RETURN
-                    if let Some(action)=self.focused.clone(){self.action(action);return LRESULT(0)}
+                0x0D|0x20=>{ // VK_RETURN or VK_SPACE
+                    if let Some(action)=self.focused.clone(){
+                        if action!=Action::SeekPointer{self.action(action);}
+                        return LRESULT(0);
+                    }else if wparam.0 as u16==0x20&&self.expanded&&!self.settings_open&&self.tab=="Musik"{
+                        self.action(Action::Play);
+                        return LRESULT(0);
+                    }
                 }
                 0x1B if self.reminder_menu.is_some()=>{self.reminder_menu=None;self.invalidate();return LRESULT(0)},
                 0x1B=>{ // VK_ESCAPE
                     if self.hover_stage>=2{
-                        self.set_hover_stage(1);
+                        self.set_hover_stage(collapse_target_stage(self.settings.minimal));
                     }else if self.hover_stage==1{
                         self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
                         self.set_hover_stage(0);
@@ -902,11 +994,16 @@ impl Shell {
         if let Some(was_break) = self.focus.complete() {
             if was_break {
                 self.focus.is_break = false;
-                self.notice("☕ Istirahat selesai! Siap untuk sesi fokus berikutnya.");
+                self.notice(crate::i18n::t("toast.break_ended", &self.settings.language));
             } else {
                 self.focus.is_break = true;
                 if self.settings.auto_break{self.focus.start(self.settings.break_minutes,true);}
-                self.notice(if self.settings.stretch_after_focus{"🎯 Sesi fokus selesai! Waktunya istirahat & peregangan."}else{"🎯 Sesi fokus selesai! Waktunya istirahat."});
+                if self.settings.stretch_after_focus{
+                    self.last_move=Instant::now();
+                    self.show_toast(ToastKind::Focus,crate::i18n::t("toast.focus_ended_stretch", &self.settings.language),8000);
+                }else{
+                    self.show_toast(ToastKind::Focus,crate::i18n::t("toast.focus_ended", &self.settings.language),8000);
+                }
             }
         }
         if self.settings.enabled("Tugas"){let now=Local::now();let mut reminders=vec![];for task in &mut self.state.todos{if !task.done&&!task.reminded&&task.due.is_some_and(|due|due<=now){task.reminded=true;reminders.push(task.text.clone());}}for text in reminders{self.notice(format!("Pengingat: {text}"));}}
@@ -917,11 +1014,11 @@ impl Shell {
             }
             if self.settings.move_reminder&&self.last_move.elapsed().as_secs()>=self.settings.move_interval as u64*60{
                 self.last_move=Instant::now();
-                self.notice("🧘 Waktunya peregangan otot! Berdiri sejenak & regangkan tubuh.");
+                self.notice(crate::i18n::t("toast.stretch_alert", &self.settings.language));
             }
             if self.settings.enabled("Sehat")&&self.settings.eye_reminder&&self.last_eye.elapsed().as_secs()>=self.settings.eye_interval as u64*60{
                 self.last_eye=Instant::now();
-                self.notice("👀 Istirahat mata 20-20-20: pandang jauh 20 detik.");
+                self.notice(crate::i18n::t("toast.eye_alert", &self.settings.language));
             }
         }
         if self.breathing.is_some_and(|start|start.elapsed().as_secs()>=60){self.breathing=None;self.notice("Latihan napas selesai.");}
@@ -943,7 +1040,7 @@ impl Shell {
                 if cover_key!=0{let bytes=track.artwork.clone();self.job("Artwork",move||Event::Artwork(cover_key,crate::artwork::decode(&bytes)));}
             }
             if self.preview&&self.track.playing!=track.playing{eprintln!("media playing={} can_seek={}",track.playing,track.can_seek);}
-            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
+            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;if !self.lyric_mode{self.trigger_stage1_temporary(5);}if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
             if self.hover_stage==1 && !self.lyric_mode {
                 let target=self.target_geometry();
                 if (self.width-target.0).abs()>2.0||(self.height-target.1).abs()>2.0{
@@ -956,7 +1053,7 @@ impl Shell {
         Event::Prayers(city,date,result)=>{if city==self.settings.prayer_city&&date==reminder::jakarta_today(){match result{Ok(s)=>{self.prayer_schedule=Some(s);self.prayer_error=None;},Err(e)=>self.prayer_error=Some(e)}}},
         Event::Artwork(key,result)=>{if key==self.cover_key&&self.settings.enabled("Musik"){self.cover=result.ok();if self.preview{eprintln!("artwork ready={}",self.cover.is_some());}}},
         Event::Levels(levels)=>{if self.visualizer.is_some(){self.levels=levels;self.sync_active_lyric();}},
-        Event::Lyrics(key,result)=>{if key==self.lyrics_key&&self.settings.enabled("Musik"){match result{Ok(value)=>{self.lyrics=crate::lyrics::parse_lrc(&value.synced_lyrics);self.plain_lyrics=if value.instrumental{"Instrumental · nikmati musiknya.".into()}else if value.plain_lyrics.is_empty()&&self.lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini.".into()}else{crate::lyrics::romanize_text(&value.plain_lyrics)};self.layout();},Err(_)=>{self.plain_lyrics="Lirik belum tersedia untuk lagu ini.".into();}}}},
+        Event::Lyrics(key,result)=>{if key==self.lyrics_key&&self.settings.enabled("Musik"){match result{Ok(value)=>{self.lyrics=crate::lyrics::parse_lrc_with_options(&value.synced_lyrics,self.settings.romanize_lyrics);self.plain_lyrics=if value.instrumental{"Instrumental · nikmati musiknya.".into()}else if value.plain_lyrics.is_empty()&&self.lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini.".into()}else if self.settings.romanize_lyrics{crate::lyrics::romanize_text(&value.plain_lyrics)}else{value.plain_lyrics};self.layout();},Err(_)=>{self.plain_lyrics="Lirik belum tersedia untuk lagu ini.".into();}}}},
         Event::Weather(result)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());},Err(e)=>self.notice(e)}}},
         Event::Agenda(result)=>{if self.settings.enabled("Kalender"){match result{Ok(value)=>{self.agenda=value;self.agenda_updated=Some(Instant::now());},Err(e)=>self.notice(e)}}},
         Event::Ai(result)=>{if self.settings.enabled("AI"){match result{Ok(text)=>self.ai_messages.push(crate::online::ChatMessage{role:"assistant".into(),content:text}),Err(e)=>self.notice(e)}}},Event::Notice(text)=>self.notice(text),
@@ -978,26 +1075,16 @@ impl Shell {
         if is_focused{unsafe{p.stroke(x-2.,y-2.,width+4.,height+4.,radius+2.,render::ACCENT,1.5);}}
         if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x,y,width,height),action});}
     }
-    fn button(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,width:f32,action:Action,primary:bool){
-        self.button_h(p,label,x,y,width,32.,action,primary);
-    }
-    fn button_circle(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,diameter:f32,action:Action){
-        let hovered=self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+diameter&&py>=y&&py<=y+diameter);
-        let is_pressed=self.pressed.as_ref()==Some(&action);
-        let surface=if is_pressed{0x2b3231}else if hovered{0x5a6564}else{0x454e4d};
-        unsafe{
-            p.fill(x,y,diameter,diameter,diameter/2.,surface);
-            p.text(label,x,y-3.,diameter,diameter,14.,0xffffff,true);
-        }
-        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x-4.,y-4.,diameter+8.,diameter+8.),action});}
-    }
-    fn transport_btn(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,w:f32,h:f32,action:Action,active:bool){
-        let hovered=self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+w&&py>=y&&py<=y+h);
-        let is_pressed=self.pressed.as_ref()==Some(&action);
-        let color=if active{0xffffff}else if is_pressed{0x888888}else if hovered{0xffffff}else{0xdddddd};
+    fn transport_btn(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,w:f32,h:f32,action:Action,active:bool,enabled:bool){
+        let hovered=enabled&&self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+w&&py>=y&&py<=y+h);
+        let is_pressed=enabled&&self.pressed.as_ref()==Some(&action);
+        let color=if !enabled{0x555a5e}else if active{0xffffff}else if is_pressed{0x888888}else if hovered{0xffffff}else{0xdddddd};
         unsafe{
             if hovered||active{
                 p.fill_alpha(x,y,w,h,6.,0xffffff,if active{0.22}else{0.10});
+            }
+            if self.focused.as_ref()==Some(&action){
+                p.stroke(x-1.,y-1.,w+2.,h+2.,7.,0xd5d5dc,1.);
             }
             let cx=x+w*0.5;let cy=y+h*0.5;
             match label{
@@ -1009,7 +1096,7 @@ impl Shell {
                 _ => p.text(label,x,y+2.,w,h-4.,15.,color,true),
             }
         }
-        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x-2.,y-2.,w+4.,h+4.),action});}
+        if enabled&&self.hit_enabled{self.hits.push(Hit{rect:render::rect(x-2.,y-2.,w+4.,h+4.),action});}
     }
     /// Draws one frame straight into the composition swap chain. There is no WM_PAINT round
     /// trip: state changes call this directly, which is what removes the coalescing jitter.
@@ -1037,9 +1124,8 @@ impl Shell {
                     self.height=height;
                     let(ox,oy)=self.capsule_origin();
                     let body_bg=if self.settings_open||self.tab=="Reminder"{0x060608}else{render::BG};
-                    let bar_only=self.settings.minimal&&!self.expanded&&self.morph.is_none()&&self.toast.is_none();
-                    // Drop shadow only blooms when hovered or expanded, matching Nusa!
-                    if !bar_only && (self.pointer.is_some() || self.expanded) {
+                    // Drop shadow blooms when hovered in Stage 1 or expanded in Stage 2
+                    if self.hover_stage >= 1 && (self.pointer.is_some() || self.expanded) {
                         let opacity=(self.settings.opacity as f32/255.)*self.startup_alpha;
                         let shadow_accent=if !self.settings_open&&self.settings.glow&&(self.tab=="Musik"||self.lyric_mode)&&self.track.playing{
                             self.cover.as_ref().map(|c|c.accent).unwrap_or(0x000000)
@@ -1057,41 +1143,36 @@ impl Shell {
                     // Everything below draws in capsule coordinates; the origin is translated to (ox, oy).
                     p.push_alpha((self.settings.opacity as f32/255.)*self.startup_alpha);
                     p.translate(ox,oy);
-                    if bar_only{
-                        // The minimal accent bar draws its own body over the full window.
-                        self.draw(&mut p);
-                    }else{
-                        let is_attached_top=!self.settings.bottom&&self.settings.edge_gap==0;
-                        if is_attached_top{
-                            let ear=if self.hover_stage==0&&!self.expanded{
-                                4.
-                            }else if height>=24.{
-                                12.
-                            }else{
-                                (height*0.5).max(4.)
-                            };
-                            // Cover the physical screen-edge row as well as the antialiased contour.
-                            // This avoids a transparent hairline at the clipped HWND/DComp boundary.
-                            p.fill(-ear,-1./self.scale,width+2.*ear,2./self.scale,0.,body_bg);
-                            if !self.settings_open&&self.settings.glow&&self.hover_stage>=2 && self.tab=="Musik"{
-                                let accent=self.cover.as_ref().map(|c|c.accent).unwrap_or(0x1a2e3b);
-                                if self.lyric_mode{
-                                    p.fill_notch_half_gradient(width,height,ear,radius,accent,0.85);
-                                }else if self.track.playing{
-                                    p.fill_notch(width,height,ear,radius,body_bg);
-                                    p.fill_notch_gradient(width,height,ear,radius,0x000000,accent,0.0,0.22);
-                                }else{
-                                    p.fill_notch(width,height,ear,radius,body_bg);
-                                }
+                    let is_attached_top=!self.settings.bottom&&self.settings.edge_gap==0;
+                    if is_attached_top{
+                        let ear=if self.hover_stage==0&&!self.expanded{
+                            4.
+                        }else if height>=24.{
+                            12.
+                        }else{
+                            (height*0.5).max(4.)
+                        };
+                        // Cover the physical screen-edge row as well as the antialiased contour.
+                        // This avoids a transparent hairline at the clipped HWND/DComp boundary.
+                        p.fill(-ear,-1./self.scale,width+2.*ear,2./self.scale,0.,body_bg);
+                        if !self.settings_open&&self.settings.glow&&self.hover_stage>=2 && self.tab=="Musik"{
+                            let accent=self.cover.as_ref().map(|c|c.accent).unwrap_or(0x1a2e3b);
+                            if self.lyric_mode{
+                                p.fill_notch_half_gradient(width,height,ear,radius,accent,0.85);
+                            }else if self.track.playing{
+                                p.fill_notch(width,height,ear,radius,body_bg);
+                                p.fill_notch_gradient(width,height,ear,radius,0x000000,accent,0.0,0.22);
                             }else{
                                 p.fill_notch(width,height,ear,radius,body_bg);
                             }
                         }else{
-                            p.fill(0.,0.,width,height,radius,body_bg);
-                            if !self.settings_open&&self.settings.glow&&self.expanded&&self.tab=="Musik"{let accent=self.cover.as_ref().map(|c|c.accent).unwrap_or(0x1a2e3b);p.fill_alpha(0.,0.,width,height,radius,accent,0.12);}
+                            p.fill_notch(width,height,ear,radius,body_bg);
                         }
-                        self.draw(&mut p);
+                    }else{
+                        p.fill(0.,0.,width,height,radius,body_bg);
+                        if !self.settings_open&&self.settings.glow&&self.expanded&&self.tab=="Musik"{let accent=self.cover.as_ref().map(|c|c.accent).unwrap_or(0x1a2e3b);p.fill_alpha(0.,0.,width,height,radius,accent,0.12);}
                     }
+                    self.draw(&mut p);
                     p.reset_transform();
                     p.pop_alpha();
                     ok=p.end().is_ok();
@@ -1146,17 +1227,6 @@ impl Shell {
         if collapsed_alpha > 0.002 { self.draw_collapsed(p, collapsed_alpha); }
         if expanded_alpha > 0.002 { self.draw_expanded(p, expanded_alpha); }
     }
-    /// Header shared by both geometries: artwork, title, subtitle, visualizer and clock.
-    fn draw_header(&mut self,p:&mut Painter,expanded:bool){unsafe{
-        if !p.cover(self.cover.as_ref(),if self.cover.is_some(){self.cover_key}else{0},16.,12.,24.,false){p.fill(16.,12.,24.,24.,8.,0x285347);p.text("N",23.,14.,18.,22.,ui::TEXT_BODY,0xb8f8df,true);}
-        let width=if expanded{270.}else{182.};
-        let title=if self.track.title.is_empty(){"mynotch 0.0.1 alpha"}else{&self.track.title};
-        p.text_ellipsis(title,48.,10.,width,20.,ui::TEXT_BODY,render::TEXT,true);
-        let subtitle=if self.focus.running(){format!("Fokus · {}",time_label(self.focus.remaining().as_secs_f64()))}else if self.track.artist.is_empty(){"Ruang kecil untuk harimu".into()}else{self.track.artist.clone()};
-        p.text_ellipsis(&subtitle,48.,28.,width,16.,ui::TEXT_CAPTION,render::MUTED,false);
-        if self.track.playing&&self.settings.visualizer{p.bars(&self.levels,if expanded{336.}else{242.},14.,36.,20.,render::ACCENT);}
-        p.text(&Local::now().format("%H:%M").to_string(),if expanded{384.}else{292.},18.,40.,20.,11.,render::MUTED,false);
-    }}
     fn draw_collapsed(&mut self,p:&mut Painter,alpha:f32){unsafe{
         p.push_alpha(alpha);
         if let Some(toast)=&self.toast{
@@ -1167,7 +1237,8 @@ impl Shell {
                 p.text_centered("💧",10.,0.,18.,self.height,13.,0x38bdf8,1.0,false);
                 if toast.confirmed {
                     let text_w = self.width - 56.;
-                    p.text_centered("Hebat! Hidrasi tercatat",28.,0.,text_w,self.height,11.5,0x6ee7b7,1.0,true);
+                    let hydration_txt = crate::i18n::t("toast.hydration_logged", &self.settings.language);
+            p.text_centered(hydration_txt,28.,0.,text_w,self.height,11.5,0x6ee7b7,1.0,true);
                     p.text_centered("🎉",self.width-28.,0.,20.,self.height,13.,0xffffff,1.0,false);
                 } else {
                     let btn_w = 26.;
@@ -1251,59 +1322,77 @@ impl Shell {
             }else{
                 p.clip(0.,0.,self.width,self.height);
 
-                let (_symbol, _sym_color, info_text) = match self.tab.as_str() {
-                    
-                    "Kalender" => {
-                        let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
-                        let cal = format!("{} {}", self.day, month_str);
-                        ("📅", 0xffffff, cal)
-                    }
-                    "Reminder" => {
-                        let rem = if self.focus.remaining().is_zero() {
-                            self.settings.focus_minutes as f64 * 60.
-                        } else {
-                            self.focus.remaining().as_secs_f64()
-                        };
-                        let foc = time_label(rem);
-                        match self.reminder_index{
-                            1=>("💧",0x65cfe3,format!("{} ml",self.state.water.iter().filter(|d|d.date==Local::now().date_naive()).map(|d|d.ml).sum::<u32>())),
-                            2=>("◷",0xb8a1ee,self.stretch_deadline.map(|d|format!("{}s",d.saturating_duration_since(Instant::now()).as_secs())).unwrap_or("Peregangan".into())),
-                            3=>("◷",0xdac68d,"Sholat".into()),
-                            _=>("🎯",0xffa46b,foc)
+                let lang = &self.settings.language;
+                let (icon, info_text) = if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
+                    let month_str = crate::i18n::month_name(self.month, lang);
+                    let cal = format!("{} {}", self.day, month_str);
+                    ("calendar", cal)
+                } else {
+                    match self.tab.as_str() {
+                        "Kalender" => {
+                            let month_str = crate::i18n::month_name(self.month, lang);
+                            let cal = format!("{} {}", self.day, month_str);
+                            ("calendar", cal)
                         }
-                    }
-                    
-                    "Musik" => {
-                        let text = if self.track.title.is_empty() {
-                            "Musik".into()
-                        } else if self.track.artist.is_empty() {
-                            self.track.title.clone()
-                        } else {
-                            format!("{} · {}", self.track.title, self.track.artist)
-                        };
-                        ("♫", 0xffffff, text)
-                    }
-                    "Clipboard" => {
-                        let count = self.state.clipboard_history.len();
-                        let text = if let Some(first) = self.state.clipboard_history.first() {
-                            let snip: String = first.text.lines().next().unwrap_or("").trim().chars().take(14).collect();
-                            if snip.is_empty() {
-                                format!("{} klip", count)
+                        "Reminder" => {
+                            let rem = if self.focus.remaining().is_zero() {
+                                self.settings.focus_minutes as f64 * 60.
                             } else {
-                                format!("{snip}…")
-                            }
-                        } else {
-                            "0 klip".to_string()
-                        };
-                        ("📋", 0x38bdf8, text)
-                    }
-                    _ => {
-                        ("•", 0xffffff, self.tab.clone())
+                                self.focus.remaining().as_secs_f64()
+                            };
+                            let foc = time_label(rem);
+                            let text = match self.reminder_index{
+                                1=>format!("{} ml",self.state.water.iter().filter(|d|d.date==Local::now().date_naive()).map(|d|d.ml).sum::<u32>()),
+                                2=>self.stretch_deadline.map(|d|format!("{}s",d.saturating_duration_since(Instant::now()).as_secs())).unwrap_or_else(||crate::i18n::t("stage1.stretch", lang).into()),
+                                3=>crate::i18n::t("stage1.prayer", lang).into(),
+                                _=>foc
+                            };
+                            let ic = ["timer","droplet","person","moon"][self.reminder_index];
+                            (ic, text)
+                        }
+                        "Musik" => {
+                            let text = if self.track.title.is_empty() {
+                                crate::i18n::t("stage1.no_music", lang).into()
+                            } else if self.track.artist.is_empty() {
+                                self.track.title.clone()
+                            } else {
+                                format!("{} · {}", self.track.title, self.track.artist)
+                            };
+                            ("music", text)
+                        }
+                        "Clipboard" => {
+                            let count = self.state.clipboard_history.len();
+                            let clips_label = crate::i18n::t("stage1.clips", lang);
+                            let text = if let Some(first) = self.state.clipboard_history.first() {
+                                let snip: String = first.text.lines().next().unwrap_or("").trim().chars().take(14).collect();
+                                if snip.is_empty() { format!("{} {}", count, clips_label) } else { format!("{snip}…") }
+                            } else {
+                                format!("0 {}", clips_label)
+                            };
+                            ("clipboard", text)
+                        }
+                        "Catatan" => {
+                            let count = self.state.sticky_notes.len();
+                            let notes_label = crate::i18n::t("stage1.notes", lang);
+                            let text = if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
+                                let snip: String = if note.title == "Catatan Baru" {
+                                    crate::i18n::t("stage1.new_note", lang).into()
+                                } else {
+                                    note.title.chars().take(14).collect()
+                                };
+                                if snip.is_empty() { format!("{} {}", count, notes_label) } else { snip }
+                            } else {
+                                format!("0 {}", notes_label)
+                            };
+                            ("edit", text)
+                        }
+                        _ => {
+                            (ui::module_icon(&self.tab), self.tab.clone())
+                        }
                     }
                 };
 
                 // 1. Symbol / icon di kiri (x = 10, w = 16)
-                let icon=if self.tab=="Reminder"{["timer","droplet","person","moon"][self.reminder_index]}else{ui::module_icon(&self.tab)};
                 p.outline_icon(icon,10.,(self.height-14.)/2.,14.,0xd5d5dc);
 
                 // 2. Tombol chevron up di sisi paling kanan
@@ -1350,6 +1439,9 @@ impl Shell {
             if hovered||is_pressed{
                 p.fill_alpha(x,y,w,h,radius,0xffffff,if is_pressed{0.25}else{0.12});
             }
+            if self.focused.as_ref()==Some(&action){
+                p.stroke(x-1.,y-1.,w+2.,h+2.,radius+1.,0xd5d5dc,1.);
+            }
             p.text_centered(icon,x,y,w,h,12.,if hovered{0xffffff}else{fg_rgb},1.0,false);
         }
         if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x,y,w,h),action});}
@@ -1361,6 +1453,9 @@ impl Shell {
         unsafe{
             if hovered||is_pressed{
                 p.fill_alpha(x,y,w,h,radius,0xffffff,if is_pressed{0.25}else{0.14});
+            }
+            if self.focused.as_ref()==Some(&action){
+                p.stroke(x-1.,y-1.,w+2.,h+2.,radius+1.,0xd5d5dc,1.);
             }
             let color=if hovered{0xffffff}else{fg_rgb};
             p.icon_chevron_up(x+w*0.5,y+h*0.5,if h>=24.{9.}else{8.},color,1.5);
@@ -1421,7 +1516,7 @@ impl Shell {
         let mut slots: Vec<TabSlot> = Vec::new();
         let mut cur_x = 18.0;
         for tab in &tabs {
-            let icon=ui::module_icon(tab);let label=tab.clone();
+            let icon=ui::module_icon(tab);let label=crate::i18n::tab_name(tab, &self.settings.language).to_string();
             let selected = self.tab == *tab;
             let w = if is_rearranging {
                 26.0
@@ -1559,14 +1654,65 @@ impl Shell {
         p.pop_alpha();
     }}
     fn active_lyric(&self)->Option<String>{let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);self.lyrics.iter().rev().find(|line|line.at<=position).map(|line|line.text.clone())}
-    fn tray(&self,add:bool){unsafe{use windows::Win32::UI::Shell::*;let mut data=NOTIFYICONDATAW{cbSize:std::mem::size_of::<NOTIFYICONDATAW>()as u32,hWnd:self.hwnd,uID:1,uFlags:NIF_MESSAGE|NIF_ICON|NIF_TIP,uCallbackMessage:TRAY,hIcon:LoadIconW(None,IDI_APPLICATION).unwrap_or_default(),..Default::default()};let text:Vec<u16>="mynotch 0.0.1 alpha".encode_utf16().collect();data.szTip[..text.len()].copy_from_slice(&text);let _=Shell_NotifyIconW(if add{NIM_ADD}else{NIM_DELETE},&data);}}
+    fn tray(&self,add:bool){unsafe{use windows::Win32::UI::Shell::*;let mut data=NOTIFYICONDATAW{cbSize:std::mem::size_of::<NOTIFYICONDATAW>()as u32,hWnd:self.hwnd,uID:1,uFlags:NIF_MESSAGE|NIF_ICON|NIF_TIP,uCallbackMessage:TRAY,hIcon:LoadIconW(None,IDI_APPLICATION).unwrap_or_default(),..Default::default()};let text:Vec<u16>="mynotch 0.0.1.1 alpha".encode_utf16().collect();data.szTip[..text.len()].copy_from_slice(&text);let _=Shell_NotifyIconW(if add{NIM_ADD}else{NIM_DELETE},&data);}}
     fn menu(&self){unsafe{if let Ok(menu)=CreatePopupMenu(){let _=AppendMenuW(menu,MF_STRING,900,w!("Buka / tutup notch"));let _=AppendMenuW(menu,MF_STRING,901,w!("Pengaturan"));let _=AppendMenuW(menu,MF_STRING,902,w!("Posisi atas"));let _=AppendMenuW(menu,MF_STRING,903,w!("Posisi bawah"));let _=AppendMenuW(menu,MF_SEPARATOR,0,PCWSTR::null());let _=AppendMenuW(menu,MF_STRING,999,w!("Keluar"));let mut cursor=POINT::default();let _=GetCursorPos(&mut cursor);let _=SetForegroundWindow(self.hwnd);let _=TrackPopupMenu(menu,TPM_RIGHTBUTTON,cursor.x,cursor.y,None,self.hwnd,None);let _=DestroyMenu(menu);}}}
 }
-impl Drop for Shell{fn drop(&mut self){crate::clipboard::unlisten_clipboard(self.hwnd);self.cancel_jobs();self.tray(false);if let Some(mut m)=self.media.take(){m.stop();}if let Some(mut v)=self.visualizer.take(){v.stop();}unsafe{for id in 1..=10{let _=KillTimer(Some(self.hwnd),id);}if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);}let _=UnregisterHotKey(Some(self.hwnd),1);let _=DestroyWindow(self.inputs_hwnd);}self.save();}}
+impl Drop for Shell{fn drop(&mut self){crate::clipboard::unlisten_clipboard(self.hwnd);self.cancel_jobs();self.tray(false);if let Some(mut m)=self.media.take(){m.stop();}if let Some(mut v)=self.visualizer.take(){v.stop();}unsafe{for id in 1..=12{let _=KillTimer(Some(self.hwnd),id);}if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);}let _=UnregisterHotKey(Some(self.hwnd),1);let _=DestroyWindow(self.inputs_hwnd);}self.save();}}
 fn time_label(seconds:f64)->String{let secs=seconds.max(0.)as u64;format!("{:02}:{:02}",secs/60,secs%60)}
 
 fn covers_monitor(window:RECT,monitor:RECT)->bool{window.left<=monitor.left&&window.top<=monitor.top&&window.right>=monitor.right&&window.bottom>=monitor.bottom}
 
+pub(super) fn classify_notice_kind(msg:&str)->ToastKind{
+    let lower = msg.to_lowercase();
+    if msg.contains("💧")||lower.contains("minum")||lower.contains("drink")||lower.contains("hydration"){
+        ToastKind::Water
+    }else if msg.contains("🎯")||lower.contains("fokus")||lower.contains("focus"){
+        ToastKind::Focus
+    }else if msg.contains("🧘")||lower.contains("regang")||lower.contains("stretch"){
+        ToastKind::Stretch
+    }else{
+        ToastKind::Generic
+    }
+}
+
+pub(super) fn lyric_display_index(lines:&[crate::lyrics::LyricLine],position:f64,offset:usize)->usize{
+    if offset>0&&!lines.is_empty(){
+        (offset-1).min(lines.len()-1)
+    }else{
+        crate::lyrics::active_line(lines,position).unwrap_or(0)
+    }
+}
+
+pub(super) fn collapse_target_stage(minimal:bool)->u8{
+    if minimal{0}else{1}
+}
+
+pub(super) fn initial_hover_stage(preview:bool,minimal:bool)->u8{
+    if preview{2}else if minimal{0}else{1}
+}
+
+pub(super) fn toast_target_reminder(kind:ToastKind)->Option<usize>{
+    match kind{
+        ToastKind::Focus=>Some(0),
+        ToastKind::Water=>Some(1),
+        ToastKind::Stretch=>Some(2),
+        ToastKind::Prayer=>Some(3),
+        ToastKind::Generic=>None,
+    }
+}
+
+pub(super) fn should_revert_stage1(tab: &str, reminder_index: usize, lyric_mode: bool) -> bool {
+    if lyric_mode {
+        return false;
+    }
+    if tab == "Kalender" {
+        return false;
+    }
+    if tab == "Reminder" && reminder_index == 0 {
+        return false;
+    }
+    true
+}
 
 // An isolated, timed test window. It has no modules, storage, audio or network access.
 unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
@@ -1587,6 +1733,36 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
     use super::*;
     #[test]fn quit_is_posted_even_during_reentrant_destroy(){APP.with(|cell|{let _borrow=cell.borrow_mut();unsafe{wndproc(HWND::default(),WM_DESTROY,WPARAM(0),LPARAM(0));let mut msg=MSG::default();assert!(PeekMessageW(&mut msg,None,WM_QUIT,WM_QUIT,PM_REMOVE).as_bool());assert_eq!(msg.message,WM_QUIT);}});}
     #[test]fn fullscreen_requires_whole_monitor_not_work_area(){let monitor=RECT{left:0,top:0,right:1920,bottom:1080};assert!(covers_monitor(monitor,monitor));assert!(!covers_monitor(RECT{bottom:1040,..monitor},monitor));assert!(!covers_monitor(RECT{left:1,..monitor},monitor));assert!(covers_monitor(RECT{left:-8,top:-8,right:1928,bottom:1088},monitor));}
+    #[test]fn notice_classification_prioritizes_focus_completion_over_stretch(){let msg="🎯 Sesi fokus selesai! Waktunya istirahat & peregangan.";let kind=classify_notice_kind(msg);assert_eq!(kind,ToastKind::Focus);}
+    #[test]fn lyric_display_index_respects_manual_scroll_offset(){let lines=vec![crate::lyrics::LyricLine{at:1.0,text:"A".into()},crate::lyrics::LyricLine{at:5.0,text:"B".into()},crate::lyrics::LyricLine{at:10.0,text:"C".into()}];assert_eq!(lyric_display_index(&lines,6.0,0),1);assert_eq!(lyric_display_index(&lines,6.0,3),2);}
+    #[test]fn minimal_mode_collapses_directly_to_stage0(){assert_eq!(collapse_target_stage(true),0);assert_eq!(collapse_target_stage(false),1);assert_eq!(initial_hover_stage(false,true),0);assert_eq!(initial_hover_stage(false,false),1);}
+    #[test]fn toast_click_maps_all_reminder_kinds_including_prayer(){assert_eq!(toast_target_reminder(ToastKind::Focus),Some(0));assert_eq!(toast_target_reminder(ToastKind::Water),Some(1));assert_eq!(toast_target_reminder(ToastKind::Stretch),Some(2));assert_eq!(toast_target_reminder(ToastKind::Prayer),Some(3));assert_eq!(toast_target_reminder(ToastKind::Generic),None);}
+    #[test]fn prayer_summary_formats_zero_lead_as_tepat_waktu(){assert_eq!(settings::prayer_lead_summary("Jakarta",0),"Jakarta · Tepat waktu");assert_eq!(settings::prayer_lead_summary("Bandung",5),"Bandung · 5 menit sebelumnya");}
+    #[test]
+    fn stage1_temporary_behavior_expires_cleanly() {
+        let until = Some(Instant::now() + Duration::from_millis(50));
+        assert!(until.is_some_and(|u| Instant::now() < u));
+
+        let expired = Some(Instant::now() - Duration::from_millis(10));
+        assert!(!expired.is_some_and(|u| Instant::now() < u));
+    }
+    #[test]
+    fn stage1_revert_rules_match_specification() {
+        // Focus mode (reminder_index == 0) never reverts to calendar
+        assert!(!should_revert_stage1("Reminder", 0, false));
+        // Lyrics mode never reverts to calendar
+        assert!(!should_revert_stage1("Musik", 0, true));
+        // Calendar mode is already calendar
+        assert!(!should_revert_stage1("Kalender", 0, false));
+
+        // Sub-modes of reminder (water, stretch, sholat) revert to calendar
+        assert!(should_revert_stage1("Reminder", 1, false));
+        assert!(should_revert_stage1("Reminder", 2, false));
+        assert!(should_revert_stage1("Reminder", 3, false));
+
+        // Clipboard, Catatan, Musik without lyrics revert to calendar
+        assert!(should_revert_stage1("Clipboard", 0, false));
+        assert!(should_revert_stage1("Catatan", 0, false));
+        assert!(should_revert_stage1("Musik", 0, false));
+    }
 }
-
-

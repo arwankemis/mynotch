@@ -1,4 +1,4 @@
-param([string]$Version='0.0.1-alpha')
+param([string]$Version='0.0.1.1-alpha')
 $ErrorActionPreference='Stop'
 $packageRoot=Split-Path -Parent $PSScriptRoot
 foreach($required in @('mynotch.exe','libunwind.dll','README.md','THIRD_PARTY_NOTICES.md','CHANGELOG.md','docs','licenses')){if(-not(Test-Path -LiteralPath (Join-Path $packageRoot $required))){throw "Berkas paket belum lengkap: $required"}}

@@ -24,7 +24,7 @@ use windows::Win32::Graphics::DirectWrite::*;
 pub use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 
 pub const BG:u32=0x000000;
-pub const CARD:u32=0x12141a;
+#[allow(dead_code)] pub const CARD:u32=0x12141a;
 pub const TEXT:u32=0xffffff;
 pub const MUTED:u32=0x9ca3af;
 pub const ACCENT:u32=0x2fd4a3;
@@ -220,7 +220,7 @@ impl Painter {
             }
         }
     }}
-    pub unsafe fn fill_notch_radial_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,cx:f32,cy:f32,rx:f32,ry:f32,rgb:u32,inner_alpha:f32,outer_alpha:f32){unsafe{
+    #[allow(dead_code)] pub unsafe fn fill_notch_radial_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,cx:f32,cy:f32,rx:f32,ry:f32,rgb:u32,inner_alpha:f32,outer_alpha:f32){unsafe{
         if let Ok(path)=self.d2d.CreatePathGeometry(){
             let closed=if let Ok(sink)=path.Open(){
                 sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
@@ -556,7 +556,7 @@ impl Painter {
         let key=((size*10.)as u32,bold);
         if !self.formats.contains_key(&key){
             if let Ok(format)=self.factory.CreateTextFormat(w!("Segoe UI"),None,if bold{DWRITE_FONT_WEIGHT_SEMI_BOLD}else{DWRITE_FONT_WEIGHT_NORMAL},DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,w!("id-ID")){
-                let _=format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);self.formats.insert(key,format);
+                let _=format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);self.formats.insert(key,format);
             }
         }
         let text_utf16:Vec<u16>=text.encode_utf16().collect();
@@ -582,7 +582,7 @@ impl Painter {
         let key=((size*10.)as u32,bold);
         if !self.formats.contains_key(&key){
             if let Ok(format)=self.factory.CreateTextFormat(w!("Segoe UI"),None,if bold{DWRITE_FONT_WEIGHT_SEMI_BOLD}else{DWRITE_FONT_WEIGHT_NORMAL},DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,w!("id-ID")){
-                let _=format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                let _=format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
                 self.formats.insert(key,format);
             }
         }
@@ -610,13 +610,13 @@ impl Painter {
         let key=((size*10.)as u32,bold);
         if !self.formats.contains_key(&key){
             if let Ok(format)=self.factory.CreateTextFormat(w!("Segoe UI"),None,if bold{DWRITE_FONT_WEIGHT_SEMI_BOLD}else{DWRITE_FONT_WEIGHT_NORMAL},DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,w!("id-ID")){
-                let _=format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                let _=format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
                 self.formats.insert(key,format);
             }
         }
         let text_utf16:Vec<u16>=text.encode_utf16().collect();
         if let Some(format)=self.formats.get(&key){
-            if let Ok(layout)=self.factory.CreateTextLayout(&text_utf16,format,1000.,100.){
+            if let Ok(layout)=self.factory.CreateTextLayout(&text_utf16,format,1000.,100.){let _=layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
                 let mut metrics=DWRITE_TEXT_METRICS::default();
                 if layout.GetMetrics(&mut metrics).is_ok(){
                     return metrics.widthIncludingTrailingWhitespace;
@@ -633,7 +633,7 @@ impl Painter {
     /// A layer that cannot be created degrades to fully opaque drawing, never to a crash.
     /// Scales everything drawn afterwards around a logical-space point. Used so the panel
     /// grows out of the pill instead of being revealed from its top-left corner.
-    pub unsafe fn scale_about(&self,scale:f32,center_x:f32,center_y:f32){unsafe{
+    #[allow(dead_code)] pub unsafe fn scale_about(&self,scale:f32,center_x:f32,center_y:f32){unsafe{
         let matrix=windows_numerics::Matrix3x2{M11:scale,M12:0.,M21:0.,M22:scale,M31:center_x*(1.-scale),M32:center_y*(1.-scale)};
         self.context.SetTransform(&matrix);
     }}
@@ -645,7 +645,7 @@ impl Painter {
     pub unsafe fn translate(&self,x:f32,y:f32){unsafe{
         self.context.SetTransform(&windows_numerics::Matrix3x2{M11:1.,M12:0.,M21:0.,M22:1.,M31:x,M32:y});
     }}
-    pub unsafe fn translate_relative(&self,dx:f32,dy:f32){unsafe{
+    #[allow(dead_code)] pub unsafe fn translate_relative(&self,dx:f32,dy:f32){unsafe{
         let mut matrix=windows_numerics::Matrix3x2::default();
         self.context.GetTransform(&mut matrix);
         matrix.M31+=dx;
@@ -717,6 +717,8 @@ impl Painter {
             "reset"|"undo"=>{line(&[(4.,9.),(8.,5.),(14.,5.),(19.,9.),(20.,14.),(17.,19.),(11.,20.),(7.,18.)]);line(&[(4.,3.),(4.,9.),(10.,9.)]);},
             "check"=>line(&[(5.,12.),(10.,17.),(20.,7.)]),
             "pin"=>{line(&[(8.,3.),(18.,3.),(16.,8.),(19.,13.),(7.,13.),(10.,8.),(8.,3.)]);line(&[(13.,13.),(10.,21.)]);},
+            "edit"=>{line(&[(18.,2.),(22.,6.),(7.,21.),(3.,21.),(3.,17.),(18.,2.)]);line(&[(15.,5.),(19.,9.)]);},
+            "package"=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
             "settings"=>{circle(12.,12.,4.);circle(12.,12.,9.);for i in 0..8{let a=i as f32*std::f32::consts::TAU/8.;line(&[(12.+a.cos()*8.,12.+a.sin()*8.),(12.+a.cos()*11.,12.+a.sin()*11.)]);}},
             _=>{}
         }

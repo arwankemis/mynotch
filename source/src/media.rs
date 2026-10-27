@@ -68,25 +68,25 @@ impl MediaService {
             result => {
                 cancelled.store(true, Ordering::Release); let _ = commands.send(Command::Stop);
                 if worker.is_finished() { let _ = worker.join(); }
-                Err(match result { Ok(Err(e)) => e, _ => "Windows media initialization timed out".into() })
+                Err(match result { Ok(Err(e)) => e, _ => "Inisialisasi sesi media Windows melewati batas waktu.".into() })
             }
         }
     }
-    pub fn snapshot(&self) -> MediaSnapshot { self.shared.lock().map(|s| s.snapshot()).unwrap_or_default() }
+    #[allow(dead_code)] pub fn snapshot(&self) -> MediaSnapshot { self.shared.lock().map(|s| s.snapshot()).unwrap_or_default() }
     /// Cheap timeline getter for lyric/UI ticks; avoids cloning artwork on every frame.
     pub fn position_seconds(&self) -> f64 { self.shared.lock().map(|s| s.position()).unwrap_or_default() }
     pub fn toggle_playback(&self) -> Result<(), String> { self.command(Command::Toggle) }
     pub fn next(&self) -> Result<(), String> { self.command(Command::Next) }
     pub fn previous(&self) -> Result<(), String> { self.command(Command::Previous) }
     pub fn seek(&self, pos_seconds: f64) -> Result<(), String> {
-        if !pos_seconds.is_finite() || pos_seconds < 0.0 { return Err("Invalid playback position".into()); }
+        if !pos_seconds.is_finite() || pos_seconds < 0.0 { return Err("Posisi pemutaran tidak valid.".into()); }
         self.command(|reply| Command::Seek(pos_seconds, reply))
     }
     fn command(&self, make: impl FnOnce(Sender<Result<(), String>>) -> Command) -> Result<(), String> {
-        if self.cancelled.load(Ordering::Acquire) { return Err("Media is stopped".into()); }
+        if self.cancelled.load(Ordering::Acquire) { return Err("Layanan media sedang dihentikan.".into()); }
         let (tx, rx) = mpsc::channel();
-        self.commands.send(make(tx)).map_err(|_| "Media worker unavailable".to_string())?;
-        rx.recv_timeout(Duration::from_millis(750)).map_err(|_| "Media command result unknown (timeout); do not retry automatically".to_string())?
+        self.commands.send(make(tx)).map_err(|_| "Worker media sedang tidak tersedia.".to_string())?;
+        rx.recv_timeout(Duration::from_millis(750)).map_err(|_| "Perintah media melewati batas waktu.".to_string())?
     }
     pub fn stop(&mut self) {
         self.cancelled.store(true, Ordering::Release); let _ = self.commands.send(Command::Stop);
@@ -214,8 +214,8 @@ fn media_worker(rx: Receiver<Command>, commands: Sender<Command>, tx: Sender<Med
     Ok(())
 }
 fn with_session(selected: &Option<SessionEvents>, action: impl FnOnce(&GlobalSystemMediaTransportControlsSession) -> windows::core::Result<bool>) -> Result<(), String> {
-    let session = selected.as_ref().ok_or_else(|| "No Windows media session".to_string())?;
-    match action(&session.session) { Ok(true) => Ok(()), Ok(false) => Err("Media player rejected/does not support this command".into()), Err(e) => Err(e.to_string()) }
+    let session = selected.as_ref().ok_or_else(|| "Belum ada sesi pemutar media Windows yang aktif.".to_string())?;
+    match action(&session.session) { Ok(true) => Ok(()), Ok(false) => Err("Pemutar media tidak mendukung perintah ini.".into()), Err(e) => Err(e.to_string()) }
 }
 fn read_state(session: &GlobalSystemMediaTransportControlsSession, metadata: bool, shared: &Mutex<State>) -> windows::core::Result<State> {
     let playback = session.GetPlaybackInfo()?; let timeline = session.GetTimelineProperties()?;

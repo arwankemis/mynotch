@@ -1,5 +1,5 @@
 use super::*;
-use render::{TEXT,MUTED,ACCENT,CARD,DIM};
+use render::MUTED;
 use chrono::Datelike;
 
 impl Shell {
@@ -9,7 +9,11 @@ impl Shell {
             "Kalender"=>self.calendar_page(p),
             "Reminder"=>self.reminder_page(p),
             "Clipboard"=>self.clipboard_page(p),
-            _=>{p.text("Pilih modul melalui Pengaturan.",24.,140.,620.,80.,18.,MUTED,false);}
+            "Catatan"=>self.notes_page(p),
+            _=>{
+                let msg = crate::i18n::t("shell.select_module", &self.settings.language);
+                p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
+            }
         }
     }}
 
@@ -22,6 +26,7 @@ impl Shell {
     }
 
     fn draw_mockup_player(&mut self,p:&mut Painter){unsafe{
+        let lang = self.settings.language.clone();
         // 1. Track Content (Artwork 60x60 from y=44 to y=104)
         let art_x=24.;let art_y=44.;let art_size=60.;
         let key=if self.cover.is_some(){self.cover_key}else{0};
@@ -31,18 +36,21 @@ impl Shell {
         }
 
         // Title (bold 14px white)
-        let title=if self.track.title.is_empty(){"Belum ada musik"}else{&self.track.title};
+        let default_title = crate::i18n::t("music.no_music", &lang);
+        let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
         p.text_ellipsis(title,94.,44.,self.width-138.,18.,14.,0xffffff,true);
 
         // Media source app icon (Spotify, etc) placed at far right of title row
         p.icon_media_app(self.width-28.,52.,&self.track.source_app,self.track.playing);
 
         // Artist (12px #9ea3a8)
-        let artist=if self.track.artist.is_empty(){"Tidak ada artis".into()}else{self.track.artist.clone()};
+        let default_artist = crate::i18n::t("music.no_artist", &lang);
+        let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
         p.text_ellipsis(&artist,94.,65.,self.width-138.,16.,12.,0x9ea3a8,false);
 
         // Album (11px #6e7681)
-        let album=if self.track.album.is_empty(){"Single / Album tidak diketahui".into()}else{self.track.album.clone()};
+        let default_album = crate::i18n::t("music.no_album", &lang);
+        let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
         p.text_ellipsis(&album,94.,85.,self.width-138.,16.,11.,0x6e7681,false);
 
         // 2. Scrubber (At y=114, below the artwork)
@@ -53,11 +61,19 @@ impl Shell {
         let scrub_y=114.;
         p.text(&time_label(position),24.,scrub_y,34.,16.,11.,0xffffff,false);
         let track_x=62.;let track_w=self.width-124.;
-        p.fill(track_x,scrub_y+6.,track_w,4.,2.,0x3e4948);
+        let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+18.);
+        p.fill(track_x,scrub_y+6.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
         if ratio>0.{
             p.fill(track_x,scrub_y+6.,track_w*ratio as f32,4.,2.,0xffffff);
         }
-        if self.track.can_seek{
+        if scrub_hov{
+            let thumb_x=(track_x+track_w*ratio as f32-5.).clamp(track_x-2.,track_x+track_w-8.);
+            p.fill(thumb_x,scrub_y+3.,10.,10.,5.,0xffffff);
+        }
+        if self.focused.as_ref()==Some(&Action::SeekPointer){
+            p.stroke(track_x-2.,scrub_y+2.,track_w+4.,12.,4.,0xd5d5dc,1.);
+        }
+        if self.track.can_seek&&self.hit_enabled{
             self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,18.),action:Action::SeekPointer});
         }
         let remaining=(duration-position).max(0.);
@@ -66,16 +82,17 @@ impl Shell {
         // 3. Transport Controls (At y=138, below scrubber)
         let trans_y=138.;
         // Lyrics toggle quote button at x=24
-        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,self.lyric_mode);
+        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,self.lyric_mode,true);
         // Centered Previous / Play / Next
         let mid_x=self.width/2.;
-        self.transport_btn(p,"⏮",mid_x-52.,trans_y,28.,28.,Action::Previous,false);
+        self.transport_btn(p,"⏮",mid_x-52.,trans_y,28.,28.,Action::Previous,false,self.track.can_previous);
         let play_symbol=if self.track.playing{"⏸"}else{"▶"};
-        self.transport_btn(p,play_symbol,mid_x-14.,trans_y,28.,28.,Action::Play,false);
-        self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false);
+        self.transport_btn(p,play_symbol,mid_x-14.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
+        self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
     }}
 
     fn draw_mockup_lyrics(&mut self,p:&mut Painter){unsafe{
+        let lang = self.settings.language.clone();
         let w=self.width;
         // Left Half: Track Content (x = 24..230)
         let art_x=24.;let art_y=44.;let art_size=60.;
@@ -85,14 +102,17 @@ impl Shell {
             p.text("♫",art_x+19.,art_y+13.,24.,30.,22.,0x8dc4dd,false);
         }
 
-        let title=if self.track.title.is_empty(){"Belum ada musik"}else{&self.track.title};
+        let default_title = crate::i18n::t("music.no_music", &lang);
+        let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
         p.text_ellipsis(title,94.,44.,120.,18.,14.,0xffffff,true);
         p.icon_media_app(224.,52.,&self.track.source_app,self.track.playing);
 
-        let artist=if self.track.artist.is_empty(){"Tidak ada artis".into()}else{self.track.artist.clone()};
+        let default_artist = crate::i18n::t("music.no_artist", &lang);
+        let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
         p.text_ellipsis(&artist,94.,65.,126.,16.,12.,0x9ea3a8,false);
 
-        let album=if self.track.album.is_empty(){"Single / Album".into()}else{self.track.album.clone()};
+        let default_album = crate::i18n::t("music.single_album", &lang);
+        let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
         p.text_ellipsis(&album,94.,85.,126.,16.,11.,0x6e7681,false);
 
         // Scrubber
@@ -103,11 +123,19 @@ impl Shell {
         let scrub_y=114.;
         p.text(&time_label(position),24.,scrub_y,30.,14.,10.,0xffffff,false);
         let track_x=58.;let track_w=128.;
-        p.fill(track_x,scrub_y+5.,track_w,4.,2.,0x3e4948);
+        let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+16.);
+        p.fill(track_x,scrub_y+5.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
         if ratio>0.{
             p.fill(track_x,scrub_y+5.,track_w*ratio as f32,4.,2.,0xffffff);
         }
-        if self.track.can_seek{
+        if scrub_hov{
+            let thumb_x=(track_x+track_w*ratio as f32-4.5).clamp(track_x-2.,track_x+track_w-7.);
+            p.fill(thumb_x,scrub_y+2.5,9.,9.,4.5,0xffffff);
+        }
+        if self.focused.as_ref()==Some(&Action::SeekPointer){
+            p.stroke(track_x-2.,scrub_y+1.,track_w+4.,12.,4.,0xd5d5dc,1.);
+        }
+        if self.track.can_seek&&self.hit_enabled{
             self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,16.),action:Action::SeekPointer});
         }
         let remaining=(duration-position).max(0.);
@@ -115,11 +143,11 @@ impl Shell {
 
         // Transport Controls
         let trans_y=138.;
-        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,true);
-        self.transport_btn(p,"⏮",64.,trans_y,28.,28.,Action::Previous,false);
+        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,true,true);
+        self.transport_btn(p,"⏮",64.,trans_y,28.,28.,Action::Previous,false,self.track.can_previous);
         let play_symbol=if self.track.playing{"⏸"}else{"▶"};
-        self.transport_btn(p,play_symbol,104.,trans_y,28.,28.,Action::Play,false);
-        self.transport_btn(p,"⏭",144.,trans_y,28.,28.,Action::Next,false);
+        self.transport_btn(p,play_symbol,104.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
+        self.transport_btn(p,"⏭",144.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
 
         // Subtle vertical divider (x = 238)
         p.fill_alpha(238.,44.,1.,122.,0.,0xffffff,0.12);
@@ -127,27 +155,58 @@ impl Shell {
         // Right Half: Synchronized Lyrics (x = 252..w-20)
         let lyrics_x=252.;
         let lyrics_w=w-272.;
+        let no_lyrics_msg = crate::i18n::t("music.no_lyrics", &lang);
+        let loading_lyrics_msg = crate::i18n::t("music.loading_lyrics", &lang);
         if self.lyrics.is_empty(){
-            p.text(if self.plain_lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini."}else{&self.plain_lyrics},lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+            if self.jobs.contains_key("Musik"){
+                p.text(loading_lyrics_msg,lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
+            }else if !self.plain_lyrics.is_empty()&&self.plain_lyrics!="Lirik belum tersedia untuk lagu ini."&&self.plain_lyrics!="Lyrics not available for this song."{
+                let plain_lines:Vec<&str>=self.plain_lyrics.lines().filter(|l|!l.trim().is_empty()).collect();
+                if plain_lines.is_empty(){
+                    p.text(&self.plain_lyrics,lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+                }else{
+                    let start=self.lyric_offset.saturating_sub(1).min(plain_lines.len().saturating_sub(1));
+                    for (i,line) in plain_lines.iter().skip(start).take(4).enumerate(){
+                        let ly=46.+i as f32*26.;
+                        let col=if i==0{0xe2e8f0}else{0x8a9291};
+                        p.text_ellipsis(line,lyrics_x,ly,lyrics_w,22.,12.5,col,i==0);
+                    }
+                    if self.lyric_offset>0{
+                        self.button_h(p,"Reset",w-64.,144.,46.,20.,Action::LyricsFollow,false);
+                    }
+                }
+            }else{
+                p.text(no_lyrics_msg,lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+            }
         }else{
-            let active=crate::lyrics::active_line(&self.lyrics,position);
-            let curr=active.unwrap_or(0);
+            let curr=super::lyric_display_index(&self.lyrics,position,self.lyric_offset);
             if curr>0{
                 let prev_line=&self.lyrics[curr-1];
-                p.text_ellipsis(&prev_line.text,lyrics_x,46.,lyrics_w,24.,13.,0x72777b,false);
-                if self.track.can_seek{
+                let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=lyrics_x&&px<=lyrics_x+lyrics_w&&py>=44.&&py<=70.);
+                p.text_ellipsis(&prev_line.text,lyrics_x,46.,lyrics_w,24.,13.,if hov{0xb0b5ba}else{0x72777b},false);
+                if self.focused.as_ref()==Some(&Action::Lyric(curr-1)){
+                    p.stroke(lyrics_x-2.,44.,lyrics_w+4.,24.,4.,0xd5d5dc,1.);
+                }
+                if self.track.can_seek&&self.hit_enabled{
                     self.hits.push(Hit{rect:render::rect(lyrics_x,44.,lyrics_w,26.),action:Action::Lyric(curr-1)});
                 }
             }
             let active_line=&self.lyrics[curr];
             p.text_ellipsis(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true);
-            if self.track.can_seek{
+            if self.focused.as_ref()==Some(&Action::Lyric(curr)){
+                p.stroke(lyrics_x-2.,72.,lyrics_w+4.,28.,4.,0xd5d5dc,1.);
+            }
+            if self.track.can_seek&&self.hit_enabled{
                 self.hits.push(Hit{rect:render::rect(lyrics_x,72.,lyrics_w,30.),action:Action::Lyric(curr)});
             }
             if curr+1<self.lyrics.len(){
                 let next_line=&self.lyrics[curr+1];
-                p.text_ellipsis(&next_line.text,lyrics_x,104.,lyrics_w,24.,13.,0x72777b,false);
-                if self.track.can_seek{
+                let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=lyrics_x&&px<=lyrics_x+lyrics_w&&py>=102.&&py<=128.);
+                p.text_ellipsis(&next_line.text,lyrics_x,104.,lyrics_w,24.,13.,if hov{0xb0b5ba}else{0x72777b},false);
+                if self.focused.as_ref()==Some(&Action::Lyric(curr+1)){
+                    p.stroke(lyrics_x-2.,102.,lyrics_w+4.,24.,4.,0xd5d5dc,1.);
+                }
+                if self.track.can_seek&&self.hit_enabled{
                     self.hits.push(Hit{rect:render::rect(lyrics_x,102.,lyrics_w,26.),action:Action::Lyric(curr+1)});
                 }
             }
@@ -155,22 +214,27 @@ impl Shell {
                 let next2_line=&self.lyrics[curr+2];
                 p.text_ellipsis(&next2_line.text,lyrics_x,130.,lyrics_w,20.,11.,0x555555,false);
             }
+            if self.lyric_offset>0{
+                let follow_lbl = crate::i18n::t("music.follow", &lang);
+                self.button_h(p,follow_lbl,w-64.,144.,46.,20.,Action::LyricsFollow,true);
+            }
         }
     }}
 
 
     fn calendar_page(&mut self,p:&mut Painter){unsafe{
         if self.width<320.{return}
-        const MONTHS:[&str;12]=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+        let lang = self.settings.language.clone();
+        let month_name_str = crate::i18n::full_month_name(self.month, &lang);
 
         // LEFT COLUMN (Month Grid): x = 24..296
-        p.text(&format!("{} {}",MONTHS[(self.month-1)as usize],self.year),24.,44.,160.,20.,15.,0xffffff,true);
+        p.text(&format!("{} {}",month_name_str,self.year),24.,44.,160.,20.,15.,0xffffff,true);
         self.button_icon(p,"‹",236.,42.,24.,24.,Action::Month(-1));
         self.button_icon(p,"›",266.,42.,24.,24.,Action::Month(1));
 
         let col_w=272./7.;
-        let day_names=["Sen","Sel","Rab","Kam","Jum","Sab","Min"];
-        for(i,name)in day_names.iter().enumerate(){
+        for i in 0..7 {
+            let name = crate::i18n::short_day_name(i, &lang);
             let color=if i==6{0xff7d7d}else{0x707077};
             p.text_centered(name,24.+i as f32*col_w,70.,col_w,16.,10.,color,1.0,false);
         }
@@ -199,11 +263,16 @@ impl Shell {
             let is_leave=holiday.is_some_and(|h|h.collective_leave);
             let is_selected=self.day==day;
             let is_today=date==today;
+            let day_act=Action::Day(day);
+            let day_hov=self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+col_w&&py>=y-2.&&py<=y+22.);
 
             if is_selected{
                 p.fill(x+4.,y-1.,col_w-8.,22.,6.,0xeaeaea);
                 p.text_centered(&day.to_string(),x+4.,y-1.,col_w-8.,22.,12.,0x090909,1.0,true);
             }else{
+                if day_hov{
+                    p.fill_alpha(x+4.,y-1.,col_w-8.,22.,6.,0xffffff,0.08);
+                }
                 if is_today{
                     p.stroke(x+4.,y-1.,col_w-8.,22.,6.,0x555555,1.0);
                 }
@@ -211,10 +280,15 @@ impl Shell {
                     0xff7d7d
                 }else if is_leave&&self.settings.collective_leave{
                     0xffa46b
+                }else if day_hov{
+                    0xffffff
                 }else{
                     0xc6c6cc
                 };
                 p.text_centered(&day.to_string(),x+4.,y-1.,col_w-8.,22.,12.,color,1.0,is_today);
+            }
+            if self.focused.as_ref()==Some(&day_act){
+                p.stroke(x+3.,y-2.,col_w-6.,24.,7.,0xd5d5dc,1.0);
             }
 
             // Dot indicators below date
@@ -224,89 +298,125 @@ impl Shell {
                 p.fill(x+col_w*0.5-1.5,y+18.,3.,3.,1.5,0xffa46b);
             }
 
-            self.hits.push(Hit{rect:render::rect(x,y-2.,col_w,24.),action:Action::Day(day)});
+            if self.hit_enabled{
+                self.hits.push(Hit{rect:render::rect(x,y-2.,col_w,24.),action:day_act});
+            }
         }
 
         // Calendar legend at y = 232
         p.fill(24.,236.,4.,4.,2.,0xff7d7d);
-        p.text("Libur nasional",32.,232.,80.,14.,10.,0x77777c,false);
+        p.text(crate::i18n::t("calendar.national_holiday", &lang),32.,232.,80.,14.,10.,0x77777c,false);
         p.fill(124.,236.,4.,4.,2.,0xffa46b);
-        p.text("Cuti bersama",132.,232.,80.,14.,10.,0x77777c,false);
+        p.text(crate::i18n::t("calendar.collective_leave", &lang),132.,232.,80.,14.,10.,0x77777c,false);
 
         // Footer at y = 254
-        p.text(if self.year==2026{"Indonesia · data libur 2026"}else{"Data libur tahun ini belum tersedia"},24.,254.,184.,16.,9.,0x909096,false);
-        let leave_label=if self.settings.collective_leave{"☑ Cuti bersama"}else{"☐ Cuti bersama"};
-        p.text(leave_label,200.,254.,90.,16.,9.,0x9c9ca3,false);
-        self.hits.push(Hit{rect:render::rect(198.,250.,94.,20.),action:Action::CalendarLeaveToggle});
+        let footer_text = if self.year==2026 {
+            crate::i18n::t("calendar.footer_2026", &lang)
+        } else {
+            crate::i18n::t("calendar.footer_other", &lang)
+        };
+        p.text(footer_text,24.,254.,184.,16.,9.,0x909096,false);
+        let leave_label = if self.settings.collective_leave {
+            crate::i18n::t("calendar.leave_toggle_on", &lang)
+        } else {
+            crate::i18n::t("calendar.leave_toggle_off", &lang)
+        };
+        let leave_hov=self.pointer.is_some_and(|(px,py)|px>=198.&&px<=292.&&py>=250.&&py<=270.);
+        p.text(leave_label,200.,254.,90.,16.,9.,if leave_hov{0xefeff3}else{0x9c9ca3},false);
+        if self.focused.as_ref()==Some(&Action::CalendarLeaveToggle){
+            p.stroke(198.,250.,94.,20.,4.,0xd5d5dc,1.0);
+        }
+        if self.hit_enabled{
+            self.hits.push(Hit{rect:render::rect(198.,250.,94.,20.),action:Action::CalendarLeaveToggle});
+        }
 
         // Vertical Divider line between columns (x = 308)
         p.fill_alpha(308.,44.,1.,226.,0.,0xffffff,0.08);
 
         // RIGHT COLUMN (Date Detail & Upcoming Holiday): x = 324..516
         if let Some(date)=NaiveDate::from_ymd_opt(self.year,self.month,self.day){
-            const DAYS:[&str;7]=["SENIN","SELASA","RABU","KAMIS","JUMAT","SABTU","MINGGU"];
             let day_idx=date.weekday().num_days_from_monday() as usize;
-            p.text(DAYS[day_idx],324.,44.,160.,14.,10.,0xffa46b,true);
+            p.text(crate::i18n::day_name_upper(day_idx, &lang),324.,44.,160.,14.,10.,0xffa46b,true);
             p.text(&self.day.to_string(),324.,56.,80.,46.,42.,0xffffff,true);
-            p.text(&format!("{} {}",MONTHS[(self.month-1)as usize],self.year),324.,104.,160.,16.,11.,0x9b9ba0,false);
+            p.text(&format!("{} {}",month_name_str,self.year),324.,104.,160.,16.,11.,0x9b9ba0,false);
 
             let holiday=self.holidays.iter().find(|h|h.date==date);
-            let status_text=if self.year!=2026{"Data libur belum tersedia".into()}else if let Some(h)=holiday{
-                if h.collective_leave{format!("Cuti bersama · {}",h.name)}else{format!("Libur nasional · {}",h.name)}
+            let status_text=if self.year!=2026{
+                crate::i18n::t("calendar.no_holiday_data", &lang).to_string()
+            }else if let Some(h)=holiday{
+                let prefix = if h.collective_leave {
+                    crate::i18n::t("calendar.collective_leave", &lang)
+                } else {
+                    crate::i18n::t("calendar.national_holiday", &lang)
+                };
+                format!("{} · {}", prefix, h.name)
             }else if date==today{
-                "Hari ini · bukan hari libur".into()
+                crate::i18n::t("calendar.today_regular", &lang).to_string()
             }else if date.weekday().num_days_from_monday()==6{
-                "Minggu · akhir pekan".into()
+                crate::i18n::t("calendar.sunday_weekend", &lang).to_string()
             }else{
-                "Bukan hari libur nasional".into()
+                crate::i18n::t("calendar.regular_day", &lang).to_string()
             };
             let status_color=if holiday.is_some_and(|h|!h.collective_leave){0xff7d7d}else if holiday.is_some(){0xffa46b}else{0x88888e};
             p.text_ellipsis(&status_text,324.,122.,188.,18.,11.,status_color,false);
 
             // Button "Hari ini"
-            p.fill(324.,146.,64.,24.,6.,0x222222);
-            p.stroke(324.,146.,64.,24.,6.,0x333333,1.0);
-            p.text_centered("Hari ini",324.,146.,64.,24.,10.,0xdddddd,1.0,false);
-            self.hits.push(Hit{rect:render::rect(324.,146.,64.,24.),action:Action::CalendarToday});
+            let today_hov=self.pointer.is_some_and(|(px,py)|px>=324.&&px<=388.&&py>=146.&&py<=170.);
+            p.fill(324.,146.,64.,24.,6.,if today_hov{0x2b2b30}else{0x222222});
+            p.stroke(324.,146.,64.,24.,6.,if today_hov{0x484852}else{0x333333},1.0);
+            p.text_centered(crate::i18n::t("calendar.today_btn", &lang),324.,146.,64.,24.,10.,if today_hov{0xffffff}else{0xdddddd},1.0,false);
+            if self.focused.as_ref()==Some(&Action::CalendarToday){
+                p.stroke(322.,144.,68.,28.,8.,0xd5d5dc,1.0);
+            }
+            if self.hit_enabled{
+                self.hits.push(Hit{rect:render::rect(324.,146.,64.,24.),action:Action::CalendarToday});
+            }
 
             // Divider
             p.fill_alpha(324.,178.,188.,1.,0.,0xffffff,0.08);
 
             // Upcoming Holiday
-            p.text("LIBUR NASIONAL BERIKUTNYA",324.,186.,188.,14.,8.,0x88888e,true);
+            p.text(crate::i18n::t("calendar.next_holiday", &lang),324.,186.,188.,14.,8.,0x88888e,true);
 
             // Find next upcoming holiday strictly >= today
             let next_h=self.holidays.iter().filter(|h|h.date>=today&&!h.collective_leave).min_by_key(|h|h.date);
             if let Some(nh)=next_h{
                 let card_y=202.;
-                p.fill(324.,card_y,188.,42.,8.,0x181517);
-                p.stroke(324.,card_y,188.,42.,8.,0x292022,1.0);
+                let jump_act=Action::JumpToDate(nh.date.year(),nh.date.month(),nh.date.day());
+                let card_hov=self.pointer.is_some_and(|(px,py)|px>=324.&&px<=512.&&py>=card_y&&py<=card_y+42.);
+                p.fill(324.,card_y,188.,42.,8.,if card_hov{0x221c1f}else{0x181517});
+                p.stroke(324.,card_y,188.,42.,8.,if card_hov{0x3d2e31}else{0x292022},1.0);
 
                 // Date badge
                 p.fill(328.,card_y+3.,34.,36.,6.,0x2f171a);
                 p.text_centered(&nh.date.day().to_string(),328.,card_y+4.,34.,18.,14.,0xff9a9a,1.0,true);
-                let short_m=match nh.date.month(){1=>"JAN",2=>"FEB",3=>"MAR",4=>"APR",5=>"MEI",6=>"JUN",7=>"JUL",8=>"AGS",9=>"SEP",10=>"OKT",11=>"NOV",_=>"DES"};
-                p.text_centered(short_m,328.,card_y+20.,34.,14.,8.,0xff9a9a,0.9,true);
+                let short_m = crate::i18n::month_name(nh.date.month(), &lang).to_uppercase();
+                p.text_centered(&short_m,328.,card_y+20.,34.,14.,8.,0xff9a9a,0.9,true);
 
                 // Title & Date description
                 p.text_ellipsis(&nh.name,368.,card_y+6.,124.,16.,11.,0xffffff,true);
-                let day_name_id=match nh.date.weekday().num_days_from_monday(){0=>"Senin",1=>"Selasa",2=>"Rabu",3=>"Kamis",4=>"Jumat",5=>"Sabtu",_=>"Minggu"};
-                let date_desc=format!("{}, {} {}",day_name_id,nh.date.day(),MONTHS[(nh.date.month()-1)as usize]);
+                let day_name_str = crate::i18n::day_name_capitalized(nh.date.weekday().num_days_from_monday() as usize, &lang);
+                let holiday_month_str = crate::i18n::full_month_name(nh.date.month(), &lang);
+                let date_desc=format!("{}, {} {}",day_name_str,nh.date.day(),holiday_month_str);
                 p.text_ellipsis(&date_desc,368.,card_y+22.,124.,14.,10.,0x83838a,false);
 
                 // Arrow icon
-                p.text("↗",494.,card_y+12.,14.,16.,12.,0x888888,false);
+                p.text("↗",494.,card_y+12.,14.,16.,12.,if card_hov{0xffffff}else{0x888888},false);
 
-                // Clicking holiday card jumps to that date!
-                let delta=nh.date.year()*12+nh.date.month() as i32 - (self.year*12+self.month as i32);
-                self.hits.push(Hit{rect:render::rect(324.,card_y,188.,42.),action:Action::Month(delta)});
+                if self.focused.as_ref()==Some(&jump_act){
+                    p.stroke(322.,card_y-2.,192.,46.,10.,0xd5d5dc,1.0);
+                }
+
+                // Clicking holiday card jumps directly to that exact holiday date!
+                if self.hit_enabled{
+                    self.hits.push(Hit{rect:render::rect(324.,card_y,188.,42.),action:jump_act});
+                }
             }
         }
     }}
 
-
-    fn music_control(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,width:f32,action:Action,primary:bool,enabled:bool){if enabled{self.button(p,label,x,y,width,action,primary);}else{unsafe{p.fill(x,y,width,32.,9.,0x202c34);p.text(label,x+10.,y+6.,width-16.,22.,12.,0x637481,false);}}}
     fn clipboard_page(&mut self, p: &mut Painter) { unsafe {
+        let lang = self.settings.language.clone();
         let w = self.width;
         let total_clips = self.state.clipboard_history.len();
 
@@ -320,17 +430,17 @@ impl Shell {
         let left_x = 22.;
         let left_w = 212.;
 
-        p.text("RIWAYAT KLIP", left_x, 46., 90., 18., 10.5, 0x8a9291, true);
+        p.text(crate::i18n::t("clipboard.title", &lang), left_x, 46., 90., 18., 10.5, 0x8a9291, true);
         let badge_text = format!("({})", total_clips);
         p.text(&badge_text, left_x + 84., 46., 40., 18., 10.0, 0x38bdf8, true);
 
         if total_clips > 0 {
-            self.button_h(p, "Bersihkan", left_x + 140., 44., 72., 20., Action::ClearClips, false);
+            self.button_h(p, crate::i18n::t("clipboard.clear", &lang), left_x + 140., 44., 72., 20., Action::ClearClips, false);
         }
 
         if total_clips == 0 {
-            p.text("Belum ada riwayat.", left_x, 80., left_w, 20., 11., 0x6e7681, false);
-            p.text("Teks yang Anda salin (Ctrl+C) di Windows akan otomatis tersimpan dan muncul di sini.", left_x, 104., left_w, 54., 10., 0x475569, false);
+            p.text(crate::i18n::t("clipboard.no_history", &lang), left_x, 80., left_w, 20., 11., 0x6e7681, false);
+            p.text(crate::i18n::t("clipboard.hint", &lang), left_x, 104., left_w, 54., 10., 0x475569, false);
         } else {
             let start = self.clip_offset.min(total_clips.saturating_sub(1));
             let visible_items: Vec<(usize, crate::clipboard::ClipItem)> = self.state.clipboard_history
@@ -344,6 +454,7 @@ impl Shell {
             for (i, (abs_idx, item)) in visible_items.into_iter().enumerate() {
                 let item_y = 68. + i as f32 * 36.;
                 let is_selected = abs_idx == self.selected_clip;
+                let item_act = Action::SelectClip(abs_idx);
                 let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
 
                 if is_selected {
@@ -356,18 +467,23 @@ impl Shell {
                     p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.03);
                     p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.05);
                 }
+                if self.focused.as_ref() == Some(&item_act) {
+                    p.stroke(left_x - 1., item_y - 1., left_w + 2., 34., 7., 0xd5d5dc, 1.0);
+                }
 
                 let first_line = item.text.lines().next().unwrap_or("").trim();
-                let display_title = if first_line.is_empty() { "(Teks kosong)" } else { first_line };
+                let empty_txt = crate::i18n::t("clipboard.empty_text", &lang);
+                let display_title = if first_line.is_empty() { empty_txt } else { first_line };
                 p.text_ellipsis(display_title, left_x + 8., item_y + 3., left_w - 16., 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
 
-                let meta = format!("{} · {} kar · {} baris", item.time, item.chars, item.lines);
-                p.text(&meta, left_x + 8., item_y + 17., left_w - 16., 12., 9.0, if is_selected { 0x93c5fd } else { 0x64748b }, false);
+                let meta = crate::i18n::clip_meta(item.chars, item.lines, &lang);
+                let full_meta = format!("{} · {}", item.time, meta);
+                p.text(&full_meta, left_x + 8., item_y + 17., left_w - 16., 12., 9.0, if is_selected { 0x93c5fd } else { 0x64748b }, false);
 
                 if self.hit_enabled {
                     self.hits.push(Hit {
                         rect: render::rect(left_x, item_y, left_w, 32.),
-                        action: Action::SelectClip(abs_idx),
+                        action: item_act,
                     });
                 }
             }
@@ -393,16 +509,17 @@ impl Shell {
 
         if total_clips == 0 {
             p.text_centered("📋", right_x, 82., right_w, 28., 24., 0x38bdf8, 0.8, false);
-            p.text_centered("Riwayat Clipboard Kosong", right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
-            p.text_centered("Salin teks (Ctrl+C) di mana saja,", right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
-            p.text_centered("Notch akan otomatis menyimpannya di sini.", right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("clipboard.empty_title", &lang), right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
+            p.text_centered(crate::i18n::t("clipboard.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("clipboard.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
         } else if let Some(item) = self.state.clipboard_history.get(self.selected_clip).cloned() {
-            let title = format!("Klip #{} · {}", self.selected_clip + 1, item.time);
+            let clip_word = crate::i18n::t("clipboard.clip", &lang);
+            let title = format!("{} #{} · {}", clip_word, self.selected_clip + 1, item.time);
             p.text(&title, right_x, 46., 120., 18., 11.5, 0x38bdf8, true);
 
             let btn_w = 98.;
             let btn_x = w - 20. - btn_w;
-            self.button_h(p, "📋 Salin Ulang", btn_x, 43., btn_w, 22., Action::CopyClip(self.selected_clip), true);
+            self.button_h(p, crate::i18n::t("clipboard.recopy", &lang), btn_x, 43., btn_w, 22., Action::CopyClip(self.selected_clip), true);
 
             let box_y = 69.;
             let box_h = 138.;
@@ -420,14 +537,141 @@ impl Shell {
 
             if all_lines.len() > max_lines {
                 let more_y = box_y + 8. + max_lines as f32 * 18.;
-                let more_text = format!("+ {} baris lainnya...", all_lines.len() - max_lines);
+                let more_text = crate::i18n::more_lines(all_lines.len() - max_lines, &lang);
                 p.text(&more_text, right_x + 10., more_y, right_w - 20., 14., 9.5, 0x64748b, false);
             }
 
             let footer_y = 212.;
-            let count_meta = format!("{} karakter · {} baris", item.chars, item.lines);
+            let count_meta = crate::i18n::clip_meta(item.chars, item.lines, &lang);
             p.text(&count_meta, right_x + 4., footer_y + 2., 140., 14., 9.5, 0x64748b, false);
-            self.button_h(p, "🗑 Hapus", w - 20. - 68., footer_y, 68., 20., Action::DeleteClip(item.id), false);
+            self.button_h(p, crate::i18n::t("clipboard.delete", &lang), w - 20. - 68., footer_y, 68., 20., Action::DeleteClip(item.id), false);
+        }
+    }}
+
+    fn notes_page(&mut self, p: &mut Painter) { unsafe {
+        let lang = self.settings.language.clone();
+        let w = self.width;
+        let left_x = 22.;
+        let left_w = 212.;
+
+        // ==========================================
+        // LEFT PANE: Sticky Notes List
+        // ==========================================
+        p.text(crate::i18n::t("notes.header", &lang), left_x, 46., 120., 18., 11.5, 0xfef08a, true);
+        self.button_h(p, crate::i18n::t("notes.new_btn", &lang), left_x + 140., 43., 72., 20., Action::NoteAdd, true);
+
+        let total_notes = self.state.sticky_notes.len();
+        if total_notes == 0 {
+            p.text(crate::i18n::t("notes.no_notes", &lang), left_x + 6., 86., left_w - 12., 18., 11.0, 0x94a3b8, false);
+            p.text(crate::i18n::t("notes.empty_hint", &lang), left_x + 6., 108., left_w - 12., 36., 9.5, 0x64748b, false);
+        } else {
+            let max_visible = 5;
+            if self.state.selected_note >= total_notes {
+                self.state.selected_note = total_notes.saturating_sub(1);
+            }
+            let start = if total_notes <= max_visible {
+                0
+            } else {
+                self.state.selected_note.saturating_sub(max_visible - 1).min(total_notes - max_visible)
+            };
+            let end = (start + max_visible).min(total_notes);
+
+            for (slot, idx) in (start..end).enumerate() {
+                let note = &self.state.sticky_notes[idx];
+                let item_y = 68. + slot as f32 * 35.;
+                let is_selected = idx == self.state.selected_note;
+                let item_act = Action::NoteSelect(idx);
+                let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
+
+                if is_selected {
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xfef08a, 0.16);
+                    p.stroke(left_x, item_y, left_w, 32., 6., 0xfef08a, 1.2);
+                } else if item_hovered {
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.08);
+                    p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.12);
+                } else {
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.03);
+                    p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.05);
+                }
+
+                if self.focused.as_ref() == Some(&item_act) {
+                    p.stroke(left_x - 1., item_y - 1., left_w + 2., 34., 7., 0xd5d5dc, 1.0);
+                }
+
+                let (note_col, _) = crate::sticky::NOTE_COLORS.get(note.color_idx as usize).copied().unwrap_or((0xfef08a, "Kuning"));
+                p.fill(left_x + 6., item_y + 8., 4., 16., 2., note_col);
+
+                let default_note_title = crate::i18n::t("notes.default_title", &lang);
+                let title = if note.title.trim().is_empty() || (note.title == "Catatan Baru" && lang == "en") {
+                    default_note_title
+                } else {
+                    &note.title
+                };
+                p.text_ellipsis(title, left_x + 16., item_y + 3., left_w - 24., 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
+
+                let empty_snippet = crate::i18n::t("notes.empty_snippet", &lang);
+                let snippet = if note.content.trim().is_empty() { empty_snippet } else { note.content.lines().next().unwrap_or("").trim() };
+                p.text_ellipsis(snippet, left_x + 16., item_y + 17., left_w - 24., 12., 9.0, if is_selected { 0xfef08a } else { 0x64748b }, false);
+
+                if self.hit_enabled {
+                    self.hits.push(Hit {
+                        rect: render::rect(left_x, item_y, left_w, 32.),
+                        action: item_act,
+                    });
+                }
+            }
+
+            let info = crate::i18n::notes_count(total_notes, &lang);
+            p.text(&info, left_x + 4., 248., 120., 16., 9.5, 0x64748b, false);
+        }
+
+        // ==========================================
+        // SUBTLE VERTICAL DIVIDER (x = 244)
+        // ==========================================
+        p.fill_alpha(244., 44., 1., 220., 0., 0xffffff, 0.10);
+
+        // ==========================================
+        // RIGHT PANE: Editor & Controls (x = 256..w-20)
+        // ==========================================
+        let right_x = 256.;
+        let right_w = w - right_x - 20.;
+
+        if total_notes == 0 {
+            p.text_centered("✎", right_x, 82., right_w, 28., 24., 0xfef08a, 0.8, false);
+            p.text_centered("Quick Sticky Notes", right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
+            p.text_centered(crate::i18n::t("notes.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("notes.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+        } else if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
+            self.button_h(p, ".md", 402., 44., 34., 22., Action::NoteExport(0), false);
+            self.button_h(p, ".txt", 440., 44., 34., 22., Action::NoteExport(1), false);
+            self.button_h(p, "⧉ Pop", 478., 44., 42., 22., Action::NotePopout, true);
+
+            let (bg_col, _) = crate::sticky::NOTE_COLORS.get(note.color_idx as usize).copied().unwrap_or((0xfef08a, "Kuning"));
+            p.fill_alpha(right_x - 2., 72., right_w + 4., 144., 6., bg_col, 0.12);
+            p.stroke(right_x - 2., 72., right_w + 4., 144., 6., bg_col, 0.6);
+
+            for (ci, &(c_val, _)) in crate::sticky::NOTE_COLORS.iter().enumerate() {
+                let cx = right_x + ci as f32 * 20.;
+                let cy = 224.;
+                let is_color_sel = note.color_idx == ci as u8;
+                p.fill(cx, cy, 14., 14., 3., c_val);
+                if is_color_sel {
+                    p.stroke(cx - 2., cy - 2., 18., 18., 4., 0xffffff, 1.5);
+                }
+                if self.hit_enabled {
+                    self.hits.push(Hit {
+                        rect: render::rect(cx - 2., cy - 2., 18., 18.),
+                        action: Action::NoteColor(ci as u8),
+                    });
+                }
+            }
+
+            self.button_h(p, crate::i18n::t("notes.copy", &lang), 368., 221., 64., 20., Action::NoteExport(2), false);
+            self.button_h(p, crate::i18n::t("notes.delete", &lang), 436., 221., 64., 20., Action::NoteDelete(note.id), false);
+
+            let updated_lbl = crate::i18n::t("notes.updated", &lang);
+            let update_lbl = format!("{}: {}", updated_lbl, note.updated_at);
+            p.text(&update_lbl, right_x, 248., 240., 14., 9.0, 0x64748b, false);
         }
     }}
 
@@ -436,7 +680,12 @@ impl Shell {
         match action{
             Action::TogglePin=>{
                 self.pinned=!self.pinned;
-                self.notice(if self.pinned{"Notch disematkan (pin)"}else{"Sematan notch dilepas"});
+                let notice_text = if self.pinned {
+                    crate::i18n::t("notice.pinned", &self.settings.language)
+                } else {
+                    crate::i18n::t("notice.unpinned", &self.settings.language)
+                };
+                self.notice(notice_text);
                 self.invalidate();
             },
             Action::ToStage0=>{
@@ -445,13 +694,19 @@ impl Shell {
             },
             Action::ToStage1=>{
                 self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
-                self.set_hover_stage(1);
+                self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
             },
             Action::CalendarToday=>{
                 let now=Local::now().date_naive();
                 self.year=now.year();
                 self.month=now.month();
                 self.day=now.day();
+                self.load_holidays();
+            },
+            Action::JumpToDate(y,m,d)=>{
+                self.year=y;
+                self.month=m;
+                self.day=d;
                 self.load_holidays();
             },
             Action::CalendarLeaveToggle=>{
@@ -461,7 +716,7 @@ impl Shell {
                 self.reminder_menu=None;
                 if self.tab == tab && self.hover_stage >= 2 {
                     self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
-                    self.set_hover_stage(1);
+                    self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
                     return;
                 }
                 if self.tab!=tab{
@@ -472,6 +727,9 @@ impl Shell {
                     self.lyric_mode=false;
                     self.tab_fade=Some((self.tab.clone(),Instant::now(),dir));
                     self.tab=tab;
+                    if self.hover_stage == 1 && self.should_revert_stage1_to_calendar() {
+                        self.trigger_stage1_temporary(5);
+                    }
                     self.settings_open=false;
                     let from=self.geometry();
                     self.morph=Some(ui::Morph::new(from,self.target_geometry()));
@@ -487,7 +745,30 @@ impl Shell {
                 self.save();
                 self.invalidate();
             },
-            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(4);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
+            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(5);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
+            Action::InstallMod(id)=>{
+                let root=self.store.root.clone();
+                match crate::mods::install_mod(&root,&mut self.settings,&id){
+                    Ok(())=>{self.save();self.notice(crate::i18n::t("notice.mod_installed", &self.settings.language));}
+                    Err(e)=>self.notice(format!("Gagal memasang mod: {e}")),
+                }
+                self.invalidate();
+            },
+            Action::UninstallMod(id)=>{
+                let root=self.store.root.clone();
+                match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
+                    Ok(())=>{
+                        if self.tab=="Catatan"{
+                            self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
+                            self.make_inputs();
+                        }
+                        self.save();
+                        self.notice(crate::i18n::t("notice.mod_uninstalled", &self.settings.language));
+                    }
+                    Err(e)=>self.notice(format!("Gagal melepas mod: {e}")),
+                }
+                self.invalidate();
+            },
             Action::SettingsMenu(key,x,y,w)=>self.open_settings_menu(key,x,y,w),
             Action::SettingsValue(key,value)=>{self.apply_settings_value(key,value);self.settings_popup=None;},
             Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}let from=self.geometry();self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.start_morph_timer();self.make_inputs();self.update_window_region();},
@@ -495,8 +776,10 @@ impl Shell {
             Action::Settings=>{self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.settings_open=true;self.set_expanded(true);let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
             Action::Back=>{self.settings_popup=None;self.focused=None;self.settings_open=false;let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
             Action::Close=>self.set_expanded(false),Action::Exit=>unsafe{let _=DestroyWindow(self.hwnd);},
-            Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},Action::Minimal=>{self.settings.minimal=!self.settings.minimal;self.sync_visualizer();self.save();},Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(165,255)as u8;self.save();self.invalidate();},
-            Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice("Sisakan setidaknya satu tab aktif.");return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
+            Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},
+            Action::Minimal=>{self.settings.minimal=!self.settings.minimal;if !self.expanded{self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));}self.sync_visualizer();self.save();},
+            Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(165,255)as u8;self.save();self.invalidate();},
+            Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
                 "auto_break"=>self.settings.auto_break=!self.settings.auto_break,
                 "focus_enabled"=>{self.settings.focus_enabled=!self.settings.focus_enabled;if !self.settings.focus_enabled{self.focus.pause();}},
@@ -507,11 +790,22 @@ impl Shell {
                 "fullscreen"=>{self.settings.hide_fullscreen=!self.settings.hide_fullscreen;self.save();},
                 "glow"=>{self.settings.glow=!self.settings.glow;self.save();},
                 "visualizer"=>{self.settings.visualizer=!self.settings.visualizer;self.sync_visualizer();self.save();},
+                "romanize_lyrics"=>{
+                    self.settings.romanize_lyrics=!self.settings.romanize_lyrics;
+                    self.lyrics_key.clear();
+                    if !self.track.title.is_empty(){
+                        let key=serde_json::to_string(&(&self.track.title,&self.track.artist,&self.track.album,self.track.duration_seconds.round()as u64)).unwrap_or_default();
+                        self.lyrics_key=key.clone();
+                        let api=self.online.clone();
+                        let track=self.track.clone();
+                        self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));
+                    }
+                    self.save();
+                },
                 "water_reminder"=>{self.settings.water_reminder=!self.settings.water_reminder;self.last_water=Instant::now();self.save();},
                 "move_reminder"=>{self.settings.move_reminder=!self.settings.move_reminder;self.last_move=Instant::now();self.save();},
                 "lyrics_below"=>self.settings.lyrics_below=!self.settings.lyrics_below,
                 "save_schedule"=>{let schedule=self.input(100);let times:Vec<String>=schedule.split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();if times.iter().any(|t|chrono::NaiveTime::parse_from_str(t,"%H:%M").is_err()){self.notice("Format jadwal harus HH:MM, misalnya 09:00,14:00.");return}self.settings.focus_schedule=times;let tab=self.input(101);if MODULES.contains(&tab.trim()){self.settings.default_tab=tab.trim().into();}self.notice("Jadwal dan tab default disimpan.");},
-                
                 _=>{}
             },
             Action::SeekPointer=>{},Action::LyricsFollow=>self.lyric_offset=0,
@@ -519,7 +813,7 @@ impl Shell {
             Action::ReminderSelect(i)=>self.select_reminder(i),
             Action::ReminderStep(d)=>self.select_reminder((self.reminder_index as i32+d).clamp(0,3)as usize),
             Action::StretchLength(d)=>self.settings.stretch_seconds=(self.settings.stretch_seconds as i32+d).clamp(15,300)as u32,
-            Action::StretchDone=>{self.stretch_deadline=None;self.last_move=Instant::now();self.notice("Peregangan tercatat. Sampai jeda berikutnya.");},
+            Action::StretchDone=>{self.stretch_deadline=None;self.last_move=Instant::now();self.notice(crate::i18n::t("notice.stretch_done", &self.settings.language));},
             Action::StretchStart=>{if self.stretch_deadline.is_some(){self.stretch_deadline=None;self.last_move=Instant::now();}else{self.stretch_deadline=Some(Instant::now()+Duration::from_secs(self.settings.stretch_seconds as u64));}},
             Action::PrayerRefresh=>self.refresh_prayers(true),
             Action::ReminderMenu(key)=>{self.open_reminder_menu(key);},
@@ -539,7 +833,11 @@ impl Shell {
                 if let Some(toast)=&mut self.toast{
                     toast.confirmed=true;
                     toast.confirmed_at=Some(Instant::now());
-                    toast.message=format!("Hebat! +{}ml tercatat 🎉",serving);
+                    toast.message = if self.settings.language == "en" {
+                        format!("Awesome! +{}ml logged 🎉", serving)
+                    } else {
+                        format!("Hebat! +{}ml tercatat 🎉", serving)
+                    };
                 }
                 unsafe{
                     let _=MessageBeep(0x00000040);
@@ -559,9 +857,9 @@ impl Shell {
                         self.state.clipboard_history.insert(0,item);
                         self.selected_clip=0;
                         self.save();
-                        self.notice("Teks disalin ke clipboard! 📋");
+                        self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
                     }else{
-                        self.notice("Gagal menyalin ke clipboard.");
+                        self.notice(crate::i18n::t("notice.clip_failed", &self.settings.language));
                     }
                 }
             },
@@ -578,7 +876,7 @@ impl Shell {
                 self.selected_clip=0;
                 self.clip_offset=0;
                 self.save();
-                self.notice("Riwayat clipboard dibersihkan.");
+                self.notice(crate::i18n::t("notice.clips_cleared", &self.settings.language));
                 self.invalidate();
             },
             Action::ClipPage(delta)=>{
@@ -605,17 +903,182 @@ impl Shell {
                 2=>{self.settings.minimal=false;self.set_expanded(false);},
                 3=>{self.settings.minimal=false;self.set_expanded(false);},
                 4=>{self.settings.minimal=true;self.set_expanded(false);},
-                
                 _=>{}
+            },
+            Action::NoteAdd => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        if !title.is_empty() || !content.is_empty() {
+                            note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                            note.content = content;
+                            note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                        }
+                    }
+                    self.clear_input(50);
+                    self.clear_input(51);
+                    self.drafts.remove(&("Catatan".into(), 50));
+                    self.drafts.remove(&("Catatan".into(), 51));
+                }
+                if self.state.sticky_notes.len() >= 20 {
+                    self.notice(crate::i18n::t("notice.notes_max", &self.settings.language));
+                } else {
+                    let new_id = self.state.sticky_notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+                    let now_str = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    let new_note = crate::sticky::StickyNote {
+                        id: new_id,
+                        title: "Catatan Baru".into(),
+                        content: String::new(),
+                        color_idx: 0,
+                        updated_at: now_str,
+                    };
+                    self.state.sticky_notes.insert(0, new_note);
+                    self.state.selected_note = 0;
+                    self.trigger_stage1_temporary(5);
+                    self.save();
+                    self.make_inputs();
+                    self.notice(crate::i18n::t("notice.note_added", &self.settings.language));
+                    self.invalidate();
+                }
+            },
+            Action::NoteSelect(idx) => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                        note.content = content;
+                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    }
+                    self.clear_input(50);
+                    self.clear_input(51);
+                    self.drafts.remove(&("Catatan".into(), 50));
+                    self.drafts.remove(&("Catatan".into(), 51));
+                }
+                if idx < self.state.sticky_notes.len() {
+                    self.state.selected_note = idx;
+                    self.trigger_stage1_temporary(5);
+                    self.save();
+                    self.make_inputs();
+                    self.invalidate();
+                }
+            },
+            Action::NoteDelete(id) => {
+                if self.input_page == "Catatan" {
+                    self.clear_input(50);
+                    self.clear_input(51);
+                    self.drafts.remove(&("Catatan".into(), 50));
+                    self.drafts.remove(&("Catatan".into(), 51));
+                }
+                self.state.sticky_notes.retain(|n| n.id != id);
+                if self.state.selected_note >= self.state.sticky_notes.len() {
+                    self.state.selected_note = self.state.sticky_notes.len().saturating_sub(1);
+                }
+                self.save();
+                self.make_inputs();
+                self.notice(crate::i18n::t("notice.note_deleted", &self.settings.language));
+                self.invalidate();
+            },
+            Action::NoteColor(ci) => {
+                if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                    note.color_idx = ci % 5;
+                    self.save();
+                    self.invalidate();
+                }
+            },
+            Action::NoteExport(kind) => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                        note.content = content;
+                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    }
+                    self.save();
+                }
+                if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
+                    match kind {
+                        0 => {
+                            let export_dir = std::path::PathBuf::from("data").join("exports");
+                            match crate::sticky::export_note_to_markdown(&export_dir, &note) {
+                                Ok(path) => {
+                                    unsafe {
+                                        use windows::Win32::UI::Shell::ShellExecuteW;
+                                        use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                        let path_w: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+                                        ShellExecuteW(None, windows::core::w!("open"), PCWSTR(path_w.as_ptr()), None, None, SW_SHOW);
+                                    }
+                                    self.notice(crate::i18n::t("notice.export_md", &self.settings.language));
+                                }
+                                Err(e) => self.notice(format!("Gagal export: {}", e)),
+                            }
+                        }
+                        1 => {
+                            let export_dir = std::path::PathBuf::from("data").join("exports");
+                            match crate::sticky::export_note_to_txt(&export_dir, &note) {
+                                Ok(path) => {
+                                    unsafe {
+                                        use windows::Win32::UI::Shell::ShellExecuteW;
+                                        use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                        let path_w: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+                                        ShellExecuteW(None, windows::core::w!("open"), PCWSTR(path_w.as_ptr()), None, None, SW_SHOW);
+                                    }
+                                    self.notice(crate::i18n::t("notice.export_txt", &self.settings.language));
+                                }
+                                Err(e) => self.notice(format!("Gagal export: {}", e)),
+                            }
+                        }
+                        2 => {
+                            let full_text = format!("{}\r\n\r\n{}", note.title, note.content);
+                            if crate::clipboard::set_clipboard_text(&full_text) {
+                                self.last_clipboard_seq = crate::clipboard::get_sequence_number();
+                                self.notice(crate::i18n::t("notice.note_copied", &self.settings.language));
+                            } else {
+                                self.notice(crate::i18n::t("notice.clip_failed", &self.settings.language));
+                            }
+                        }
+                        3 => {
+                            unsafe {
+                                use windows::Win32::UI::Shell::ShellExecuteW;
+                                use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                let protocol = windows::core::w!("ms-stickynotes:");
+                                let res = ShellExecuteW(None, windows::core::w!("open"), protocol, None, None, SW_SHOW);
+                                if res.0 as isize > 32 {
+                                    self.notice("Membuka Sticky Notes Windows... 📌");
+                                } else {
+                                    self.notice("Sticky Notes Windows tidak ditemukan.");
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            },
+            Action::NotePopout => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                        note.content = content;
+                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    }
+                    self.save();
+                }
+                if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
+                    super::spawn_floating_sticky_note(&note.title, &note.content, note.color_idx);
+                    self.notice(crate::i18n::t("notice.note_popout", &self.settings.language));
+                }
             },
         }
         for module in MODULES{if !self.settings.enabled(module){self.cancel_job(module);}}
         if !self.settings.enabled("Musik"){self.cancel_job("Artwork");self.cover=None;self.cover_key=0;self.lyrics_key.clear();self.plain_lyrics.clear();self.lyric_offset=0;}
         self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.clock_timer();self.invalidate();
     }
-    fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice("Buka pemutar musik terlebih dahulu.");}}
+    fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
     fn refresh_weather(&mut self){if !self.settings.enabled("Cuaca")||!self.settings.weather_configured{self.notice("Simpan lokasi cuaca terlebih dahulu.");return}if self.jobs.contains_key("Cuaca"){return}let api=self.online.clone();let(lat,lon)=(self.settings.latitude,self.settings.longitude);self.job("Cuaca",move||Event::Weather(api.weather(lat,lon)));}
     fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice("Feed kalender dilepas.");return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
     fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice("Simpan API key dan model terlebih dahulu.");return}};if self.settings.ai_model.trim().is_empty(){self.notice("Nama model belum diisi.");return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
 }
-

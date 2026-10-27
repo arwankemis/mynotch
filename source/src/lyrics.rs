@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use windows::core::{w, s};
+use windows::Win32::Foundation::FreeLibrary;
 use windows::Win32::System::LibraryLoader::{LoadLibraryW, GetProcAddress};
 
 type FnOpen = unsafe extern "C" fn(*const u16, i32, i32, *const u16, i32, *mut [i32; 8], *mut i32) -> *mut std::ffi::c_void;
@@ -37,9 +38,14 @@ fn with_icu<F: FnOnce(&IcuTrans) -> R, R>(f: F) -> Option<R> {
 fn init_icu() -> Option<IcuTrans> {
     unsafe {
         let h_icu = LoadLibraryW(w!("icu.dll")).ok()?;
-        let p_open = GetProcAddress(h_icu, s!("utrans_openU"))?;
-        let p_close = GetProcAddress(h_icu, s!("utrans_close"))?;
-        let p_trans = GetProcAddress(h_icu, s!("utrans_transUChars"))?;
+        let (Some(p_open), Some(p_close), Some(p_trans)) = (
+            GetProcAddress(h_icu, s!("utrans_openU")),
+            GetProcAddress(h_icu, s!("utrans_close")),
+            GetProcAddress(h_icu, s!("utrans_transUChars")),
+        ) else {
+            let _ = FreeLibrary(h_icu);
+            return None;
+        };
 
         let fn_open: FnOpen = std::mem::transmute(p_open);
         let fn_close: FnClose = std::mem::transmute(p_close);
@@ -50,6 +56,7 @@ fn init_icu() -> Option<IcuTrans> {
         let mut status = 0i32;
         let trans = fn_open(id.as_ptr(), id.len() as i32, 0, std::ptr::null(), 0, &mut parse_err, &mut status);
         if trans.is_null() || status > 0 {
+            let _ = FreeLibrary(h_icu);
             return None;
         }
         Some(IcuTrans { trans, fn_close, fn_trans })
@@ -108,6 +115,19 @@ const JP_PAIRS: &[(&str, &str)] = &[
     ("永遠", " eien "),
     ("約束", " yakusoku "),
     ("時間", " jikan "),
+    ("時計", " tokei "),
+    ("時代", " jidai "),
+    ("人生", " jinsei "),
+    ("人間", " ningen "),
+    ("今年", " kotoshi "),
+    ("今夜", " konya "),
+    ("今朝", " kesa "),
+    ("花火", " hanabi "),
+    ("星空", " hoshizora "),
+    ("太陽", " taiyou "),
+    ("音楽", " ongaku "),
+    ("歌声", " utagoe "),
+    ("手紙", " tegami "),
     ("言葉", " kotoba "),
     ("笑顔", " egao "),
     ("運命", " unmei "),
@@ -231,6 +251,7 @@ const JP_PAIRS: &[(&str, &str)] = &[
     ("からは", " kara wa "),
 ];
 
+#[allow(dead_code)]
 pub fn romanize_line(line: &str) -> String {
     romanize_line_hint(line, has_japanese_kana(line))
 }
@@ -308,9 +329,19 @@ pub struct LyricLine {
 }
 
 /// LRC timestamps in seconds. The optional offset tag adds milliseconds to every timestamp.
+#[allow(dead_code)]
 pub fn parse_lrc(content: &str) -> Vec<LyricLine> { parse_lrc_checked(content).unwrap_or_default() }
 
+pub fn parse_lrc_with_options(content: &str, romanize: bool) -> Vec<LyricLine> {
+    parse_lrc_checked_with_options(content, romanize).unwrap_or_default()
+}
+
+#[allow(dead_code)]
 pub fn parse_lrc_checked(content: &str) -> Result<Vec<LyricLine>, String> {
+    parse_lrc_checked_with_options(content, true)
+}
+
+pub fn parse_lrc_checked_with_options(content: &str, romanize: bool) -> Result<Vec<LyricLine>, String> {
     if content.len() > 1024 * 1024 { return Err("Lirik melebihi batas ukuran.".into()); }
     let mut offset = 0_f64;
     for line in content.lines() {
@@ -335,7 +366,9 @@ pub fn parse_lrc_checked(content: &str) -> Result<Vec<LyricLine>, String> {
     }
     // Stable sort preserves the file's order when several lines share a timestamp.
     output.sort_by(|a, b| a.at.total_cmp(&b.at));
-    romanize_lines(&mut output);
+    if romanize {
+        romanize_lines(&mut output);
+    }
     Ok(output)
 }
 
@@ -390,5 +423,11 @@ mod tests {
         ];
         romanize_lines(&mut lines);
         assert_eq!(lines[1].text, "eien");
+    }
+    #[test]
+    fn japanese_compounds_and_optional_romanization() {
+        assert_eq!(romanize_line_hint("人生と時計と今年", true), "jinsei to tokei to kotoshi");
+        let raw = parse_lrc_with_options("[00:01.00]君の名は", false);
+        assert_eq!(raw[0].text, "君の名は");
     }
 }

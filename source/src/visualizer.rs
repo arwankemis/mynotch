@@ -21,14 +21,16 @@ static CAPTURE_OWNED: AtomicBool = AtomicBool::new(false);
 struct CaptureLease;
 impl Drop for CaptureLease { fn drop(&mut self) { CAPTURE_OWNED.store(false, Ordering::Release); } }
 
+#[allow(dead_code)]
 pub struct Visualizer {
     cancelled: Arc<AtomicBool>, error: Arc<Mutex<Option<String>>>,
     worker: Option<JoinHandle<()>>, done: Receiver<()>,
 }
+#[allow(dead_code)]
 impl Visualizer {
     pub fn start(tx: Sender<Vec<f32>>) -> Result<Self, String> {
         if CAPTURE_OWNED.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
-            return Err("Previous audio capture is still stopping".into());
+            return Err("Tangkap audio sebelumnya masih berhenti.".into());
         }
         let cancelled = Arc::new(AtomicBool::new(false)); let cancel = cancelled.clone();
         let error = Arc::new(Mutex::new(None)); let errors = error.clone();
@@ -49,7 +51,7 @@ impl Visualizer {
             result => {
                 cancelled.store(true, Ordering::Release);
                 if worker.is_finished() { let _ = worker.join(); }
-                Err(match result { Ok(Err(e)) => e, _ => "WASAPI initialization timed out".into() })
+                Err(match result { Ok(Err(e)) => e, _ => "Inisialisasi audio WASAPI melewati batas waktu.".into() })
             }
         }
     }
