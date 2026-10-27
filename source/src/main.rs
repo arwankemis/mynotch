@@ -13,6 +13,7 @@ mod render;
 mod shadow;
 mod artwork;
 mod clipboard;
+mod mods;
 mod shell;
 
 fn main(){
