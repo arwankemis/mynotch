@@ -15,6 +15,7 @@ mod artwork;
 mod clipboard;
 mod mods;
 mod sticky;
+pub mod i18n;
 mod shell;
 
 fn main(){

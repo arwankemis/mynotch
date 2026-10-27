@@ -1159,9 +1159,17 @@ impl Shell {
                         }else{
                             p.fill_notch(width,height,ear,radius,body_bg);
                         }
+                        if self.settings.frosted_glass && (self.settings.opacity < 255 || self.hover_stage >= 1) {
+                            p.stroke_notch_alpha(width, height, ear, radius, 0xffffff, 0.14, 1.);
+                            p.fill_notch_gradient(width, (height * 0.4).max(8.), ear, radius, 0xffffff, 0x000000, 0.04, 0.0);
+                        }
                     }else{
                         p.fill(0.,0.,width,height,radius,body_bg);
                         if !self.settings_open&&self.settings.glow&&self.expanded&&self.tab=="Musik"{let accent=self.cover.as_ref().map(|c|c.accent).unwrap_or(0x1a2e3b);p.fill_alpha(0.,0.,width,height,radius,accent,0.12);}
+                        if self.settings.frosted_glass && (self.settings.opacity < 255 || self.hover_stage >= 1) {
+                            p.stroke_alpha(0.5, 0.5, width - 1., height - 1., radius - 0.5, 0xffffff, 0.16, 1.);
+                            p.fill_alpha(1., 1., width - 2., (height * 0.4).max(6.), radius - 1., 0xffffff, 0.035);
+                        }
                     }
                     self.draw(&mut p);
                     p.reset_transform();
@@ -1312,14 +1320,15 @@ impl Shell {
             }else{
                 p.clip(0.,0.,self.width,self.height);
 
+                let lang = &self.settings.language;
                 let (icon, info_text) = if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
-                    let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
+                    let month_str = crate::i18n::month_name(self.month, lang);
                     let cal = format!("{} {}", self.day, month_str);
                     ("calendar", cal)
                 } else {
                     match self.tab.as_str() {
                         "Kalender" => {
-                            let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
+                            let month_str = crate::i18n::month_name(self.month, lang);
                             let cal = format!("{} {}", self.day, month_str);
                             ("calendar", cal)
                         }
@@ -1332,8 +1341,8 @@ impl Shell {
                             let foc = time_label(rem);
                             let text = match self.reminder_index{
                                 1=>format!("{} ml",self.state.water.iter().filter(|d|d.date==Local::now().date_naive()).map(|d|d.ml).sum::<u32>()),
-                                2=>self.stretch_deadline.map(|d|format!("{}s",d.saturating_duration_since(Instant::now()).as_secs())).unwrap_or("Peregangan".into()),
-                                3=>"Sholat".into(),
+                                2=>self.stretch_deadline.map(|d|format!("{}s",d.saturating_duration_since(Instant::now()).as_secs())).unwrap_or_else(||crate::i18n::t("stage1.stretch", lang).into()),
+                                3=>crate::i18n::t("stage1.prayer", lang).into(),
                                 _=>foc
                             };
                             let ic = ["timer","droplet","person","moon"][self.reminder_index];
@@ -1341,7 +1350,7 @@ impl Shell {
                         }
                         "Musik" => {
                             let text = if self.track.title.is_empty() {
-                                "Musik".into()
+                                crate::i18n::t("stage1.no_music", lang).into()
                             } else if self.track.artist.is_empty() {
                                 self.track.title.clone()
                             } else {
@@ -1351,21 +1360,23 @@ impl Shell {
                         }
                         "Clipboard" => {
                             let count = self.state.clipboard_history.len();
+                            let clips_label = crate::i18n::t("stage1.clips", lang);
                             let text = if let Some(first) = self.state.clipboard_history.first() {
                                 let snip: String = first.text.lines().next().unwrap_or("").trim().chars().take(14).collect();
-                                if snip.is_empty() { format!("{} klip", count) } else { format!("{snip}…") }
+                                if snip.is_empty() { format!("{} {}", count, clips_label) } else { format!("{snip}…") }
                             } else {
-                                "0 klip".to_string()
+                                format!("0 {}", clips_label)
                             };
                             ("clipboard", text)
                         }
                         "Catatan" => {
                             let count = self.state.sticky_notes.len();
+                            let notes_label = crate::i18n::t("stage1.notes", lang);
                             let text = if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
                                 let snip: String = note.title.chars().take(14).collect();
-                                if snip.is_empty() { format!("{} catatan", count) } else { snip }
+                                if snip.is_empty() { format!("{} {}", count, notes_label) } else { snip }
                             } else {
-                                "0 catatan".to_string()
+                                format!("0 {}", notes_label)
                             };
                             ("edit", text)
                         }
