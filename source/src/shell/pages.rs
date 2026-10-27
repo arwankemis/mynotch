@@ -679,7 +679,7 @@ impl Shell {
                     self.lyric_mode=false;
                     self.tab_fade=Some((self.tab.clone(),Instant::now(),dir));
                     self.tab=tab;
-                    if self.hover_stage == 1 && (self.tab == "Musik" || self.tab == "Catatan") {
+                    if self.hover_stage == 1 && self.should_revert_stage1_to_calendar() {
                         self.trigger_stage1_temporary(5);
                     }
                     self.settings_open=false;

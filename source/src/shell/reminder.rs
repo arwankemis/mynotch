@@ -27,6 +27,9 @@ impl Shell{
     pub(super) fn select_reminder(&mut self,index:usize){
         let index=index.min(3);if index==self.reminder_index{return}
         let from=self.geometry();let current=self.reminder_position();self.reminder_index=index;self.reminder_menu=None;
+        if self.hover_stage == 1 && self.should_revert_stage1_to_calendar() {
+            self.trigger_stage1_temporary(5);
+        }
         self.reminder_anim=Some((current,Instant::now()));self.focused=None;
         if (from.1-self.target_geometry().1).abs()>0.1{self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.layout();self.update_window_region();}
         self.make_inputs();self.start_morph_timer();if index==3{self.refresh_prayers(false);}self.invalidate();

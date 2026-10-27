@@ -163,7 +163,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
     if !app.preview_silent{app.start_media();}
     
     app.clock_timer();
-    if !app.preview && app.hover_stage == 1 && (app.tab == "Musik" || app.tab == "Catatan") {
+    if !app.preview && app.hover_stage == 1 && app.should_revert_stage1_to_calendar() {
         app.trigger_stage1_temporary(5);
     }
     if !app.preview{SetTimer(Some(hwnd),11,16,None);}
@@ -319,6 +319,12 @@ impl Shell {
                         self.state.clipboard_history.truncate(50);
                     }
                     let _ = self.store.save("state.json", &self.state);
+                    if self.hover_stage == 1 && self.tab == "Clipboard" {
+                        self.trigger_stage1_temporary(5);
+                        let from = self.geometry();
+                        self.morph = Some(ui::Morph::new(from, self.target_geometry()));
+                        self.start_morph_timer();
+                    }
                     self.invalidate();
                 }
             }
@@ -388,6 +394,8 @@ impl Shell {
         }else if self.hover_stage==1{
             if self.lyric_mode{
                 (300.,30.,15.)
+            }else if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
+                (158.,30.,15.)
             }else if self.tab == "Kalender" {
                 (158.,30.,15.)
             }else if self.tab == "Reminder" {
@@ -395,13 +403,9 @@ impl Shell {
             }else if self.tab == "Clipboard" {
                 (195.,30.,15.)
             }else if self.tab == "Catatan" {
-                if self.is_stage1_temporary_active() {
-                    (180.,30.,15.)
-                } else {
-                    (158.,30.,15.)
-                }
+                (180.,30.,15.)
             }else if self.tab == "Musik" {
-                if self.is_stage1_temporary_active() && (self.track.playing || !self.track.title.is_empty()) {
+                if self.track.playing || !self.track.title.is_empty() {
                     let len = if !self.track.artist.is_empty() {
                         self.track.title.chars().count() + self.track.artist.chars().count() + 3
                     } else {
@@ -419,6 +423,9 @@ impl Shell {
             (50.,10.,5.)
         }
     }
+    pub fn should_revert_stage1_to_calendar(&self) -> bool {
+        should_revert_stage1(&self.tab, self.reminder_index, self.lyric_mode)
+    }
     pub fn is_stage1_temporary_active(&self) -> bool {
         self.stage1_temporary_until.is_some_and(|until| Instant::now() < until)
     }
@@ -434,7 +441,7 @@ impl Shell {
         if stage==0{
             self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
         }
-        if stage == 1 && !self.lyric_mode && (self.tab == "Musik" || self.tab == "Catatan") {
+        if stage == 1 && self.should_revert_stage1_to_calendar() {
             self.trigger_stage1_temporary(5);
         }
         let from=self.geometry();
@@ -1305,7 +1312,7 @@ impl Shell {
             }else{
                 p.clip(0.,0.,self.width,self.height);
 
-                let (icon, info_text) = if !self.is_stage1_temporary_active() && (self.tab == "Musik" || self.tab == "Catatan") {
+                let (icon, info_text) = if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
                     let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
                     let cal = format!("{} {}", self.day, month_str);
                     ("calendar", cal)
@@ -1676,6 +1683,19 @@ pub(super) fn toast_target_reminder(kind:ToastKind)->Option<usize>{
     }
 }
 
+pub(super) fn should_revert_stage1(tab: &str, reminder_index: usize, lyric_mode: bool) -> bool {
+    if lyric_mode {
+        return false;
+    }
+    if tab == "Kalender" {
+        return false;
+    }
+    if tab == "Reminder" && reminder_index == 0 {
+        return false;
+    }
+    true
+}
+
 // An isolated, timed test window. It has no modules, storage, audio or network access.
 unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
     unsafe extern "system" fn procedure(hwnd:HWND,msg:u32,wp:WPARAM,lp:LPARAM)->LRESULT{unsafe{match msg{
@@ -1707,5 +1727,24 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
 
         let expired = Some(Instant::now() - Duration::from_millis(10));
         assert!(!expired.is_some_and(|u| Instant::now() < u));
+    }
+    #[test]
+    fn stage1_revert_rules_match_specification() {
+        // Focus mode (reminder_index == 0) never reverts to calendar
+        assert!(!should_revert_stage1("Reminder", 0, false));
+        // Lyrics mode never reverts to calendar
+        assert!(!should_revert_stage1("Musik", 0, true));
+        // Calendar mode is already calendar
+        assert!(!should_revert_stage1("Kalender", 0, false));
+
+        // Sub-modes of reminder (water, stretch, sholat) revert to calendar
+        assert!(should_revert_stage1("Reminder", 1, false));
+        assert!(should_revert_stage1("Reminder", 2, false));
+        assert!(should_revert_stage1("Reminder", 3, false));
+
+        // Clipboard, Catatan, Musik without lyrics revert to calendar
+        assert!(should_revert_stage1("Clipboard", 0, false));
+        assert!(should_revert_stage1("Catatan", 0, false));
+        assert!(should_revert_stage1("Musik", 0, false));
     }
 }
