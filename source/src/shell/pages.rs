@@ -861,6 +861,10 @@ impl Shell {
                             note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
                         }
                     }
+                    self.clear_input(50);
+                    self.clear_input(51);
+                    self.drafts.remove(&("Catatan".into(), 50));
+                    self.drafts.remove(&("Catatan".into(), 51));
                 }
                 if self.state.sticky_notes.len() >= 20 {
                     self.notice("Maksimal 20 catatan sticky tercapai.");
@@ -891,6 +895,10 @@ impl Shell {
                         note.content = content;
                         note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
                     }
+                    self.clear_input(50);
+                    self.clear_input(51);
+                    self.drafts.remove(&("Catatan".into(), 50));
+                    self.drafts.remove(&("Catatan".into(), 51));
                 }
                 if idx < self.state.sticky_notes.len() {
                     self.state.selected_note = idx;
@@ -900,6 +908,12 @@ impl Shell {
                 }
             },
             Action::NoteDelete(id) => {
+                if self.input_page == "Catatan" {
+                    self.clear_input(50);
+                    self.clear_input(51);
+                    self.drafts.remove(&("Catatan".into(), 50));
+                    self.drafts.remove(&("Catatan".into(), 51));
+                }
                 self.state.sticky_notes.retain(|n| n.id != id);
                 if self.state.selected_note >= self.state.sticky_notes.len() {
                     self.state.selected_note = self.state.sticky_notes.len().saturating_sub(1);

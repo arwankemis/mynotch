@@ -165,4 +165,27 @@ mod tests {
         assert_eq!(NOTE_COLORS[3].1, "Pink");
         assert_eq!(NOTE_COLORS[4].1, "Ungu");
     }
+
+    #[test]
+    fn test_sticky_notes_delete_and_add_state_lifecycle() {
+        let mut notes: Vec<StickyNote> = Vec::new();
+        notes.insert(0, StickyNote {
+            id: 1,
+            title: "Catatan Lama".into(),
+            content: "Teks yang harusnya dihapus".into(),
+            color_idx: 0,
+            updated_at: "2026-10-27 21:00".into(),
+        });
+        assert_eq!(notes.len(), 1);
+
+        notes.retain(|n| n.id != 1);
+        assert_eq!(notes.len(), 0);
+
+        let new_note = StickyNote::default();
+        notes.insert(0, new_note);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Catatan Baru");
+        assert_eq!(notes[0].content, "");
+        assert_ne!(notes[0].title, "Catatan Lama");
+    }
 }

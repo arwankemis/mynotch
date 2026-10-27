@@ -550,9 +550,13 @@ impl Shell {
     }
     fn clock_timer(&self){unsafe{let now=Local::now();let delay=if !self.fullscreen&&(self.focus.running()||self.breathing.is_some()||self.expanded||self.lyric_mode||self.track.playing||self.settings.water_reminder||self.settings.move_reminder||self.settings.prayer_enabled||self.stretch_deadline.is_some()){1000}else{(60-now.second()).max(1)*1000};SetTimer(Some(self.hwnd),1,delay,None);}}
     fn make_inputs(&mut self){unsafe{
-        for &id in self.inputs.keys(){self.drafts.insert((self.input_page.clone(),id),self.input(id));}
+        for &id in self.inputs.keys(){
+            if self.input_page != "Catatan" {
+                self.drafts.insert((self.input_page.clone(),id),self.input(id));
+            }
+        }
         if self.input_page=="Tugas"{if let Some(note)=self.drafts.get(&("Tugas".into(),12)){self.state.notes=note.clone();}}
-        if self.input_page=="Catatan"{
+        if self.input_page=="Catatan" && (self.tab != "Catatan" || self.settings_open || !self.expanded) {
             let title=self.input(50);let content=self.input(51);
             if let Some(note)=self.state.sticky_notes.get_mut(self.state.selected_note){
                 if !title.is_empty()||!content.is_empty(){
@@ -584,7 +588,11 @@ impl Shell {
         self.rebuild_input_region();self.sync_input_host();
     }}
     unsafe fn edit(&mut self,id:u16,value:&str,x:f32,y:f32,width:f32,height:f32,password:bool,multiline:bool){unsafe{
-        let value=self.drafts.get(&(self.input_page.clone(),id)).map(|v|v.as_str()).unwrap_or(value);
+        let value=if self.input_page != "Catatan" {
+            self.drafts.get(&(self.input_page.clone(),id)).map(|v|v.as_str()).unwrap_or(value)
+        } else {
+            value
+        };
         let value:Vec<u16>=value.encode_utf16().chain(Some(0)).collect();
         let style=WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_BORDER|WINDOW_STYLE(if multiline{(ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN)as u32|WS_VSCROLL.0}else{ES_AUTOHSCROLL as u32})|WINDOW_STYLE(if password{ES_PASSWORD as u32}else{0});
         // Parent is the input host, not the composition window: child HWNDs do not render on a
