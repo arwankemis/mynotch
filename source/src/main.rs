@@ -14,6 +14,7 @@ mod shadow;
 mod artwork;
 mod clipboard;
 mod mods;
+mod sticky;
 mod shell;
 
 fn main(){
