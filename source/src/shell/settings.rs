@@ -2,7 +2,17 @@ use super::*;
 use crate::i18n::t;
 const FG:u32=0xf3f3f5;const MUTED:u32=0x92929d;const ACCENT:u32=0x69d2e5;
 #[derive(Clone)]pub(super) struct SettingsPopup{pub key:&'static str,pub x:f32,pub y:f32,pub width:f32,pub cursor:usize}
-pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{if lead==0{format!("{city} · Tepat waktu")}else{format!("{city} · {lead} menit sebelumnya")}}
+#[allow(dead_code)]
+pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{
+    prayer_lead_summary_i18n(city, lead, "id")
+}
+pub(super) fn prayer_lead_summary_i18n(city:&str,lead:u32,lang:&str)->String{
+    if lang == "en" {
+        if lead==0{format!("{city} · On time")}else{format!("{city} · {lead} min before")}
+    } else {
+        if lead==0{format!("{city} · Tepat waktu")}else{format!("{city} · {lead} menit sebelumnya")}
+    }
+}
 impl Shell{
     fn categories(&self) -> [(&'static str, &'static str, &'static str); 6] {
         let lang = self.settings.language.clone();
@@ -69,8 +79,9 @@ impl Shell{
         self.st_row_compact(p,208.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
         self.st_toggle(p,512.,219.,self.settings.minimal,Action::Minimal,true);
         self.st_row_compact(p,254.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
-        let current=self.settings.default_tab.clone();
-        self.st_select(p,"default_tab",&current,418.,260.,124.,!self.settings.active_tab_order().is_empty());
+        let current=crate::i18n::tab_name(&self.settings.default_tab, &lang).to_string();
+        let has_tabs = !self.settings.active_tab_order().is_empty();
+        self.st_select(p,"default_tab",&current,418.,260.,124.,has_tabs);
     }}
     fn settings_appearance(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
@@ -94,7 +105,9 @@ impl Shell{
     fn settings_tabs(&mut self,p:&mut Painter){unsafe{
         let mut order=self.settings.tab_order.clone();for &m in MODULES{if !order.iter().any(|v|v==m){order.push(m.into());}}order.retain(|t|MODULES.contains(&t.as_str()));
         let count=order.len();let active=self.settings.active_tab_order().len();
-        for (i,module) in order.iter().enumerate(){let y=116.+i as f32*36.;let on=self.settings.enabled(module);p.outline_icon(ui::module_icon(module),196.,y+9.,17.,if on{0xd9d9e0}else{0x62626e});p.text(module,224.,y+8.,168.,22.,12.,if on{FG}else{MUTED},false);
+        for (i,module) in order.iter().enumerate(){let y=116.+i as f32*36.;let on=self.settings.enabled(module);p.outline_icon(ui::module_icon(module),196.,y+9.,17.,if on{0xd9d9e0}else{0x62626e});
+            let display_module = crate::i18n::tab_name(module, &self.settings.language);
+            p.text(display_module,224.,y+8.,168.,22.,12.,if on{FG}else{MUTED},false);
             for (icon,x,d,ok) in [("up",412.,-1,i>0),("down",442.,1,i+1<count)]{
                 let action=Action::MoveTab(module.clone(),d);
                 let hover=ok&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+25.&&b>=y+2.&&b<=y+33.);
@@ -123,11 +136,17 @@ impl Shell{
         let enabled=self.settings.enabled("Reminder");
         if !enabled{p.text(t("reminders.disabled",&lang),196.,116.,210.,18.,11.,MUTED,false);self.st_button(p,t("reminders.enable",&lang),448.,112.,94.,Action::ToggleModule("Reminder".into()),true);}
         let top=if enabled{116.}else{153.};
-        let rows=[(t("reminders.focus",&lang),"timer",format!("{} menit · istirahat {} menit",self.settings.focus_minutes,self.settings.break_minutes),self.settings.focus_enabled),(t("reminders.hydrate",&lang),"droplet",format!("{} ml · setiap {} menit",self.settings.water_target,self.settings.water_interval),self.settings.water_reminder),(t("reminders.stretch",&lang),"person",format!("Jeda setiap {} menit",self.settings.move_interval),self.settings.move_reminder),(t("reminders.prayer",&lang),"moon",prayer_lead_summary(&self.settings.prayer_city,self.settings.prayer_lead),self.settings.prayer_enabled)];
+        let rows=[
+            (t("reminders.focus",&lang),"timer",if lang == "en" { format!("{} min · break {} min",self.settings.focus_minutes,self.settings.break_minutes) } else { format!("{} menit · istirahat {} menit",self.settings.focus_minutes,self.settings.break_minutes) },self.settings.focus_enabled),
+            (t("reminders.hydrate",&lang),"droplet",if lang == "en" { format!("{} ml · every {} min",self.settings.water_target,self.settings.water_interval) } else { format!("{} ml · setiap {} menit",self.settings.water_target,self.settings.water_interval) },self.settings.water_reminder),
+            (t("reminders.stretch",&lang),"person",if lang == "en" { format!("Break every {} min",self.settings.move_interval) } else { format!("Jeda setiap {} menit",self.settings.move_interval) },self.settings.move_reminder),
+            (t("reminders.prayer",&lang),"moon",prayer_lead_summary_i18n(&self.settings.prayer_city,self.settings.prayer_lead,&lang),self.settings.prayer_enabled)
+        ];
         let row_h=if enabled{53.}else{45.};
         for (i,(name,icon,summary,on)) in rows.iter().enumerate(){let y=top+i as f32*row_h;p.outline_icon(icon,196.,y+10.,18.,0xa8a8b2);p.text(name,224.,y+1.,164.,22.,12.,FG,false);p.text_ellipsis(summary,224.,y+23.,198.,17.,10.,MUTED,false);p.text(if *on{t("reminders.active",&lang)}else{t("reminders.inactive",&lang)},423.,y+11.,42.,16.,10.,if *on{ACCENT}else{MUTED},false);self.st_button(p,t("reminders.configure",&lang),474.,y+4.,68.,Action::SettingsOpenTab("Reminder".into(),i),enabled);if i<3{p.fill(196.,y+row_h-1.,346.,1.,0.,0x222229);}}
     }}
     fn settings_mods(&mut self, p: &mut Painter) { unsafe {
+        let lang = self.settings.language.clone();
         let available = crate::mods::available_mods();
         for (i, m) in available.iter().enumerate() {
             let y = 116. + i as f32 * 68.;
@@ -138,17 +157,19 @@ impl Shell{
             p.text_ellipsis(&m.description, 224., y + 24., 200., 16., 10., MUTED, false);
             let btn_w = 78.;
             let btn_x = 542. - btn_w;
+            let uninstall_lbl = if lang == "en" { "Uninstall" } else { "Lepas" };
+            let install_lbl = if lang == "en" { "Install" } else { "Pasang" };
             if installed {
-                self.st_button(p, "Lepas", btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
+                self.st_button(p, uninstall_lbl, btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
             } else {
-                self.st_button(p, "Pasang", btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
+                self.st_button(p, install_lbl, btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
             }
             p.fill(196., y + 56., 346., 1., 0., 0x222229);
         }
     }}
     fn settings_options(&self,key:&str)->Vec<(u32,String)>{match key{
         "language"=>crate::i18n::LANGUAGES.iter().enumerate().map(|(i,(_,name))|(i as u32,name.to_string())).collect(),
-        "default_tab"=>self.settings.active_tab_order().iter().filter_map(|tab|MODULES.iter().position(|m|*m==tab).map(|i|(i as u32,tab.clone()))).collect(),
+        "default_tab"=>self.settings.active_tab_order().iter().filter_map(|tab|MODULES.iter().position(|m|*m==tab).map(|i|(i as u32, crate::i18n::tab_name(tab, &self.settings.language).to_string()))).collect(),
         "scale"=>[80,100,110,125,135].iter().map(|&v|(v,format!("{v}%"))).collect(),
         "gap"=>[0,4,8,16,24].iter().map(|&v|(v,format!("{v} px"))).collect(),
         "opacity"=>[100,98,90,80,70].iter().map(|&v|(v,format!("{v}%"))).collect(),_=>vec![]

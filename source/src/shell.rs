@@ -269,7 +269,11 @@ impl Shell {
     }
     fn show_water_toast(&mut self){
         let serving = self.settings.water_serving;
-        let msg = format!("Waktunya minum air! (+{} ml)", serving);
+        let msg = if self.settings.language == "en" {
+            format!("Time to drink water! (+{} ml)", serving)
+        } else {
+            format!("Waktunya minum air! (+{} ml)", serving)
+        };
         self.show_toast(ToastKind::Water, msg, 12000);
     }
     fn show_toast(&mut self, kind: ToastKind, text: impl Into<String>, timeout_ms: u32){
@@ -629,7 +633,12 @@ impl Shell {
             "AI"=>{let w=self.width;self.edit(40,"",28.,124.,w-56.,50.,false,true);self.edit(41,&self.settings.ai_endpoint.clone(),28.,72.,240.,26.,false,false);self.edit(42,&self.settings.ai_model.clone(),276.,72.,140.,26.,false,false);self.edit(43,"",28.,104.,240.,26.,true,false);},
             "Catatan"=>{
                 if let Some(note)=self.state.sticky_notes.get(self.state.selected_note){
-                    let title=note.title.clone();let content=note.content.clone();
+                    let title = if note.title == "Catatan Baru" && self.settings.language == "en" {
+                        "New Note".to_string()
+                    } else {
+                        note.title.clone()
+                    };
+                    let content=note.content.clone();
                     self.edit(50,&title,256.,44.,140.,24.,false,false);
                     self.edit(51,&content,256.,74.,self.width-276.,140.,false,true);
                 }
@@ -985,15 +994,15 @@ impl Shell {
         if let Some(was_break) = self.focus.complete() {
             if was_break {
                 self.focus.is_break = false;
-                self.notice("☕ Istirahat selesai! Siap untuk sesi fokus berikutnya.");
+                self.notice(crate::i18n::t("toast.break_ended", &self.settings.language));
             } else {
                 self.focus.is_break = true;
                 if self.settings.auto_break{self.focus.start(self.settings.break_minutes,true);}
                 if self.settings.stretch_after_focus{
                     self.last_move=Instant::now();
-                    self.show_toast(ToastKind::Focus,"🎯 Sesi fokus selesai! Waktunya istirahat & peregangan.",8000);
+                    self.show_toast(ToastKind::Focus,crate::i18n::t("toast.focus_ended_stretch", &self.settings.language),8000);
                 }else{
-                    self.show_toast(ToastKind::Focus,"🎯 Sesi fokus selesai! Waktunya istirahat.",8000);
+                    self.show_toast(ToastKind::Focus,crate::i18n::t("toast.focus_ended", &self.settings.language),8000);
                 }
             }
         }
@@ -1005,11 +1014,11 @@ impl Shell {
             }
             if self.settings.move_reminder&&self.last_move.elapsed().as_secs()>=self.settings.move_interval as u64*60{
                 self.last_move=Instant::now();
-                self.notice("🧘 Waktunya peregangan otot! Berdiri sejenak & regangkan tubuh.");
+                self.notice(crate::i18n::t("toast.stretch_alert", &self.settings.language));
             }
             if self.settings.enabled("Sehat")&&self.settings.eye_reminder&&self.last_eye.elapsed().as_secs()>=self.settings.eye_interval as u64*60{
                 self.last_eye=Instant::now();
-                self.notice("👀 Istirahat mata 20-20-20: pandang jauh 20 detik.");
+                self.notice(crate::i18n::t("toast.eye_alert", &self.settings.language));
             }
         }
         if self.breathing.is_some_and(|start|start.elapsed().as_secs()>=60){self.breathing=None;self.notice("Latihan napas selesai.");}
@@ -1228,7 +1237,8 @@ impl Shell {
                 p.text_centered("💧",10.,0.,18.,self.height,13.,0x38bdf8,1.0,false);
                 if toast.confirmed {
                     let text_w = self.width - 56.;
-                    p.text_centered("Hebat! Hidrasi tercatat",28.,0.,text_w,self.height,11.5,0x6ee7b7,1.0,true);
+                    let hydration_txt = crate::i18n::t("toast.hydration_logged", &self.settings.language);
+            p.text_centered(hydration_txt,28.,0.,text_w,self.height,11.5,0x6ee7b7,1.0,true);
                     p.text_centered("🎉",self.width-28.,0.,20.,self.height,13.,0xffffff,1.0,false);
                 } else {
                     let btn_w = 26.;
@@ -1365,7 +1375,11 @@ impl Shell {
                             let count = self.state.sticky_notes.len();
                             let notes_label = crate::i18n::t("stage1.notes", lang);
                             let text = if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
-                                let snip: String = note.title.chars().take(14).collect();
+                                let snip: String = if note.title == "Catatan Baru" {
+                                    crate::i18n::t("stage1.new_note", lang).into()
+                                } else {
+                                    note.title.chars().take(14).collect()
+                                };
                                 if snip.is_empty() { format!("{} {}", count, notes_label) } else { snip }
                             } else {
                                 format!("0 {}", notes_label)
@@ -1502,7 +1516,7 @@ impl Shell {
         let mut slots: Vec<TabSlot> = Vec::new();
         let mut cur_x = 18.0;
         for tab in &tabs {
-            let icon=ui::module_icon(tab);let label=tab.clone();
+            let icon=ui::module_icon(tab);let label=crate::i18n::tab_name(tab, &self.settings.language).to_string();
             let selected = self.tab == *tab;
             let w = if is_rearranging {
                 26.0
@@ -1649,11 +1663,12 @@ fn time_label(seconds:f64)->String{let secs=seconds.max(0.)as u64;format!("{:02}
 fn covers_monitor(window:RECT,monitor:RECT)->bool{window.left<=monitor.left&&window.top<=monitor.top&&window.right>=monitor.right&&window.bottom>=monitor.bottom}
 
 pub(super) fn classify_notice_kind(msg:&str)->ToastKind{
-    if msg.contains("💧")||msg.contains("minum"){
+    let lower = msg.to_lowercase();
+    if msg.contains("💧")||lower.contains("minum")||lower.contains("drink")||lower.contains("hydration"){
         ToastKind::Water
-    }else if msg.contains("🎯")||msg.contains("fokus"){
+    }else if msg.contains("🎯")||lower.contains("fokus")||lower.contains("focus"){
         ToastKind::Focus
-    }else if msg.contains("🧘")||msg.contains("regang"){
+    }else if msg.contains("🧘")||lower.contains("regang")||lower.contains("stretch"){
         ToastKind::Stretch
     }else{
         ToastKind::Generic

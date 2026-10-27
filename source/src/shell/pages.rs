@@ -10,7 +10,10 @@ impl Shell {
             "Reminder"=>self.reminder_page(p),
             "Clipboard"=>self.clipboard_page(p),
             "Catatan"=>self.notes_page(p),
-            _=>{p.text("Pilih modul melalui Pengaturan.",24.,140.,620.,80.,18.,MUTED,false);}
+            _=>{
+                let msg = crate::i18n::t("shell.select_module", &self.settings.language);
+                p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
+            }
         }
     }}
 
@@ -23,6 +26,7 @@ impl Shell {
     }
 
     fn draw_mockup_player(&mut self,p:&mut Painter){unsafe{
+        let lang = self.settings.language.clone();
         // 1. Track Content (Artwork 60x60 from y=44 to y=104)
         let art_x=24.;let art_y=44.;let art_size=60.;
         let key=if self.cover.is_some(){self.cover_key}else{0};
@@ -32,18 +36,21 @@ impl Shell {
         }
 
         // Title (bold 14px white)
-        let title=if self.track.title.is_empty(){"Belum ada musik"}else{&self.track.title};
+        let default_title = crate::i18n::t("music.no_music", &lang);
+        let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
         p.text_ellipsis(title,94.,44.,self.width-138.,18.,14.,0xffffff,true);
 
         // Media source app icon (Spotify, etc) placed at far right of title row
         p.icon_media_app(self.width-28.,52.,&self.track.source_app,self.track.playing);
 
         // Artist (12px #9ea3a8)
-        let artist=if self.track.artist.is_empty(){"Tidak ada artis".into()}else{self.track.artist.clone()};
+        let default_artist = crate::i18n::t("music.no_artist", &lang);
+        let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
         p.text_ellipsis(&artist,94.,65.,self.width-138.,16.,12.,0x9ea3a8,false);
 
         // Album (11px #6e7681)
-        let album=if self.track.album.is_empty(){"Single / Album tidak diketahui".into()}else{self.track.album.clone()};
+        let default_album = crate::i18n::t("music.no_album", &lang);
+        let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
         p.text_ellipsis(&album,94.,85.,self.width-138.,16.,11.,0x6e7681,false);
 
         // 2. Scrubber (At y=114, below the artwork)
@@ -85,6 +92,7 @@ impl Shell {
     }}
 
     fn draw_mockup_lyrics(&mut self,p:&mut Painter){unsafe{
+        let lang = self.settings.language.clone();
         let w=self.width;
         // Left Half: Track Content (x = 24..230)
         let art_x=24.;let art_y=44.;let art_size=60.;
@@ -94,14 +102,17 @@ impl Shell {
             p.text("♫",art_x+19.,art_y+13.,24.,30.,22.,0x8dc4dd,false);
         }
 
-        let title=if self.track.title.is_empty(){"Belum ada musik"}else{&self.track.title};
+        let default_title = crate::i18n::t("music.no_music", &lang);
+        let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
         p.text_ellipsis(title,94.,44.,120.,18.,14.,0xffffff,true);
         p.icon_media_app(224.,52.,&self.track.source_app,self.track.playing);
 
-        let artist=if self.track.artist.is_empty(){"Tidak ada artis".into()}else{self.track.artist.clone()};
+        let default_artist = crate::i18n::t("music.no_artist", &lang);
+        let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
         p.text_ellipsis(&artist,94.,65.,126.,16.,12.,0x9ea3a8,false);
 
-        let album=if self.track.album.is_empty(){"Single / Album".into()}else{self.track.album.clone()};
+        let default_album = crate::i18n::t("music.single_album", &lang);
+        let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
         p.text_ellipsis(&album,94.,85.,126.,16.,11.,0x6e7681,false);
 
         // Scrubber
@@ -144,10 +155,12 @@ impl Shell {
         // Right Half: Synchronized Lyrics (x = 252..w-20)
         let lyrics_x=252.;
         let lyrics_w=w-272.;
+        let no_lyrics_msg = crate::i18n::t("music.no_lyrics", &lang);
+        let loading_lyrics_msg = crate::i18n::t("music.loading_lyrics", &lang);
         if self.lyrics.is_empty(){
             if self.jobs.contains_key("Musik"){
-                p.text("Memuat lirik…",lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
-            }else if !self.plain_lyrics.is_empty()&&self.plain_lyrics!="Lirik belum tersedia untuk lagu ini."{
+                p.text(loading_lyrics_msg,lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
+            }else if !self.plain_lyrics.is_empty()&&self.plain_lyrics!="Lirik belum tersedia untuk lagu ini."&&self.plain_lyrics!="Lyrics not available for this song."{
                 let plain_lines:Vec<&str>=self.plain_lyrics.lines().filter(|l|!l.trim().is_empty()).collect();
                 if plain_lines.is_empty(){
                     p.text(&self.plain_lyrics,lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
@@ -163,7 +176,7 @@ impl Shell {
                     }
                 }
             }else{
-                p.text("Lirik belum tersedia untuk lagu ini.",lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
+                p.text(no_lyrics_msg,lyrics_x,70.,lyrics_w,50.,13.,0x72777b,false);
             }
         }else{
             let curr=super::lyric_display_index(&self.lyrics,position,self.lyric_offset);
@@ -202,7 +215,8 @@ impl Shell {
                 p.text_ellipsis(&next2_line.text,lyrics_x,130.,lyrics_w,20.,11.,0x555555,false);
             }
             if self.lyric_offset>0{
-                self.button_h(p,"Ikuti",w-64.,144.,46.,20.,Action::LyricsFollow,true);
+                let follow_lbl = crate::i18n::t("music.follow", &lang);
+                self.button_h(p,follow_lbl,w-64.,144.,46.,20.,Action::LyricsFollow,true);
             }
         }
     }}
@@ -210,16 +224,17 @@ impl Shell {
 
     fn calendar_page(&mut self,p:&mut Painter){unsafe{
         if self.width<320.{return}
-        const MONTHS:[&str;12]=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+        let lang = self.settings.language.clone();
+        let month_name_str = crate::i18n::full_month_name(self.month, &lang);
 
         // LEFT COLUMN (Month Grid): x = 24..296
-        p.text(&format!("{} {}",MONTHS[(self.month-1)as usize],self.year),24.,44.,160.,20.,15.,0xffffff,true);
+        p.text(&format!("{} {}",month_name_str,self.year),24.,44.,160.,20.,15.,0xffffff,true);
         self.button_icon(p,"‹",236.,42.,24.,24.,Action::Month(-1));
         self.button_icon(p,"›",266.,42.,24.,24.,Action::Month(1));
 
         let col_w=272./7.;
-        let day_names=["Sen","Sel","Rab","Kam","Jum","Sab","Min"];
-        for(i,name)in day_names.iter().enumerate(){
+        for i in 0..7 {
+            let name = crate::i18n::short_day_name(i, &lang);
             let color=if i==6{0xff7d7d}else{0x707077};
             p.text_centered(name,24.+i as f32*col_w,70.,col_w,16.,10.,color,1.0,false);
         }
@@ -290,13 +305,22 @@ impl Shell {
 
         // Calendar legend at y = 232
         p.fill(24.,236.,4.,4.,2.,0xff7d7d);
-        p.text("Libur nasional",32.,232.,80.,14.,10.,0x77777c,false);
+        p.text(crate::i18n::t("calendar.national_holiday", &lang),32.,232.,80.,14.,10.,0x77777c,false);
         p.fill(124.,236.,4.,4.,2.,0xffa46b);
-        p.text("Cuti bersama",132.,232.,80.,14.,10.,0x77777c,false);
+        p.text(crate::i18n::t("calendar.collective_leave", &lang),132.,232.,80.,14.,10.,0x77777c,false);
 
         // Footer at y = 254
-        p.text(if self.year==2026{"Indonesia · data libur 2026"}else{"Data libur tahun ini belum tersedia"},24.,254.,184.,16.,9.,0x909096,false);
-        let leave_label=if self.settings.collective_leave{"☑ Cuti bersama"}else{"☐ Cuti bersama"};
+        let footer_text = if self.year==2026 {
+            crate::i18n::t("calendar.footer_2026", &lang)
+        } else {
+            crate::i18n::t("calendar.footer_other", &lang)
+        };
+        p.text(footer_text,24.,254.,184.,16.,9.,0x909096,false);
+        let leave_label = if self.settings.collective_leave {
+            crate::i18n::t("calendar.leave_toggle_on", &lang)
+        } else {
+            crate::i18n::t("calendar.leave_toggle_off", &lang)
+        };
         let leave_hov=self.pointer.is_some_and(|(px,py)|px>=198.&&px<=292.&&py>=250.&&py<=270.);
         p.text(leave_label,200.,254.,90.,16.,9.,if leave_hov{0xefeff3}else{0x9c9ca3},false);
         if self.focused.as_ref()==Some(&Action::CalendarLeaveToggle){
@@ -311,21 +335,27 @@ impl Shell {
 
         // RIGHT COLUMN (Date Detail & Upcoming Holiday): x = 324..516
         if let Some(date)=NaiveDate::from_ymd_opt(self.year,self.month,self.day){
-            const DAYS:[&str;7]=["SENIN","SELASA","RABU","KAMIS","JUMAT","SABTU","MINGGU"];
             let day_idx=date.weekday().num_days_from_monday() as usize;
-            p.text(DAYS[day_idx],324.,44.,160.,14.,10.,0xffa46b,true);
+            p.text(crate::i18n::day_name_upper(day_idx, &lang),324.,44.,160.,14.,10.,0xffa46b,true);
             p.text(&self.day.to_string(),324.,56.,80.,46.,42.,0xffffff,true);
-            p.text(&format!("{} {}",MONTHS[(self.month-1)as usize],self.year),324.,104.,160.,16.,11.,0x9b9ba0,false);
+            p.text(&format!("{} {}",month_name_str,self.year),324.,104.,160.,16.,11.,0x9b9ba0,false);
 
             let holiday=self.holidays.iter().find(|h|h.date==date);
-            let status_text=if self.year!=2026{"Data libur belum tersedia".into()}else if let Some(h)=holiday{
-                if h.collective_leave{format!("Cuti bersama · {}",h.name)}else{format!("Libur nasional · {}",h.name)}
+            let status_text=if self.year!=2026{
+                crate::i18n::t("calendar.no_holiday_data", &lang).to_string()
+            }else if let Some(h)=holiday{
+                let prefix = if h.collective_leave {
+                    crate::i18n::t("calendar.collective_leave", &lang)
+                } else {
+                    crate::i18n::t("calendar.national_holiday", &lang)
+                };
+                format!("{} · {}", prefix, h.name)
             }else if date==today{
-                "Hari ini · bukan hari libur".into()
+                crate::i18n::t("calendar.today_regular", &lang).to_string()
             }else if date.weekday().num_days_from_monday()==6{
-                "Minggu · akhir pekan".into()
+                crate::i18n::t("calendar.sunday_weekend", &lang).to_string()
             }else{
-                "Bukan hari libur nasional".into()
+                crate::i18n::t("calendar.regular_day", &lang).to_string()
             };
             let status_color=if holiday.is_some_and(|h|!h.collective_leave){0xff7d7d}else if holiday.is_some(){0xffa46b}else{0x88888e};
             p.text_ellipsis(&status_text,324.,122.,188.,18.,11.,status_color,false);
@@ -334,7 +364,7 @@ impl Shell {
             let today_hov=self.pointer.is_some_and(|(px,py)|px>=324.&&px<=388.&&py>=146.&&py<=170.);
             p.fill(324.,146.,64.,24.,6.,if today_hov{0x2b2b30}else{0x222222});
             p.stroke(324.,146.,64.,24.,6.,if today_hov{0x484852}else{0x333333},1.0);
-            p.text_centered("Hari ini",324.,146.,64.,24.,10.,if today_hov{0xffffff}else{0xdddddd},1.0,false);
+            p.text_centered(crate::i18n::t("calendar.today_btn", &lang),324.,146.,64.,24.,10.,if today_hov{0xffffff}else{0xdddddd},1.0,false);
             if self.focused.as_ref()==Some(&Action::CalendarToday){
                 p.stroke(322.,144.,68.,28.,8.,0xd5d5dc,1.0);
             }
@@ -346,7 +376,7 @@ impl Shell {
             p.fill_alpha(324.,178.,188.,1.,0.,0xffffff,0.08);
 
             // Upcoming Holiday
-            p.text("LIBUR NASIONAL BERIKUTNYA",324.,186.,188.,14.,8.,0x88888e,true);
+            p.text(crate::i18n::t("calendar.next_holiday", &lang),324.,186.,188.,14.,8.,0x88888e,true);
 
             // Find next upcoming holiday strictly >= today
             let next_h=self.holidays.iter().filter(|h|h.date>=today&&!h.collective_leave).min_by_key(|h|h.date);
@@ -360,13 +390,14 @@ impl Shell {
                 // Date badge
                 p.fill(328.,card_y+3.,34.,36.,6.,0x2f171a);
                 p.text_centered(&nh.date.day().to_string(),328.,card_y+4.,34.,18.,14.,0xff9a9a,1.0,true);
-                let short_m=match nh.date.month(){1=>"JAN",2=>"FEB",3=>"MAR",4=>"APR",5=>"MEI",6=>"JUN",7=>"JUL",8=>"AGS",9=>"SEP",10=>"OKT",11=>"NOV",_=>"DES"};
-                p.text_centered(short_m,328.,card_y+20.,34.,14.,8.,0xff9a9a,0.9,true);
+                let short_m = crate::i18n::month_name(nh.date.month(), &lang).to_uppercase();
+                p.text_centered(&short_m,328.,card_y+20.,34.,14.,8.,0xff9a9a,0.9,true);
 
                 // Title & Date description
                 p.text_ellipsis(&nh.name,368.,card_y+6.,124.,16.,11.,0xffffff,true);
-                let day_name_id=match nh.date.weekday().num_days_from_monday(){0=>"Senin",1=>"Selasa",2=>"Rabu",3=>"Kamis",4=>"Jumat",5=>"Sabtu",_=>"Minggu"};
-                let date_desc=format!("{}, {} {}",day_name_id,nh.date.day(),MONTHS[(nh.date.month()-1)as usize]);
+                let day_name_str = crate::i18n::day_name_capitalized(nh.date.weekday().num_days_from_monday() as usize, &lang);
+                let holiday_month_str = crate::i18n::full_month_name(nh.date.month(), &lang);
+                let date_desc=format!("{}, {} {}",day_name_str,nh.date.day(),holiday_month_str);
                 p.text_ellipsis(&date_desc,368.,card_y+22.,124.,14.,10.,0x83838a,false);
 
                 // Arrow icon
@@ -385,6 +416,7 @@ impl Shell {
     }}
 
     fn clipboard_page(&mut self, p: &mut Painter) { unsafe {
+        let lang = self.settings.language.clone();
         let w = self.width;
         let total_clips = self.state.clipboard_history.len();
 
@@ -398,17 +430,17 @@ impl Shell {
         let left_x = 22.;
         let left_w = 212.;
 
-        p.text("RIWAYAT KLIP", left_x, 46., 90., 18., 10.5, 0x8a9291, true);
+        p.text(crate::i18n::t("clipboard.title", &lang), left_x, 46., 90., 18., 10.5, 0x8a9291, true);
         let badge_text = format!("({})", total_clips);
         p.text(&badge_text, left_x + 84., 46., 40., 18., 10.0, 0x38bdf8, true);
 
         if total_clips > 0 {
-            self.button_h(p, "Bersihkan", left_x + 140., 44., 72., 20., Action::ClearClips, false);
+            self.button_h(p, crate::i18n::t("clipboard.clear", &lang), left_x + 140., 44., 72., 20., Action::ClearClips, false);
         }
 
         if total_clips == 0 {
-            p.text("Belum ada riwayat.", left_x, 80., left_w, 20., 11., 0x6e7681, false);
-            p.text("Teks yang Anda salin (Ctrl+C) di Windows akan otomatis tersimpan dan muncul di sini.", left_x, 104., left_w, 54., 10., 0x475569, false);
+            p.text(crate::i18n::t("clipboard.no_history", &lang), left_x, 80., left_w, 20., 11., 0x6e7681, false);
+            p.text(crate::i18n::t("clipboard.hint", &lang), left_x, 104., left_w, 54., 10., 0x475569, false);
         } else {
             let start = self.clip_offset.min(total_clips.saturating_sub(1));
             let visible_items: Vec<(usize, crate::clipboard::ClipItem)> = self.state.clipboard_history
@@ -440,11 +472,13 @@ impl Shell {
                 }
 
                 let first_line = item.text.lines().next().unwrap_or("").trim();
-                let display_title = if first_line.is_empty() { "(Teks kosong)" } else { first_line };
+                let empty_txt = crate::i18n::t("clipboard.empty_text", &lang);
+                let display_title = if first_line.is_empty() { empty_txt } else { first_line };
                 p.text_ellipsis(display_title, left_x + 8., item_y + 3., left_w - 16., 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
 
-                let meta = format!("{} · {} kar · {} baris", item.time, item.chars, item.lines);
-                p.text(&meta, left_x + 8., item_y + 17., left_w - 16., 12., 9.0, if is_selected { 0x93c5fd } else { 0x64748b }, false);
+                let meta = crate::i18n::clip_meta(item.chars, item.lines, &lang);
+                let full_meta = format!("{} · {}", item.time, meta);
+                p.text(&full_meta, left_x + 8., item_y + 17., left_w - 16., 12., 9.0, if is_selected { 0x93c5fd } else { 0x64748b }, false);
 
                 if self.hit_enabled {
                     self.hits.push(Hit {
@@ -475,16 +509,17 @@ impl Shell {
 
         if total_clips == 0 {
             p.text_centered("📋", right_x, 82., right_w, 28., 24., 0x38bdf8, 0.8, false);
-            p.text_centered("Riwayat Clipboard Kosong", right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
-            p.text_centered("Salin teks (Ctrl+C) di mana saja,", right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
-            p.text_centered("Notch akan otomatis menyimpannya di sini.", right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("clipboard.empty_title", &lang), right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
+            p.text_centered(crate::i18n::t("clipboard.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("clipboard.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
         } else if let Some(item) = self.state.clipboard_history.get(self.selected_clip).cloned() {
-            let title = format!("Klip #{} · {}", self.selected_clip + 1, item.time);
+            let clip_word = crate::i18n::t("clipboard.clip", &lang);
+            let title = format!("{} #{} · {}", clip_word, self.selected_clip + 1, item.time);
             p.text(&title, right_x, 46., 120., 18., 11.5, 0x38bdf8, true);
 
             let btn_w = 98.;
             let btn_x = w - 20. - btn_w;
-            self.button_h(p, "📋 Salin Ulang", btn_x, 43., btn_w, 22., Action::CopyClip(self.selected_clip), true);
+            self.button_h(p, crate::i18n::t("clipboard.recopy", &lang), btn_x, 43., btn_w, 22., Action::CopyClip(self.selected_clip), true);
 
             let box_y = 69.;
             let box_h = 138.;
@@ -502,18 +537,19 @@ impl Shell {
 
             if all_lines.len() > max_lines {
                 let more_y = box_y + 8. + max_lines as f32 * 18.;
-                let more_text = format!("+ {} baris lainnya...", all_lines.len() - max_lines);
+                let more_text = crate::i18n::more_lines(all_lines.len() - max_lines, &lang);
                 p.text(&more_text, right_x + 10., more_y, right_w - 20., 14., 9.5, 0x64748b, false);
             }
 
             let footer_y = 212.;
-            let count_meta = format!("{} karakter · {} baris", item.chars, item.lines);
+            let count_meta = crate::i18n::clip_meta(item.chars, item.lines, &lang);
             p.text(&count_meta, right_x + 4., footer_y + 2., 140., 14., 9.5, 0x64748b, false);
-            self.button_h(p, "🗑 Hapus", w - 20. - 68., footer_y, 68., 20., Action::DeleteClip(item.id), false);
+            self.button_h(p, crate::i18n::t("clipboard.delete", &lang), w - 20. - 68., footer_y, 68., 20., Action::DeleteClip(item.id), false);
         }
     }}
 
     fn notes_page(&mut self, p: &mut Painter) { unsafe {
+        let lang = self.settings.language.clone();
         let w = self.width;
         let left_x = 22.;
         let left_w = 212.;
@@ -521,13 +557,13 @@ impl Shell {
         // ==========================================
         // LEFT PANE: Sticky Notes List
         // ==========================================
-        p.text("CATATAN STICKY", left_x, 46., 120., 18., 11.5, 0xfef08a, true);
-        self.button_h(p, "+ Baru", left_x + 140., 43., 72., 20., Action::NoteAdd, true);
+        p.text(crate::i18n::t("notes.header", &lang), left_x, 46., 120., 18., 11.5, 0xfef08a, true);
+        self.button_h(p, crate::i18n::t("notes.new_btn", &lang), left_x + 140., 43., 72., 20., Action::NoteAdd, true);
 
         let total_notes = self.state.sticky_notes.len();
         if total_notes == 0 {
-            p.text("Belum ada catatan.", left_x + 6., 86., left_w - 12., 18., 11.0, 0x94a3b8, false);
-            p.text("Klik tombol '+ Baru' di atas untuk membuat catatan tempel pertama Anda.", left_x + 6., 108., left_w - 12., 36., 9.5, 0x64748b, false);
+            p.text(crate::i18n::t("notes.no_notes", &lang), left_x + 6., 86., left_w - 12., 18., 11.0, 0x94a3b8, false);
+            p.text(crate::i18n::t("notes.empty_hint", &lang), left_x + 6., 108., left_w - 12., 36., 9.5, 0x64748b, false);
         } else {
             let max_visible = 5;
             if self.state.selected_note >= total_notes {
@@ -565,10 +601,16 @@ impl Shell {
                 let (note_col, _) = crate::sticky::NOTE_COLORS.get(note.color_idx as usize).copied().unwrap_or((0xfef08a, "Kuning"));
                 p.fill(left_x + 6., item_y + 8., 4., 16., 2., note_col);
 
-                let title = if note.title.trim().is_empty() { "Catatan Baru" } else { &note.title };
+                let default_note_title = crate::i18n::t("notes.default_title", &lang);
+                let title = if note.title.trim().is_empty() || (note.title == "Catatan Baru" && lang == "en") {
+                    default_note_title
+                } else {
+                    &note.title
+                };
                 p.text_ellipsis(title, left_x + 16., item_y + 3., left_w - 24., 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
 
-                let snippet = if note.content.trim().is_empty() { "(Kosong)" } else { note.content.lines().next().unwrap_or("").trim() };
+                let empty_snippet = crate::i18n::t("notes.empty_snippet", &lang);
+                let snippet = if note.content.trim().is_empty() { empty_snippet } else { note.content.lines().next().unwrap_or("").trim() };
                 p.text_ellipsis(snippet, left_x + 16., item_y + 17., left_w - 24., 12., 9.0, if is_selected { 0xfef08a } else { 0x64748b }, false);
 
                 if self.hit_enabled {
@@ -579,7 +621,7 @@ impl Shell {
                 }
             }
 
-            let info = format!("{} / 20 catatan", total_notes);
+            let info = crate::i18n::notes_count(total_notes, &lang);
             p.text(&info, left_x + 4., 248., 120., 16., 9.5, 0x64748b, false);
         }
 
@@ -597,8 +639,8 @@ impl Shell {
         if total_notes == 0 {
             p.text_centered("✎", right_x, 82., right_w, 28., 24., 0xfef08a, 0.8, false);
             p.text_centered("Quick Sticky Notes", right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
-            p.text_centered("Catat memo atau ide instan di sini.", right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
-            p.text_centered("Bisa diexport ke Markdown (.md) atau TXT.", right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("notes.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered(crate::i18n::t("notes.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
         } else if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
             self.button_h(p, ".md", 402., 44., 34., 22., Action::NoteExport(0), false);
             self.button_h(p, ".txt", 440., 44., 34., 22., Action::NoteExport(1), false);
@@ -624,10 +666,11 @@ impl Shell {
                 }
             }
 
-            self.button_h(p, "📋 Salin", 368., 221., 64., 20., Action::NoteExport(2), false);
-            self.button_h(p, "🗑 Hapus", 436., 221., 64., 20., Action::NoteDelete(note.id), false);
+            self.button_h(p, crate::i18n::t("notes.copy", &lang), 368., 221., 64., 20., Action::NoteExport(2), false);
+            self.button_h(p, crate::i18n::t("notes.delete", &lang), 436., 221., 64., 20., Action::NoteDelete(note.id), false);
 
-            let update_lbl = format!("Diperbarui: {}", note.updated_at);
+            let updated_lbl = crate::i18n::t("notes.updated", &lang);
+            let update_lbl = format!("{}: {}", updated_lbl, note.updated_at);
             p.text(&update_lbl, right_x, 248., 240., 14., 9.0, 0x64748b, false);
         }
     }}
@@ -637,7 +680,12 @@ impl Shell {
         match action{
             Action::TogglePin=>{
                 self.pinned=!self.pinned;
-                self.notice(if self.pinned{"Notch disematkan (pin)"}else{"Sematan notch dilepas"});
+                let notice_text = if self.pinned {
+                    crate::i18n::t("notice.pinned", &self.settings.language)
+                } else {
+                    crate::i18n::t("notice.unpinned", &self.settings.language)
+                };
+                self.notice(notice_text);
                 self.invalidate();
             },
             Action::ToStage0=>{
@@ -701,7 +749,7 @@ impl Shell {
             Action::InstallMod(id)=>{
                 let root=self.store.root.clone();
                 match crate::mods::install_mod(&root,&mut self.settings,&id){
-                    Ok(())=>{self.save();self.notice("Mod berhasil dipasang! Tab baru tersedia.");}
+                    Ok(())=>{self.save();self.notice(crate::i18n::t("notice.mod_installed", &self.settings.language));}
                     Err(e)=>self.notice(format!("Gagal memasang mod: {e}")),
                 }
                 self.invalidate();
@@ -715,7 +763,7 @@ impl Shell {
                             self.make_inputs();
                         }
                         self.save();
-                        self.notice("Mod berhasil dilepas.");
+                        self.notice(crate::i18n::t("notice.mod_uninstalled", &self.settings.language));
                     }
                     Err(e)=>self.notice(format!("Gagal melepas mod: {e}")),
                 }
@@ -731,7 +779,7 @@ impl Shell {
             Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},
             Action::Minimal=>{self.settings.minimal=!self.settings.minimal;if !self.expanded{self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));}self.sync_visualizer();self.save();},
             Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(165,255)as u8;self.save();self.invalidate();},
-            Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice("Sisakan setidaknya satu tab aktif.");return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
+            Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
                 "auto_break"=>self.settings.auto_break=!self.settings.auto_break,
                 "focus_enabled"=>{self.settings.focus_enabled=!self.settings.focus_enabled;if !self.settings.focus_enabled{self.focus.pause();}},
@@ -765,7 +813,7 @@ impl Shell {
             Action::ReminderSelect(i)=>self.select_reminder(i),
             Action::ReminderStep(d)=>self.select_reminder((self.reminder_index as i32+d).clamp(0,3)as usize),
             Action::StretchLength(d)=>self.settings.stretch_seconds=(self.settings.stretch_seconds as i32+d).clamp(15,300)as u32,
-            Action::StretchDone=>{self.stretch_deadline=None;self.last_move=Instant::now();self.notice("Peregangan tercatat. Sampai jeda berikutnya.");},
+            Action::StretchDone=>{self.stretch_deadline=None;self.last_move=Instant::now();self.notice(crate::i18n::t("notice.stretch_done", &self.settings.language));},
             Action::StretchStart=>{if self.stretch_deadline.is_some(){self.stretch_deadline=None;self.last_move=Instant::now();}else{self.stretch_deadline=Some(Instant::now()+Duration::from_secs(self.settings.stretch_seconds as u64));}},
             Action::PrayerRefresh=>self.refresh_prayers(true),
             Action::ReminderMenu(key)=>{self.open_reminder_menu(key);},
@@ -785,7 +833,11 @@ impl Shell {
                 if let Some(toast)=&mut self.toast{
                     toast.confirmed=true;
                     toast.confirmed_at=Some(Instant::now());
-                    toast.message=format!("Hebat! +{}ml tercatat 🎉",serving);
+                    toast.message = if self.settings.language == "en" {
+                        format!("Awesome! +{}ml logged 🎉", serving)
+                    } else {
+                        format!("Hebat! +{}ml tercatat 🎉", serving)
+                    };
                 }
                 unsafe{
                     let _=MessageBeep(0x00000040);
@@ -805,9 +857,9 @@ impl Shell {
                         self.state.clipboard_history.insert(0,item);
                         self.selected_clip=0;
                         self.save();
-                        self.notice("Teks disalin ke clipboard! 📋");
+                        self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
                     }else{
-                        self.notice("Gagal menyalin ke clipboard.");
+                        self.notice(crate::i18n::t("notice.clip_failed", &self.settings.language));
                     }
                 }
             },
@@ -824,7 +876,7 @@ impl Shell {
                 self.selected_clip=0;
                 self.clip_offset=0;
                 self.save();
-                self.notice("Riwayat clipboard dibersihkan.");
+                self.notice(crate::i18n::t("notice.clips_cleared", &self.settings.language));
                 self.invalidate();
             },
             Action::ClipPage(delta)=>{
@@ -870,7 +922,7 @@ impl Shell {
                     self.drafts.remove(&("Catatan".into(), 51));
                 }
                 if self.state.sticky_notes.len() >= 20 {
-                    self.notice("Maksimal 20 catatan sticky tercapai.");
+                    self.notice(crate::i18n::t("notice.notes_max", &self.settings.language));
                 } else {
                     let new_id = self.state.sticky_notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
                     let now_str = Local::now().format("%Y-%m-%d %H:%M").to_string();
@@ -886,7 +938,7 @@ impl Shell {
                     self.trigger_stage1_temporary(5);
                     self.save();
                     self.make_inputs();
-                    self.notice("Catatan baru ditambahkan ✨");
+                    self.notice(crate::i18n::t("notice.note_added", &self.settings.language));
                     self.invalidate();
                 }
             },
@@ -925,7 +977,7 @@ impl Shell {
                 }
                 self.save();
                 self.make_inputs();
-                self.notice("Catatan telah dihapus.");
+                self.notice(crate::i18n::t("notice.note_deleted", &self.settings.language));
                 self.invalidate();
             },
             Action::NoteColor(ci) => {
@@ -958,7 +1010,7 @@ impl Shell {
                                         let path_w: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
                                         ShellExecuteW(None, windows::core::w!("open"), PCWSTR(path_w.as_ptr()), None, None, SW_SHOW);
                                     }
-                                    self.notice("Diexport ke Markdown (.md) di data/exports/ 📄");
+                                    self.notice(crate::i18n::t("notice.export_md", &self.settings.language));
                                 }
                                 Err(e) => self.notice(format!("Gagal export: {}", e)),
                             }
@@ -973,7 +1025,7 @@ impl Shell {
                                         let path_w: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
                                         ShellExecuteW(None, windows::core::w!("open"), PCWSTR(path_w.as_ptr()), None, None, SW_SHOW);
                                     }
-                                    self.notice("Diexport ke TXT (.txt) di data/exports/ 📄");
+                                    self.notice(crate::i18n::t("notice.export_txt", &self.settings.language));
                                 }
                                 Err(e) => self.notice(format!("Gagal export: {}", e)),
                             }
@@ -982,9 +1034,9 @@ impl Shell {
                             let full_text = format!("{}\r\n\r\n{}", note.title, note.content);
                             if crate::clipboard::set_clipboard_text(&full_text) {
                                 self.last_clipboard_seq = crate::clipboard::get_sequence_number();
-                                self.notice("Isi catatan disalin ke clipboard! 📋");
+                                self.notice(crate::i18n::t("notice.note_copied", &self.settings.language));
                             } else {
-                                self.notice("Gagal menyalin ke clipboard.");
+                                self.notice(crate::i18n::t("notice.clip_failed", &self.settings.language));
                             }
                         }
                         3 => {
@@ -1017,7 +1069,7 @@ impl Shell {
                 }
                 if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
                     super::spawn_floating_sticky_note(&note.title, &note.content, note.color_idx);
-                    self.notice("Catatan sticky melayang di desktop! 📌");
+                    self.notice(crate::i18n::t("notice.note_popout", &self.settings.language));
                 }
             },
         }
@@ -1025,7 +1077,7 @@ impl Shell {
         if !self.settings.enabled("Musik"){self.cancel_job("Artwork");self.cover=None;self.cover_key=0;self.lyrics_key.clear();self.plain_lyrics.clear();self.lyric_offset=0;}
         self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.clock_timer();self.invalidate();
     }
-    fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice("Buka pemutar musik terlebih dahulu.");}}
+    fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
     fn refresh_weather(&mut self){if !self.settings.enabled("Cuaca")||!self.settings.weather_configured{self.notice("Simpan lokasi cuaca terlebih dahulu.");return}if self.jobs.contains_key("Cuaca"){return}let api=self.online.clone();let(lat,lon)=(self.settings.latitude,self.settings.longitude);self.job("Cuaca",move||Event::Weather(api.weather(lat,lon)));}
     fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice("Feed kalender dilepas.");return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
     fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice("Simpan API key dan model terlebih dahulu.");return}};if self.settings.ai_model.trim().is_empty(){self.notice("Nama model belum diisi.");return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
