@@ -7,6 +7,8 @@ use windows::Win32::{Foundation::*,System::{LibraryLoader::GetModuleHandleW,Com:
 mod pages;
 mod reminder;
 mod settings;
+mod sticky_window;
+pub(crate) use sticky_window::spawn_floating_sticky_note;
 const WAKE:u32=WM_APP+1;const TRAY:u32=WM_APP+2;const MORPH_MSG:u32=WM_APP+5;
 unsafe extern "system" {
     fn MessageBeep(utype: u32) -> i32;
@@ -339,6 +341,8 @@ impl Shell {
                 (550.,if self.reminder_index==3{362.}else{346.},27.)
             }else if self.tab=="Clipboard"{
                 (530.,236.,24.)
+            }else if self.tab=="Catatan"{
+                (540.,280.,24.)
             }else{
                 (ui::EXPANDED_WIDTH,ui::EXPANDED_HEIGHT,24.)
             }
@@ -362,6 +366,8 @@ impl Shell {
                 (158.,30.,15.)
             }else if self.tab == "Clipboard" {
                 (195.,30.,15.)
+            }else if self.tab == "Catatan" {
+                (180.,30.,15.)
             }else if self.tab == "Musik" {
                 if !self.track.playing && self.track.title.is_empty() {
                     (158.,30.,15.)
@@ -546,6 +552,16 @@ impl Shell {
     fn make_inputs(&mut self){unsafe{
         for &id in self.inputs.keys(){self.drafts.insert((self.input_page.clone(),id),self.input(id));}
         if self.input_page=="Tugas"{if let Some(note)=self.drafts.get(&("Tugas".into(),12)){self.state.notes=note.clone();}}
+        if self.input_page=="Catatan"{
+            let title=self.input(50);let content=self.input(51);
+            if let Some(note)=self.state.sticky_notes.get_mut(self.state.selected_note){
+                if !title.is_empty()||!content.is_empty(){
+                    note.title=if title.trim().is_empty(){"Catatan Baru".into()}else{title};
+                    note.content=content;
+                    note.updated_at=chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                }
+            }
+        }
         for(_,hwnd)in std::mem::take(&mut self.inputs){let _=DestroyWindow(hwnd);}if !self.expanded{self.rebuild_input_region();self.sync_input_host();return}
         self.input_page=if self.settings_open{"Pengaturan".into()}else{self.tab.clone()};
         if self.settings_open{
@@ -556,6 +572,13 @@ impl Shell {
             "Tugas"=>{self.edit(10,"",16.,46.,220.,28.,false,false);self.edit(11,"",244.,46.,100.,28.,false,false);let notes=self.state.notes.clone();self.edit(12,&notes,16.,184.,330.,68.,false,true);},
             "Cuaca"=>{let city=self.settings.weather_city.clone();self.edit(30,&city,28.,172.,140.,28.,false,false);self.edit(31,&self.settings.latitude.to_string(),176.,172.,86.,28.,false,false);self.edit(32,&self.settings.longitude.to_string(),270.,172.,86.,28.,false,false);},
             "AI"=>{let w=self.width;self.edit(40,"",28.,124.,w-56.,50.,false,true);self.edit(41,&self.settings.ai_endpoint.clone(),28.,72.,240.,26.,false,false);self.edit(42,&self.settings.ai_model.clone(),276.,72.,140.,26.,false,false);self.edit(43,"",28.,104.,240.,26.,true,false);},
+            "Catatan"=>{
+                if let Some(note)=self.state.sticky_notes.get(self.state.selected_note){
+                    let title=note.title.clone();let content=note.content.clone();
+                    self.edit(50,&title,256.,44.,140.,24.,false,false);
+                    self.edit(51,&content,256.,74.,self.width-276.,140.,false,true);
+                }
+            },
             _=>{}
         }
         self.rebuild_input_region();self.sync_input_host();
@@ -760,6 +783,7 @@ impl Shell {
                 if self.tab=="Reminder"&&rel_x<208.&&rel_y>48.{self.action(Action::ReminderStep(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
                 if self.tab=="Kalender"&&rel_x<308.&&rel_y>42.{self.action(Action::Month(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
                 if self.tab=="Clipboard"&&rel_y>42.{self.action(Action::ClipPage(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
+                if self.tab=="Catatan"&&rel_y>42.{let total=self.state.sticky_notes.len();if total>0{let delta=if wheel_delta>0{-1}else{1};let next=(self.state.selected_note as i32+delta).clamp(0,(total-1)as i32)as usize;if next!=self.state.selected_note{self.action(Action::NoteSelect(next));}}return LRESULT(0);}
                 if self.tab=="Musik"&&self.lyric_mode&&rel_x>=250.{
                     if !self.lyrics.is_empty(){
                         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
@@ -1274,6 +1298,16 @@ impl Shell {
                             "0 klip".to_string()
                         };
                         ("📋", 0x38bdf8, text)
+                    }
+                    "Catatan" => {
+                        let count = self.state.sticky_notes.len();
+                        let text = if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
+                            let snip: String = note.title.chars().take(14).collect();
+                            if snip.is_empty() { format!("{} catatan", count) } else { snip }
+                        } else {
+                            "0 catatan".to_string()
+                        };
+                        ("✎", 0xfef08a, text)
                     }
                     _ => {
                         ("•", 0xffffff, self.tab.clone())

@@ -9,6 +9,7 @@ impl Shell {
             "Kalender"=>self.calendar_page(p),
             "Reminder"=>self.reminder_page(p),
             "Clipboard"=>self.clipboard_page(p),
+            "Catatan"=>self.notes_page(p),
             _=>{p.text("Pilih modul melalui Pengaturan.",24.,140.,620.,80.,18.,MUTED,false);}
         }
     }}
@@ -512,6 +513,125 @@ impl Shell {
         }
     }}
 
+    fn notes_page(&mut self, p: &mut Painter) { unsafe {
+        let w = self.width;
+        let left_x = 22.;
+        let left_w = 212.;
+
+        // ==========================================
+        // LEFT PANE: Sticky Notes List
+        // ==========================================
+        p.text("CATATAN STICKY", left_x, 46., 120., 18., 11.5, 0xfef08a, true);
+        self.button_h(p, "+ Baru", left_x + 140., 43., 72., 20., Action::NoteAdd, true);
+
+        let total_notes = self.state.sticky_notes.len();
+        if total_notes == 0 {
+            p.text("Belum ada catatan.", left_x + 6., 86., left_w - 12., 18., 11.0, 0x94a3b8, false);
+            p.text("Klik tombol '+ Baru' di atas untuk membuat catatan tempel pertama Anda.", left_x + 6., 108., left_w - 12., 36., 9.5, 0x64748b, false);
+        } else {
+            let max_visible = 5;
+            if self.state.selected_note >= total_notes {
+                self.state.selected_note = total_notes.saturating_sub(1);
+            }
+            let start = if total_notes <= max_visible {
+                0
+            } else {
+                self.state.selected_note.saturating_sub(max_visible - 1).min(total_notes - max_visible)
+            };
+            let end = (start + max_visible).min(total_notes);
+
+            for (slot, idx) in (start..end).enumerate() {
+                let note = &self.state.sticky_notes[idx];
+                let item_y = 68. + slot as f32 * 35.;
+                let is_selected = idx == self.state.selected_note;
+                let item_act = Action::NoteSelect(idx);
+                let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
+
+                if is_selected {
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xfef08a, 0.16);
+                    p.stroke(left_x, item_y, left_w, 32., 6., 0xfef08a, 1.2);
+                } else if item_hovered {
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.08);
+                    p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.12);
+                } else {
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.03);
+                    p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.05);
+                }
+
+                if self.focused.as_ref() == Some(&item_act) {
+                    p.stroke(left_x - 1., item_y - 1., left_w + 2., 34., 7., 0xd5d5dc, 1.0);
+                }
+
+                let (note_col, _) = crate::sticky::NOTE_COLORS.get(note.color_idx as usize).copied().unwrap_or((0xfef08a, "Kuning"));
+                p.fill(left_x + 6., item_y + 8., 4., 16., 2., note_col);
+
+                let title = if note.title.trim().is_empty() { "Catatan Baru" } else { &note.title };
+                p.text_ellipsis(title, left_x + 16., item_y + 3., left_w - 24., 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
+
+                let snippet = if note.content.trim().is_empty() { "(Kosong)" } else { note.content.lines().next().unwrap_or("").trim() };
+                p.text_ellipsis(snippet, left_x + 16., item_y + 17., left_w - 24., 12., 9.0, if is_selected { 0xfef08a } else { 0x64748b }, false);
+
+                if self.hit_enabled {
+                    self.hits.push(Hit {
+                        rect: render::rect(left_x, item_y, left_w, 32.),
+                        action: item_act,
+                    });
+                }
+            }
+
+            let info = format!("{} / 20 catatan", total_notes);
+            p.text(&info, left_x + 4., 248., 120., 16., 9.5, 0x64748b, false);
+        }
+
+        // ==========================================
+        // SUBTLE VERTICAL DIVIDER (x = 244)
+        // ==========================================
+        p.fill_alpha(244., 44., 1., 220., 0., 0xffffff, 0.10);
+
+        // ==========================================
+        // RIGHT PANE: Editor & Controls (x = 256..w-20)
+        // ==========================================
+        let right_x = 256.;
+        let right_w = w - right_x - 20.;
+
+        if total_notes == 0 {
+            p.text_centered("✎", right_x, 82., right_w, 28., 24., 0xfef08a, 0.8, false);
+            p.text_centered("Quick Sticky Notes", right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
+            p.text_centered("Catat memo atau ide instan di sini.", right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+            p.text_centered("Bisa diexport ke Markdown (.md) atau TXT.", right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
+        } else if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
+            self.button_h(p, ".md", 402., 44., 34., 22., Action::NoteExport(0), false);
+            self.button_h(p, ".txt", 440., 44., 34., 22., Action::NoteExport(1), false);
+            self.button_h(p, "⧉ Pop", 478., 44., 42., 22., Action::NotePopout, true);
+
+            let (bg_col, _) = crate::sticky::NOTE_COLORS.get(note.color_idx as usize).copied().unwrap_or((0xfef08a, "Kuning"));
+            p.fill_alpha(right_x - 2., 72., right_w + 4., 144., 6., bg_col, 0.12);
+            p.stroke(right_x - 2., 72., right_w + 4., 144., 6., bg_col, 0.6);
+
+            for (ci, &(c_val, _)) in crate::sticky::NOTE_COLORS.iter().enumerate() {
+                let cx = right_x + ci as f32 * 20.;
+                let cy = 224.;
+                let is_color_sel = note.color_idx == ci as u8;
+                p.fill(cx, cy, 14., 14., 3., c_val);
+                if is_color_sel {
+                    p.stroke(cx - 2., cy - 2., 18., 18., 4., 0xffffff, 1.5);
+                }
+                if self.hit_enabled {
+                    self.hits.push(Hit {
+                        rect: render::rect(cx - 2., cy - 2., 18., 18.),
+                        action: Action::NoteColor(ci as u8),
+                    });
+                }
+            }
+
+            self.button_h(p, "📋 Salin", 368., 221., 64., 20., Action::NoteExport(2), false);
+            self.button_h(p, "🗑 Hapus", 436., 221., 64., 20., Action::NoteDelete(note.id), false);
+
+            let update_lbl = format!("Diperbarui: {}", note.updated_at);
+            p.text(&update_lbl, right_x, 248., 240., 14., 9.0, 0x64748b, false);
+        }
+    }}
+
     pub(super) fn action(&mut self,action:Action){
         let transient=matches!(&action,Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..));
         match action{
@@ -730,7 +850,157 @@ impl Shell {
                 4=>{self.settings.minimal=true;self.set_expanded(false);},
                 _=>{}
             },
-            Action::NoteAdd | Action::NoteSelect(..) | Action::NoteDelete(..) | Action::NoteColor(..) | Action::NoteExport(..) | Action::NotePopout => {},
+            Action::NoteAdd => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        if !title.is_empty() || !content.is_empty() {
+                            note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                            note.content = content;
+                            note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                        }
+                    }
+                }
+                if self.state.sticky_notes.len() >= 20 {
+                    self.notice("Maksimal 20 catatan sticky tercapai.");
+                } else {
+                    let new_id = self.state.sticky_notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+                    let now_str = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    let new_note = crate::sticky::StickyNote {
+                        id: new_id,
+                        title: "Catatan Baru".into(),
+                        content: String::new(),
+                        color_idx: 0,
+                        updated_at: now_str,
+                    };
+                    self.state.sticky_notes.insert(0, new_note);
+                    self.state.selected_note = 0;
+                    self.save();
+                    self.make_inputs();
+                    self.notice("Catatan baru ditambahkan ✨");
+                    self.invalidate();
+                }
+            },
+            Action::NoteSelect(idx) => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                        note.content = content;
+                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    }
+                }
+                if idx < self.state.sticky_notes.len() {
+                    self.state.selected_note = idx;
+                    self.save();
+                    self.make_inputs();
+                    self.invalidate();
+                }
+            },
+            Action::NoteDelete(id) => {
+                self.state.sticky_notes.retain(|n| n.id != id);
+                if self.state.selected_note >= self.state.sticky_notes.len() {
+                    self.state.selected_note = self.state.sticky_notes.len().saturating_sub(1);
+                }
+                self.save();
+                self.make_inputs();
+                self.notice("Catatan telah dihapus.");
+                self.invalidate();
+            },
+            Action::NoteColor(ci) => {
+                if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                    note.color_idx = ci % 5;
+                    self.save();
+                    self.invalidate();
+                }
+            },
+            Action::NoteExport(kind) => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                        note.content = content;
+                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    }
+                    self.save();
+                }
+                if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
+                    match kind {
+                        0 => {
+                            let export_dir = std::path::PathBuf::from("data").join("exports");
+                            match crate::sticky::export_note_to_markdown(&export_dir, &note) {
+                                Ok(path) => {
+                                    unsafe {
+                                        use windows::Win32::UI::Shell::ShellExecuteW;
+                                        use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                        let path_w: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+                                        ShellExecuteW(None, windows::core::w!("open"), PCWSTR(path_w.as_ptr()), None, None, SW_SHOW);
+                                    }
+                                    self.notice("Diexport ke Markdown (.md) di data/exports/ 📄");
+                                }
+                                Err(e) => self.notice(format!("Gagal export: {}", e)),
+                            }
+                        }
+                        1 => {
+                            let export_dir = std::path::PathBuf::from("data").join("exports");
+                            match crate::sticky::export_note_to_txt(&export_dir, &note) {
+                                Ok(path) => {
+                                    unsafe {
+                                        use windows::Win32::UI::Shell::ShellExecuteW;
+                                        use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                        let path_w: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+                                        ShellExecuteW(None, windows::core::w!("open"), PCWSTR(path_w.as_ptr()), None, None, SW_SHOW);
+                                    }
+                                    self.notice("Diexport ke TXT (.txt) di data/exports/ 📄");
+                                }
+                                Err(e) => self.notice(format!("Gagal export: {}", e)),
+                            }
+                        }
+                        2 => {
+                            let full_text = format!("{}\r\n\r\n{}", note.title, note.content);
+                            if crate::clipboard::set_clipboard_text(&full_text) {
+                                self.last_clipboard_seq = crate::clipboard::get_sequence_number();
+                                self.notice("Isi catatan disalin ke clipboard! 📋");
+                            } else {
+                                self.notice("Gagal menyalin ke clipboard.");
+                            }
+                        }
+                        3 => {
+                            unsafe {
+                                use windows::Win32::UI::Shell::ShellExecuteW;
+                                use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                let protocol = windows::core::w!("ms-stickynotes:");
+                                let res = ShellExecuteW(None, windows::core::w!("open"), protocol, None, None, SW_SHOW);
+                                if res.0 as isize > 32 {
+                                    self.notice("Membuka Sticky Notes Windows... 📌");
+                                } else {
+                                    self.notice("Sticky Notes Windows tidak ditemukan.");
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            },
+            Action::NotePopout => {
+                if self.input_page == "Catatan" {
+                    let title = self.input(50);
+                    let content = self.input(51);
+                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
+                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
+                        note.content = content;
+                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    }
+                    self.save();
+                }
+                if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
+                    super::spawn_floating_sticky_note(&note.title, &note.content, note.color_idx);
+                    self.notice("Catatan sticky melayang di desktop! 📌");
+                }
+            },
         }
         for module in MODULES{if !self.settings.enabled(module){self.cancel_job(module);}}
         if !self.settings.enabled("Musik"){self.cancel_job("Artwork");self.cover=None;self.cover_key=0;self.lyrics_key.clear();self.plain_lyrics.clear();self.lyric_offset=0;}

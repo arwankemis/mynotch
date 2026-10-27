@@ -152,4 +152,17 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_sticky_note_default_and_color_palette() {
+        let note = StickyNote::default();
+        assert_eq!(note.title, "Catatan Baru");
+        assert_eq!(note.color_idx, 0);
+        assert_eq!(NOTE_COLORS.len(), 5);
+        assert_eq!(NOTE_COLORS[0].1, "Kuning");
+        assert_eq!(NOTE_COLORS[1].1, "Biru");
+        assert_eq!(NOTE_COLORS[2].1, "Hijau");
+        assert_eq!(NOTE_COLORS[3].1, "Pink");
+        assert_eq!(NOTE_COLORS[4].1, "Ungu");
+    }
 }

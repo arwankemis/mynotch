@@ -11,7 +11,7 @@
 use std::time::{Duration, Instant};
 
 /// One vector icon vocabulary for navigation, settings and compact status.
-pub fn module_icon(module:&str)->&'static str{match module{"Musik"=>"music","Kalender"=>"calendar","Reminder"=>"bell","Clipboard"=>"clipboard",_=>"bell"}}
+pub fn module_icon(module:&str)->&'static str{match module{"Musik"=>"music","Kalender"=>"calendar","Reminder"=>"bell","Clipboard"=>"clipboard","Catatan"=>"edit",_=>"bell"}}
 
 /// Match the integer HWND position and the D2D origin in physical pixels.
 pub fn panel_origin_y(bottom:bool,height:f32,scale:f32)->f32{

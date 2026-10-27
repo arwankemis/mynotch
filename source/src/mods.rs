@@ -27,6 +27,7 @@ pub fn available_mods() -> Vec<ModManifest> {
     ]
 }
 
+#[allow(dead_code)]
 pub fn is_mod_installed(root: &Path, id: &str) -> bool {
     let mod_file = root.join("mods").join(format!("{id}.mod.json"));
     mod_file.exists()
