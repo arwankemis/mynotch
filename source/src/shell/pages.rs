@@ -679,6 +679,9 @@ impl Shell {
                     self.lyric_mode=false;
                     self.tab_fade=Some((self.tab.clone(),Instant::now(),dir));
                     self.tab=tab;
+                    if self.hover_stage == 1 && (self.tab == "Musik" || self.tab == "Catatan") {
+                        self.trigger_stage1_temporary(5);
+                    }
                     self.settings_open=false;
                     let from=self.geometry();
                     self.morph=Some(ui::Morph::new(from,self.target_geometry()));
@@ -880,6 +883,7 @@ impl Shell {
                     };
                     self.state.sticky_notes.insert(0, new_note);
                     self.state.selected_note = 0;
+                    self.trigger_stage1_temporary(5);
                     self.save();
                     self.make_inputs();
                     self.notice("Catatan baru ditambahkan ✨");
@@ -902,6 +906,7 @@ impl Shell {
                 }
                 if idx < self.state.sticky_notes.len() {
                     self.state.selected_note = idx;
+                    self.trigger_stage1_temporary(5);
                     self.save();
                     self.make_inputs();
                     self.invalidate();

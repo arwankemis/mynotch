@@ -9,7 +9,7 @@ mod reminder;
 mod settings;
 mod sticky_window;
 pub(crate) use sticky_window::spawn_floating_sticky_note;
-const WAKE:u32=WM_APP+1;const TRAY:u32=WM_APP+2;const MORPH_MSG:u32=WM_APP+5;
+const WAKE:u32=WM_APP+1;const TRAY:u32=WM_APP+2;const MORPH_MSG:u32=WM_APP+5;const EM_SETSEL:u32=0x00B1;
 unsafe extern "system" {
     fn MessageBeep(utype: u32) -> i32;
 }
@@ -100,6 +100,7 @@ pub(super) struct Shell {
     /// Startup fade-in: ramps 0→1 over ~300 ms (20 ticks × 16 ms via timer 11).
     /// Permanently 1.0 once fully visible; timer 11 is killed at that point.
     startup_alpha:f32,
+    pub stage1_temporary_until: Option<Instant>,
 }
 #[derive(Clone,serde::Deserialize)]struct HolidayRecord{date:NaiveDate,name:String,#[serde(default)]collective_leave:bool}
 #[derive(serde::Deserialize)]struct HolidayFile{holidays:Vec<HolidayRecord>}
@@ -145,7 +146,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         render_ready:false,
         cover:None,cover_key:0,preview_silent:preview&&!live_preview,
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,};
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,stage1_temporary_until:None,};
     app.tab=app.settings.default_tab.clone();
     if !app.settings.enabled(&app.tab)||!MODULES.contains(&app.tab.as_str()){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
     app.load_holidays();
@@ -162,14 +163,41 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
     if !app.preview_silent{app.start_media();}
     
     app.clock_timer();
+    if !app.preview && app.hover_stage == 1 && (app.tab == "Musik" || app.tab == "Catatan") {
+        app.trigger_stage1_temporary(5);
+    }
     if !app.preview{SetTimer(Some(hwnd),11,16,None);}
     SetTimer(Some(hwnd),5,150,None);
     if args.iter().any(|s|s=="--suspend-fixture"){SetTimer(Some(hwnd),7,4000,None);SetTimer(Some(hwnd),8,7500,None);}
     APP.with(|cell|*cell.borrow_mut()=Some(app));
     let _=ShowWindow(hwnd,SW_SHOWNOACTIVATE);let _=InvalidateRect(Some(hwnd),None,false);
-    let mut message=MSG::default();while GetMessageW(&mut message,None,0,0).as_bool(){let _=TranslateMessage(&message);DispatchMessageW(&message);}
+    let mut message=MSG::default();
+    while GetMessageW(&mut message,None,0,0).as_bool(){
+        if message.message == WM_KEYDOWN && message.wParam.0 == 0x41 {
+            let ctrl = (GetKeyState(0x11) as u16 & 0x8000) != 0;
+            if ctrl && is_edit_control(message.hwnd) {
+                let _ = SendMessageW(message.hwnd, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+                continue;
+            }
+        }
+        let _=TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
     APP.with(|cell|{cell.borrow_mut().take();});CoUninitialize();Ok(())
 }}
+
+fn is_edit_control(hwnd: HWND) -> bool {
+    unsafe {
+        let mut buf = [0u16; 16];
+        let len = GetClassNameW(hwnd, &mut buf);
+        if len > 0 {
+            let s = String::from_utf16_lossy(&buf[..len as usize]);
+            s.eq_ignore_ascii_case("EDIT")
+        } else {
+            false
+        }
+    }
+}
 
 unsafe extern "system" fn wndproc(hwnd:HWND,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{
     // DestroyWindow dispatches WM_DESTROY reentrantly while the command handler
@@ -367,11 +395,13 @@ impl Shell {
             }else if self.tab == "Clipboard" {
                 (195.,30.,15.)
             }else if self.tab == "Catatan" {
-                (180.,30.,15.)
-            }else if self.tab == "Musik" {
-                if !self.track.playing && self.track.title.is_empty() {
-                    (158.,30.,15.)
+                if self.is_stage1_temporary_active() {
+                    (180.,30.,15.)
                 } else {
+                    (158.,30.,15.)
+                }
+            }else if self.tab == "Musik" {
+                if self.is_stage1_temporary_active() && (self.track.playing || !self.track.title.is_empty()) {
                     let len = if !self.track.artist.is_empty() {
                         self.track.title.chars().count() + self.track.artist.chars().count() + 3
                     } else {
@@ -379,6 +409,8 @@ impl Shell {
                     };
                     let w = (len as f32 * 7.2 + 110.).clamp(180., 340.);
                     (w, 30., 15.)
+                } else {
+                    (158.,30.,15.)
                 }
             }else{
                 (180.,30.,15.)
@@ -387,11 +419,23 @@ impl Shell {
             (50.,10.,5.)
         }
     }
+    pub fn is_stage1_temporary_active(&self) -> bool {
+        self.stage1_temporary_until.is_some_and(|until| Instant::now() < until)
+    }
+    pub fn trigger_stage1_temporary(&mut self, duration_secs: u64) {
+        self.stage1_temporary_until = Some(Instant::now() + Duration::from_secs(duration_secs));
+        unsafe {
+            SetTimer(Some(self.hwnd), 6, (duration_secs * 1000) as u32, None);
+        }
+    }
     fn set_hover_stage(&mut self,stage:u8){
         if self.fullscreen{return}
         if self.hover_stage==stage{return}
         if stage==0{
             self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
+        }
+        if stage == 1 && !self.lyric_mode && (self.tab == "Musik" || self.tab == "Catatan") {
+            self.trigger_stage1_temporary(5);
         }
         let from=self.geometry();
         self.hover_stage=stage;
@@ -847,7 +891,7 @@ impl Shell {
                 5=>{if !self.suspended{self.sync_foreground();}},
                 6=>{
                     let _=KillTimer(Some(self.hwnd),6);
-
+                    self.stage1_temporary_until = None;
                     if self.hover_stage<2{
                         let from=self.geometry();
                         self.morph=Some(ui::Morph::new(from,self.target_geometry()));
@@ -980,7 +1024,7 @@ impl Shell {
                 if cover_key!=0{let bytes=track.artwork.clone();self.job("Artwork",move||Event::Artwork(cover_key,crate::artwork::decode(&bytes)));}
             }
             if self.preview&&self.track.playing!=track.playing{eprintln!("media playing={} can_seek={}",track.playing,track.can_seek);}
-            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
+            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;if !self.lyric_mode{self.trigger_stage1_temporary(5);}if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
             if self.hover_stage==1 && !self.lyric_mode {
                 let target=self.target_geometry();
                 if (self.width-target.0).abs()>2.0||(self.height-target.1).abs()>2.0{
@@ -1261,69 +1305,70 @@ impl Shell {
             }else{
                 p.clip(0.,0.,self.width,self.height);
 
-                let (_symbol, _sym_color, info_text) = match self.tab.as_str() {
-                    
-                    "Kalender" => {
-                        let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
-                        let cal = format!("{} {}", self.day, month_str);
-                        ("📅", 0xffffff, cal)
-                    }
-                    "Reminder" => {
-                        let rem = if self.focus.remaining().is_zero() {
-                            self.settings.focus_minutes as f64 * 60.
-                        } else {
-                            self.focus.remaining().as_secs_f64()
-                        };
-                        let foc = time_label(rem);
-                        match self.reminder_index{
-                            1=>("💧",0x65cfe3,format!("{} ml",self.state.water.iter().filter(|d|d.date==Local::now().date_naive()).map(|d|d.ml).sum::<u32>())),
-                            2=>("◷",0xb8a1ee,self.stretch_deadline.map(|d|format!("{}s",d.saturating_duration_since(Instant::now()).as_secs())).unwrap_or("Peregangan".into())),
-                            3=>("◷",0xdac68d,"Sholat".into()),
-                            _=>("🎯",0xffa46b,foc)
+                let (icon, info_text) = if !self.is_stage1_temporary_active() && (self.tab == "Musik" || self.tab == "Catatan") {
+                    let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
+                    let cal = format!("{} {}", self.day, month_str);
+                    ("calendar", cal)
+                } else {
+                    match self.tab.as_str() {
+                        "Kalender" => {
+                            let month_str = match self.month { 1=>"Jan", 2=>"Feb", 3=>"Mar", 4=>"Apr", 5=>"Mei", 6=>"Jun", 7=>"Jul", 8=>"Ags", 9=>"Sep", 10=>"Okt", 11=>"Nov", _=>"Des" };
+                            let cal = format!("{} {}", self.day, month_str);
+                            ("calendar", cal)
                         }
-                    }
-                    
-                    "Musik" => {
-                        let text = if self.track.title.is_empty() {
-                            "Musik".into()
-                        } else if self.track.artist.is_empty() {
-                            self.track.title.clone()
-                        } else {
-                            format!("{} · {}", self.track.title, self.track.artist)
-                        };
-                        ("♫", 0xffffff, text)
-                    }
-                    "Clipboard" => {
-                        let count = self.state.clipboard_history.len();
-                        let text = if let Some(first) = self.state.clipboard_history.first() {
-                            let snip: String = first.text.lines().next().unwrap_or("").trim().chars().take(14).collect();
-                            if snip.is_empty() {
-                                format!("{} klip", count)
+                        "Reminder" => {
+                            let rem = if self.focus.remaining().is_zero() {
+                                self.settings.focus_minutes as f64 * 60.
                             } else {
-                                format!("{snip}…")
-                            }
-                        } else {
-                            "0 klip".to_string()
-                        };
-                        ("📋", 0x38bdf8, text)
-                    }
-                    "Catatan" => {
-                        let count = self.state.sticky_notes.len();
-                        let text = if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
-                            let snip: String = note.title.chars().take(14).collect();
-                            if snip.is_empty() { format!("{} catatan", count) } else { snip }
-                        } else {
-                            "0 catatan".to_string()
-                        };
-                        ("✎", 0xfef08a, text)
-                    }
-                    _ => {
-                        ("•", 0xffffff, self.tab.clone())
+                                self.focus.remaining().as_secs_f64()
+                            };
+                            let foc = time_label(rem);
+                            let text = match self.reminder_index{
+                                1=>format!("{} ml",self.state.water.iter().filter(|d|d.date==Local::now().date_naive()).map(|d|d.ml).sum::<u32>()),
+                                2=>self.stretch_deadline.map(|d|format!("{}s",d.saturating_duration_since(Instant::now()).as_secs())).unwrap_or("Peregangan".into()),
+                                3=>"Sholat".into(),
+                                _=>foc
+                            };
+                            let ic = ["timer","droplet","person","moon"][self.reminder_index];
+                            (ic, text)
+                        }
+                        "Musik" => {
+                            let text = if self.track.title.is_empty() {
+                                "Musik".into()
+                            } else if self.track.artist.is_empty() {
+                                self.track.title.clone()
+                            } else {
+                                format!("{} · {}", self.track.title, self.track.artist)
+                            };
+                            ("music", text)
+                        }
+                        "Clipboard" => {
+                            let count = self.state.clipboard_history.len();
+                            let text = if let Some(first) = self.state.clipboard_history.first() {
+                                let snip: String = first.text.lines().next().unwrap_or("").trim().chars().take(14).collect();
+                                if snip.is_empty() { format!("{} klip", count) } else { format!("{snip}…") }
+                            } else {
+                                "0 klip".to_string()
+                            };
+                            ("clipboard", text)
+                        }
+                        "Catatan" => {
+                            let count = self.state.sticky_notes.len();
+                            let text = if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
+                                let snip: String = note.title.chars().take(14).collect();
+                                if snip.is_empty() { format!("{} catatan", count) } else { snip }
+                            } else {
+                                "0 catatan".to_string()
+                            };
+                            ("edit", text)
+                        }
+                        _ => {
+                            (ui::module_icon(&self.tab), self.tab.clone())
+                        }
                     }
                 };
 
                 // 1. Symbol / icon di kiri (x = 10, w = 16)
-                let icon=if self.tab=="Reminder"{["timer","droplet","person","moon"][self.reminder_index]}else{ui::module_icon(&self.tab)};
                 p.outline_icon(icon,10.,(self.height-14.)/2.,14.,0xd5d5dc);
 
                 // 2. Tombol chevron up di sisi paling kanan
@@ -1655,4 +1700,12 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
     #[test]fn minimal_mode_collapses_directly_to_stage0(){assert_eq!(collapse_target_stage(true),0);assert_eq!(collapse_target_stage(false),1);assert_eq!(initial_hover_stage(false,true),0);assert_eq!(initial_hover_stage(false,false),1);}
     #[test]fn toast_click_maps_all_reminder_kinds_including_prayer(){assert_eq!(toast_target_reminder(ToastKind::Focus),Some(0));assert_eq!(toast_target_reminder(ToastKind::Water),Some(1));assert_eq!(toast_target_reminder(ToastKind::Stretch),Some(2));assert_eq!(toast_target_reminder(ToastKind::Prayer),Some(3));assert_eq!(toast_target_reminder(ToastKind::Generic),None);}
     #[test]fn prayer_summary_formats_zero_lead_as_tepat_waktu(){assert_eq!(settings::prayer_lead_summary("Jakarta",0),"Jakarta · Tepat waktu");assert_eq!(settings::prayer_lead_summary("Bandung",5),"Bandung · 5 menit sebelumnya");}
+    #[test]
+    fn stage1_temporary_behavior_expires_cleanly() {
+        let until = Some(Instant::now() + Duration::from_millis(50));
+        assert!(until.is_some_and(|u| Instant::now() < u));
+
+        let expired = Some(Instant::now() - Duration::from_millis(10));
+        assert!(!expired.is_some_and(|u| Instant::now() < u));
+    }
 }
