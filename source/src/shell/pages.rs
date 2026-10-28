@@ -10,6 +10,7 @@ impl Shell {
             "Reminder"=>self.reminder_page(p),
             "Clipboard"=>self.clipboard_page(p),
             "Catatan"=>self.notes_page(p),
+            "Cuaca"=>self.weather_page(p),
             _=>{
                 let msg = crate::i18n::t("shell.select_module", &self.settings.language);
                 p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
@@ -418,43 +419,82 @@ impl Shell {
     fn clipboard_page(&mut self, p: &mut Painter) { unsafe {
         let lang = self.settings.language.clone();
         let w = self.width;
-        let total_clips = self.state.clipboard_history.len();
+        let left_x = 22.;
+        let left_w = 212.;
+
+        let filter = self.clip_filter.trim().to_lowercase();
+        let mut matching_indices: Vec<usize> = self.state.clipboard_history
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| filter.is_empty() || c.text.to_lowercase().contains(&filter))
+            .map(|(idx, _)| idx)
+            .collect();
+
+        matching_indices.sort_by_key(|&idx| !self.state.clipboard_history[idx].pinned);
+        let total_clips = matching_indices.len();
 
         if self.selected_clip >= total_clips && total_clips > 0 {
             self.selected_clip = total_clips - 1;
         }
 
         // ==========================================
-        // LEFT PANE: History List (x = 22..234, w = 212)
+        // LEFT PANE: Header & History List (x = 22..234, w = 212)
         // ==========================================
-        let left_x = 22.;
-        let left_w = 212.;
+        let search_active = self.clip_search_open || !self.clip_filter.is_empty();
 
-        p.text(crate::i18n::t("clipboard.title", &lang), left_x, 46., 90., 18., 10.5, 0x8a9291, true);
-        let badge_text = format!("({})", total_clips);
-        p.text(&badge_text, left_x + 84., 46., 40., 18., 10.0, 0x38bdf8, true);
+        if !search_active {
+            let search_btn_hover = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + 28. && py >= 41. && py <= 63.);
+            if search_btn_hover {
+                p.fill_alpha(left_x, 41., 28., 22., 6., 0xffffff, 0.10);
+            }
+            p.outline_icon("search", left_x + 6., 44., 15., if search_btn_hover { 0xffffff } else { 0x94a3b8 });
+            if self.hit_enabled {
+                self.hits.push(Hit { rect: render::rect(left_x, 41., 28., 22.), action: Action::ToggleClipSearch });
+            }
 
-        if total_clips > 0 {
-            self.button_h(p, crate::i18n::t("clipboard.clear", &lang), left_x + 140., 44., 72., 20., Action::ClearClips, false);
+            if !self.state.clipboard_history.is_empty() {
+                self.button_h(p, crate::i18n::t("clipboard.clear", &lang), left_x + left_w - 70., 42., 70., 21., Action::ClearClips, false);
+            }
+        } else {
+            p.outline_icon("search", left_x + 2., 44., 15., 0x38bdf8);
+
+            let close_x = left_x + left_w - 22.;
+            let close_hover = self.pointer.is_some_and(|(px, py)| px >= close_x && px <= close_x + 22. && py >= 41. && py <= 63.);
+            if close_hover {
+                p.fill_alpha(close_x, 41., 22., 22., 5., 0xffffff, 0.12);
+            }
+            p.text_centered("✕", close_x, 41., 22., 22., 11., if close_hover { 0xffffff } else { 0x94a3b8 }, 1.0, false);
+            if self.hit_enabled {
+                self.hits.push(Hit { rect: render::rect(close_x, 41., 22., 22.), action: Action::ToggleClipSearch });
+            }
+
+            p.fill(left_x, 63., left_w, 1.5, 0.5, 0x38bdf8);
         }
 
         if total_clips == 0 {
-            p.text(crate::i18n::t("clipboard.no_history", &lang), left_x, 80., left_w, 20., 11., 0x6e7681, false);
-            p.text(crate::i18n::t("clipboard.hint", &lang), left_x, 104., left_w, 54., 10., 0x475569, false);
+            let empty_msg = if !self.clip_filter.is_empty() {
+                if lang == "en" { "No matching clips found." } else { "Tidak ada klip yang cocok." }
+            } else {
+                crate::i18n::t("clipboard.no_history", &lang)
+            };
+            p.text(empty_msg, left_x, 80., left_w, 20., 11., 0x6e7681, false);
+            if self.clip_filter.is_empty() {
+                p.text(crate::i18n::t("clipboard.hint", &lang), left_x, 104., left_w, 54., 10., 0x475569, false);
+            }
         } else {
             let start = self.clip_offset.min(total_clips.saturating_sub(1));
-            let visible_items: Vec<(usize, crate::clipboard::ClipItem)> = self.state.clipboard_history
+            let visible_items: Vec<(usize, usize, crate::clipboard::ClipItem)> = matching_indices
                 .iter()
                 .enumerate()
                 .skip(start)
                 .take(4)
-                .map(|(idx, item)| (idx, item.clone()))
+                .map(|(list_idx, &orig_idx)| (list_idx, orig_idx, self.state.clipboard_history[orig_idx].clone()))
                 .collect();
 
-            for (i, (abs_idx, item)) in visible_items.into_iter().enumerate() {
+            for (i, (list_idx, _orig_idx, item)) in visible_items.into_iter().enumerate() {
                 let item_y = 68. + i as f32 * 36.;
-                let is_selected = abs_idx == self.selected_clip;
-                let item_act = Action::SelectClip(abs_idx);
+                let is_selected = list_idx == self.selected_clip;
+                let item_act = Action::SelectClip(list_idx);
                 let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
 
                 if is_selected {
@@ -471,13 +511,18 @@ impl Shell {
                     p.stroke(left_x - 1., item_y - 1., left_w + 2., 34., 7., 0xd5d5dc, 1.0);
                 }
 
+                if item.pinned {
+                    p.text("\u{1F4CC}", left_x + left_w - 20., item_y + 8., 16., 16., 10.0, 0xfacc15, false);
+                }
+
                 let first_line = item.text.lines().next().unwrap_or("").trim();
                 let empty_txt = crate::i18n::t("clipboard.empty_text", &lang);
                 let display_title = if first_line.is_empty() { empty_txt } else { first_line };
-                p.text_ellipsis(display_title, left_x + 8., item_y + 3., left_w - 16., 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
+                let title_max_w = if item.pinned { left_w - 36. } else { left_w - 16. };
+                p.text_ellipsis(display_title, left_x + 8., item_y + 3., title_max_w, 15., 11.0, if is_selected { 0xffffff } else { 0xe2e8f0 }, is_selected);
 
                 let meta = crate::i18n::clip_meta(item.chars, item.lines, &lang);
-                let full_meta = format!("{} · {}", item.time, meta);
+                let full_meta = format!("{} \u{00B7} {}", item.time, meta);
                 p.text(&full_meta, left_x + 8., item_y + 17., left_w - 16., 12., 9.0, if is_selected { 0x93c5fd } else { 0x64748b }, false);
 
                 if self.hit_enabled {
@@ -507,19 +552,28 @@ impl Shell {
         let right_x = 256.;
         let right_w = w - right_x - 20.;
 
+        let selected_item = matching_indices.get(self.selected_clip).and_then(|&orig_idx| {
+            self.state.clipboard_history.get(orig_idx).cloned().map(|it| (orig_idx, it))
+        });
+
         if total_clips == 0 {
             p.text_centered("📋", right_x, 82., right_w, 28., 24., 0x38bdf8, 0.8, false);
             p.text_centered(crate::i18n::t("clipboard.empty_title", &lang), right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
             p.text_centered(crate::i18n::t("clipboard.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
             p.text_centered(crate::i18n::t("clipboard.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
-        } else if let Some(item) = self.state.clipboard_history.get(self.selected_clip).cloned() {
+        } else if let Some((orig_idx, item)) = selected_item {
             let clip_word = crate::i18n::t("clipboard.clip", &lang);
-            let title = format!("{} #{} · {}", clip_word, self.selected_clip + 1, item.time);
+            let title = format!("{} #{} \u{00B7} {}", clip_word, self.selected_clip + 1, item.time);
             p.text(&title, right_x, 46., 120., 18., 11.5, 0x38bdf8, true);
+
+            let pin_label = if item.pinned { crate::i18n::t("clipboard.unpin", &lang) } else { crate::i18n::t("clipboard.pin", &lang) };
+            let pin_w = 68.;
+            let pin_x = w - 20. - 98. - 8. - pin_w;
+            self.button_h(p, pin_label, pin_x, 43., pin_w, 22., Action::TogglePinClip(item.id), item.pinned);
 
             let btn_w = 98.;
             let btn_x = w - 20. - btn_w;
-            self.button_h(p, crate::i18n::t("clipboard.recopy", &lang), btn_x, 43., btn_w, 22., Action::CopyClip(self.selected_clip), true);
+            self.button_h(p, crate::i18n::t("clipboard.recopy", &lang), btn_x, 43., btn_w, 22., Action::CopyClip(orig_idx), true);
 
             let box_y = 69.;
             let box_h = 138.;
@@ -676,7 +730,7 @@ impl Shell {
     }}
 
     pub(super) fn action(&mut self,action:Action){
-        let transient=matches!(&action,Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..));
+        let transient=matches!(&action,Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom);
         match action{
             Action::TogglePin=>{
                 self.pinned=!self.pinned;
@@ -713,6 +767,7 @@ impl Shell {
                 self.settings.collective_leave=!self.settings.collective_leave;
             },
             Action::Tab(tab)=>{
+                self.stage1_media_until=None;
                 self.reminder_menu=None;
                 if self.tab == tab && self.hover_stage >= 2 {
                     self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
@@ -727,6 +782,9 @@ impl Shell {
                     self.lyric_mode=false;
                     self.tab_fade=Some((self.tab.clone(),Instant::now(),dir));
                     self.tab=tab;
+                    if self.tab == "Cuaca" && self.weather.is_none() {
+                        self.refresh_weather();
+                    }
                     if self.hover_stage == 1 && self.should_revert_stage1_to_calendar() {
                         self.trigger_stage1_temporary(5);
                     }
@@ -745,7 +803,7 @@ impl Shell {
                 self.save();
                 self.invalidate();
             },
-            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(5);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
+            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(6);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
             Action::InstallMod(id)=>{
                 let root=self.store.root.clone();
                 match crate::mods::install_mod(&root,&mut self.settings,&id){
@@ -758,7 +816,7 @@ impl Shell {
                 let root=self.store.root.clone();
                 match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
                     Ok(())=>{
-                        if self.tab=="Catatan"{
+                        if !self.settings.enabled(&self.tab){
                             self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
                             self.make_inputs();
                         }
@@ -782,11 +840,35 @@ impl Shell {
             Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
                 "auto_break"=>self.settings.auto_break=!self.settings.auto_break,
+                "startup"=>{
+                    let new_val=!self.settings.run_at_startup;
+                    if let Err(e)=crate::system::set_run_at_startup(new_val){
+                        self.notice(&format!("Error: {}",e));
+                    }else{
+                        self.settings.run_at_startup=new_val;
+                        let msg=if new_val{
+                            if self.settings.language=="en"{"Run at Windows startup enabled."}else{"Jalankan saat startup Windows diaktifkan."}
+                        }else{
+                            if self.settings.language=="en"{"Run at Windows startup disabled."}else{"Jalankan saat startup Windows dinonaktifkan."}
+                        };
+                        self.notice(msg);
+                    }
+                },
                 "focus_enabled"=>{self.settings.focus_enabled=!self.settings.focus_enabled;if !self.settings.focus_enabled{self.focus.pause();}},
                 "stretch_after_focus"=>self.settings.stretch_after_focus=!self.settings.stretch_after_focus,
                 "prayer_sound"=>self.settings.prayer_sound=!self.settings.prayer_sound,
                 "prayer_enabled"=>{self.settings.prayer_enabled=!self.settings.prayer_enabled;self.refresh_prayers(false);},
                 "message_preview"=>self.settings.message_preview=!self.settings.message_preview,
+                "software_renderer"=>{
+                    self.settings.software_renderer = !self.settings.software_renderer;
+                    self.save();
+                    let msg = if self.settings.software_renderer {
+                        if self.settings.language == "en" { "Low RAM Mode enabled. Please restart app to apply." } else { "Mode Hemat RAM aktif. Muat ulang aplikasi untuk menerapkan." }
+                    } else {
+                        if self.settings.language == "en" { "Hardware rendering enabled. Please restart app to apply." } else { "Akselerasi GPU aktif. Muat ulang aplikasi untuk menerapkan." }
+                    };
+                    self.notice(msg);
+                },
                 "fullscreen"=>{self.settings.hide_fullscreen=!self.settings.hide_fullscreen;self.save();},
                 "glow"=>{self.settings.glow=!self.settings.glow;self.save();},
                 "visualizer"=>{self.settings.visualizer=!self.settings.visualizer;self.sync_visualizer();self.save();},
@@ -871,6 +953,38 @@ impl Shell {
                 self.save();
                 self.invalidate();
             },
+            Action::ClearClipFilter=>{
+                self.clip_filter.clear();
+                self.clear_input(60);
+                self.clip_offset=0;
+                self.clip_search_open=false;
+                self.make_inputs();
+                self.invalidate();
+            },
+            Action::ToggleClipSearch=>{
+                self.clip_search_open = !self.clip_search_open;
+                if !self.clip_search_open {
+                    self.clip_filter.clear();
+                    self.clear_input(60);
+                    self.clip_offset = 0;
+                }
+                self.make_inputs();
+                if self.clip_search_open {
+                    if let Some(&edit_hwnd) = self.inputs.get(&60) {
+                        unsafe {
+                            let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(edit_hwnd));
+                        }
+                    }
+                }
+                self.invalidate();
+            },
+            Action::TogglePinClip(id)=>{
+                if let Some(item) = self.state.clipboard_history.iter_mut().find(|it| it.id == id) {
+                    item.pinned = !item.pinned;
+                    self.save();
+                    self.invalidate();
+                }
+            },
             Action::ClearClips=>{
                 self.state.clipboard_history.clear();
                 self.selected_clip=0;
@@ -887,7 +1001,70 @@ impl Shell {
             Action::Breath=>self.breathing=if self.breathing.is_some(){None}else{Some(Instant::now())},
             Action::Month(delta)=>{let index=self.year*12+self.month as i32-1+delta;self.year=index.div_euclid(12);self.month=(index.rem_euclid(12)+1)as u32;self.day=1;self.load_holidays();},Action::Day(day)=>self.day=day,
             Action::CalendarSave=>{let feed=self.input(20);match crate::secrets::protect(feed.trim()){Ok(secret)=>{self.settings.calendar_feed=secret;self.clear_input(20);self.refresh_agenda();},Err(e)=>self.notice(e)}},Action::CalendarRefresh=>self.refresh_agenda(),
-            Action::WeatherSave=>{match(self.input(31).trim().parse::<f64>(),self.input(32).trim().parse::<f64>()){(Ok(lat),Ok(lon))if lat.is_finite()&&lon.is_finite()&&(-90.0..=90.0).contains(&lat)&&(-180.0..=180.0).contains(&lon)=>{self.settings.latitude=lat;self.settings.longitude=lon;self.settings.weather_city=self.input(30);self.settings.weather_configured=true;self.refresh_weather();},_=>self.notice("Latitude/longitude tidak valid.")}},Action::WeatherRefresh=>self.refresh_weather(),
+            Action::WeatherSave=>{
+                let city = self.input(30).trim().to_string();
+                match(self.input(31).trim().parse::<f64>(),self.input(32).trim().parse::<f64>()){
+                    (Ok(lat),Ok(lon))if lat.is_finite()&&lon.is_finite()&&(-90.0..=90.0).contains(&lat)&&(-180.0..=180.0).contains(&lon)=>{
+                        self.reset_weather_location();
+                        self.settings.latitude=lat;
+                        self.settings.longitude=lon;
+                        self.settings.weather_city=if city.is_empty(){crate::i18n::t("weather.custom",&self.settings.language).to_string()}else{city};
+                        self.settings.weather_configured=true;
+                        self.weather_custom_open=false;
+                        self.morph=None;self.layout();
+                        self.save();
+                        self.make_inputs();
+                        self.refresh_weather();
+                        self.invalidate();
+                    },
+                    _=>self.notice(crate::i18n::t("weather.invalid_coords",&self.settings.language))
+                }
+            },
+            Action::WeatherRefresh=>self.refresh_weather(),
+            Action::WeatherToggleMenu=>{self.weather_menu_open=!self.weather_menu_open;},
+            Action::WeatherSetCity(city,lat,lon)=>{
+                self.reset_weather_location();
+                self.weather_custom_open=false;
+                self.settings.weather_city=city.to_string();
+                self.settings.latitude=lat;
+                self.settings.longitude=lon;
+                self.settings.weather_configured=true;
+                self.save();
+                self.make_inputs();
+                self.refresh_weather();
+                self.invalidate();
+            },
+            Action::WeatherToggleCustom=>{
+                self.weather_menu_open=false;
+                self.weather_custom_open=!self.weather_custom_open;
+                self.morph=None;self.layout();
+                self.make_inputs();
+                if !self.weather_custom_open{self.drafts.retain(|(page,id),_|page!="Cuaca"||!(30..=32).contains(id));}
+                self.invalidate();
+            },
+            Action::CheckUpdate=>{
+                self.update_status=super::UpdateStatus::Checking;
+                self.invalidate();
+                let api=self.online.clone();
+                self.job("Update",move||super::Event::Update(api.check_update()));
+            },
+            Action::DownloadUpdate=>{
+                if let super::UpdateStatus::Available(ref rel) = self.update_status {
+                    let zip_url = rel.assets.iter()
+                        .find(|a| a.name.ends_with(".zip"))
+                        .map(|a| a.browser_download_url.as_str())
+                        .unwrap_or(rel.html_url.as_str());
+                    crate::system::open_browser(zip_url);
+                }
+            },
+            Action::OpenReleaseNotes=>{
+                if let super::UpdateStatus::Available(ref rel) = self.update_status {
+                    crate::system::open_browser(&rel.html_url);
+                }
+            },
+            Action::OpenRepoUrl=>{
+                crate::system::open_browser("https://github.com/arwankemis/mynotch");
+            },
             Action::AiSave=>{let key=self.input(43);if !key.is_empty(){match crate::secrets::protect(&key){Ok(secret)=>self.settings.ai_key=secret,Err(e)=>{self.notice(e);return}}}self.settings.ai_endpoint=self.input(41).trim().into();self.settings.ai_model=self.input(42).trim().into();self.clear_input(43);self.notice("Pengaturan AI tersimpan.");},Action::AiSend=>self.send_ai(),Action::AiClear=>self.ai_messages.clear(),
             Action::ToggleLyrics=>{
                 self.lyric_mode=!self.lyric_mode;
@@ -1073,12 +1250,20 @@ impl Shell {
                 }
             },
         }
+        self.sync_weather_lifecycle();
         for module in MODULES{if !self.settings.enabled(module){self.cancel_job(module);}}
         if !self.settings.enabled("Musik"){self.cancel_job("Artwork");self.cover=None;self.cover_key=0;self.lyrics_key.clear();self.plain_lyrics.clear();self.lyric_offset=0;}
         self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.clock_timer();self.invalidate();
     }
     fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
-    fn refresh_weather(&mut self){if !self.settings.enabled("Cuaca")||!self.settings.weather_configured{self.notice("Simpan lokasi cuaca terlebih dahulu.");return}if self.jobs.contains_key("Cuaca"){return}let api=self.online.clone();let(lat,lon)=(self.settings.latitude,self.settings.longitude);self.job("Cuaca",move||Event::Weather(api.weather(lat,lon)));}
     fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice("Feed kalender dilepas.");return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
     fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice("Simpan API key dan model terlebih dahulu.");return}};if self.settings.ai_model.trim().is_empty(){self.notice("Nama model belum diisi.");return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
+
+        pub(super) fn hit(&mut self, x: f32, y: f32, w: f32, h: f32, action: Action) {
+        if self.hit_enabled {
+            self.hits.push(Hit { rect: render::rect(x, y, w, h), action });
+        }
+    }
+
+
 }

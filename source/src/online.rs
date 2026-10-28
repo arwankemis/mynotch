@@ -9,9 +9,9 @@ use std::{collections::HashMap, fs, io::Write, path::{Path, PathBuf}, sync::{Arc
 pub struct PrayerSchedule{pub city:String,pub date:String,pub times:Vec<String>}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ForecastDay { pub date: String, pub min: f64, pub max: f64, pub weather_code: u32, pub rain_chance: u32 }
+pub struct ForecastDay { pub date: String, pub min: f64, pub max: f64, pub weather_code: u32, #[serde(default)] pub rain_chance: Option<u32> }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ForecastHour { pub time: String, pub temperature: f64, pub weather_code: u32, pub rain_chance: u32 }
+pub struct ForecastHour { pub time: String, pub temperature: f64, pub weather_code: u32, #[serde(default)] pub rain_chance: Option<u32>, #[serde(default)] pub is_day: bool }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WeatherReport {
     pub temperature: f64,
@@ -28,6 +28,27 @@ pub struct WeatherReport {
 pub struct LyricsResult { pub plain_lyrics: String, pub synced_lyrics: String, pub instrumental: bool }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage { pub role: String, pub content: String }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReleaseAsset {
+    pub name: String,
+    pub size: u64,
+    pub browser_download_url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GithubRelease {
+    pub tag_name: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    pub html_url: String,
+    #[serde(default)]
+    pub published_at: Option<String>,
+    #[serde(default)]
+    pub assets: Vec<ReleaseAsset>,
+}
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache<T> { schema: u32, key: String, stored_at: u64, data: T }
@@ -58,9 +79,9 @@ impl OnlineService {
     pub fn weather(&self, latitude: f64, longitude: f64) -> Result<WeatherReport, String> {
         net::check_cancel()?;
         if !latitude.is_finite() || !longitude.is_finite() || !(-90.0..=90.0).contains(&latitude) || !(-180.0..=180.0).contains(&longitude) { return Err("Koordinat cuaca tidak valid.".into()); }
-        let key = format!("{latitude:.4},{longitude:.4}");
+        let key = format!("v2:{latitude:.4},{longitude:.4}");
         if let Some(report) = self.read_cache("weather", &key, 30 * 60) { return Ok(report); }
-        let url = format!("https://api.open-meteo.com/v1/forecast?latitude={latitude:.4}&longitude={longitude:.4}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto&forecast_days=7&timeformat=unixtime");
+        let url = format!("https://api.open-meteo.com/v1/forecast?latitude={latitude:.4}&longitude={longitude:.4}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto&forecast_days=2&forecast_hours=6&timeformat=unixtime");
         let body = net::get(&url)?;
         let report = parse_weather(&body)?;
         net::check_cancel()?;
@@ -123,6 +144,16 @@ impl OnlineService {
         parse_chat_response(request.kind, &body)
     }
 
+    pub fn check_update(&self) -> Result<Option<GithubRelease>, String> {
+        net::check_cancel()?;
+        let url = "https://api.github.com/repos/arwankemis/mynotch/releases";
+        let bytes = net::get(url)?;
+        net::check_cancel()?;
+        let releases: Vec<GithubRelease> = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("Gagal memproses data rilis: {e}"))?;
+        Ok(releases.into_iter().next())
+    }
+
     fn read_cache<T: DeserializeOwned>(&self, kind: &str, key: &str, ttl_seconds: u64) -> Option<T> {
         let path = cache_path(&self.root, kind, key);
         let metadata = fs::metadata(&path).ok()?;
@@ -180,21 +211,22 @@ fn parse_weather(body: &[u8]) -> Result<WeatherReport, String> {
     let mut daily = Vec::new();
     let data = &value["daily"];
     if let Some(times) = data["time"].as_array() {
-        for (index, time) in times.iter().take(7).enumerate() {
+        for (index, time) in times.iter().take(2).enumerate() {
             let Some(date) = timestamp(time, offset).and_then(|s| s.get(..10).map(str::to_owned)) else { continue; };
             let (Some(min), Some(max)) = (finite(&data["temperature_2m_min"][index]), finite(&data["temperature_2m_max"][index])) else { continue; };
-            daily.push(ForecastDay { date, min, max, weather_code: integer(&data["weather_code"][index]), rain_chance: integer(&data["precipitation_probability_max"][index]).min(100) });
+            if max<min{continue}
+            daily.push(ForecastDay { date, min, max, weather_code: integer(&data["weather_code"][index]), rain_chance: data["precipitation_probability_max"][index].as_u64().map(|chance|chance.min(100)as u32) });
         }
     }
     let mut hourly = Vec::new();
     let data = &value["hourly"];
     let now = current["time"].as_i64().unwrap_or(0);
     if let Some(times) = data["time"].as_array() {
-        for (index, time) in times.iter().take(7 * 24).enumerate() {
+        for (index, time) in times.iter().take(48).enumerate() {
             if time.as_i64().unwrap_or(0) < now - 3600 { continue; }
             let (Some(time), Some(temperature)) = (timestamp(time, offset), finite(&data["temperature_2m"][index])) else { continue; };
-            hourly.push(ForecastHour { time, temperature, weather_code: integer(&data["weather_code"][index]), rain_chance: integer(&data["precipitation_probability"][index]).min(100) });
-            if hourly.len() >= 24 { break; }
+            hourly.push(ForecastHour { time, temperature, weather_code: integer(&data["weather_code"][index]), rain_chance: data["precipitation_probability"][index].as_u64().map(|chance|chance.min(100)as u32), is_day: data["is_day"][index].as_u64()==Some(1) });
+            if hourly.len() >= 6 { break; }
         }
     }
     Ok(WeatherReport { temperature, feels_like, humidity: integer(&current["relative_humidity_2m"]).min(100), wind_kph: finite(&current["wind_speed_10m"]).unwrap_or(0.), weather_code: integer(&current["weather_code"]), is_day: current["is_day"].as_u64() == Some(1), updated_at, daily, hourly })
@@ -271,6 +303,19 @@ fn parse_chat_response(kind: ChatKind, body: &[u8]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn weather_preserves_unknown_daily_and_hourly_rain() {
+        let report=parse_weather(br#"{"utc_offset_seconds":25200,"current":{"time":1793199600,"temperature_2m":30},"daily":{"time":[1793199600],"temperature_2m_min":[25],"temperature_2m_max":[32],"precipitation_probability_max":[null]},"hourly":{"time":[1793199600],"temperature_2m":[30],"precipitation_probability":[null]}}"#).unwrap();
+        assert_eq!(report.daily[0].rain_chance,None);assert_eq!(report.hourly[0].rain_chance,None);
+    }
+    #[test]
+    fn weather_keeps_only_near_term_hours_and_preserves_night_icons() {
+        let start=1793199600_i64;
+        let times:Vec<_>=(0..48).map(|hour|start+hour*3600).collect();
+        let body=serde_json::to_vec(&json!({"utc_offset_seconds":25200,"current":{"time":start,"temperature_2m":30,"is_day":0},"hourly":{"time":times,"temperature_2m":vec![28.;48],"weather_code":vec![0;48],"is_day":vec![0;48]}})).unwrap();
+        let report=parse_weather(&body).unwrap();
+        assert!(report.hourly.len()<=6);
+        assert!(!report.hourly[0].is_day);
+    }
     #[test]
     fn ttl_and_cache_identity_are_bounded() {
         assert!(fresh(1000, 1029, 30)); assert!(!fresh(1000, 1030, 30)); assert!(!fresh(1001, 1000, 30));
@@ -302,8 +347,38 @@ mod tests {
     #[test]
     fn parses_weather_dates_in_response_offset() {
         let fixture=br#"{"utc_offset_seconds":25200,"current":{"time":1792796400,"temperature_2m":30,"apparent_temperature":33,"relative_humidity_2m":70,"wind_speed_10m":5,"weather_code":3,"is_day":1},"daily":{"time":[1792774800],"temperature_2m_min":[25],"temperature_2m_max":[32],"weather_code":[61],"precipitation_probability_max":[80]},"hourly":{"time":[1792796400],"temperature_2m":[30],"weather_code":[3],"precipitation_probability":[20]}}"#;
-        let weather=parse_weather(fixture).unwrap();assert_eq!(weather.temperature,30.);assert!(weather.updated_at.ends_with("+07:00"));assert_eq!(weather.daily[0].rain_chance,80);assert_eq!(weather.hourly.len(),1);
+        let weather=parse_weather(fixture).unwrap();assert_eq!(weather.temperature,30.);assert!(weather.updated_at.ends_with("+07:00"));assert_eq!(weather.daily[0].rain_chance,Some(80));assert_eq!(weather.hourly.len(),1);
     }
+    #[test]
+    fn test_version_comparison_for_releases() {
+        assert!(is_newer_release("v0.0.1.3", "0.0.1.2"));
+        assert!(is_newer_release("v0.0.2", "0.0.1.2"));
+        assert!(is_newer_release("v0.1.0-alpha", "0.0.1.2"));
+        assert!(is_newer_release("v1.0.0", "0.0.1.2"));
+        assert!(!is_newer_release("v0.0.1.2-alpha", "0.0.1.2"));
+        assert!(!is_newer_release("v0.0.1.2", "0.0.1.2"));
+        assert!(!is_newer_release("v0.0.1.1-alpha", "0.0.1.2"));
+        assert!(!is_newer_release("0.0.1.0", "0.0.1.2"));
+    }
+}
+
+pub fn parse_version_numbers(v: &str) -> Vec<u64> {
+    let cleaned = v.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+    let main_part = cleaned.split(['-', '+', ' ']).next().unwrap_or(cleaned);
+    main_part
+        .split('.')
+        .filter_map(|s| s.parse::<u64>().ok())
+        .collect()
+}
+
+pub fn is_newer_release(tag: &str, current: &str) -> bool {
+    let tag_nums = parse_version_numbers(tag);
+    let cur_nums = parse_version_numbers(current);
+    for (t, c) in tag_nums.iter().zip(cur_nums.iter()) {
+        if t > c { return true; }
+        if t < c { return false; }
+    }
+    tag_nums.len() > cur_nums.len() && tag_nums[cur_nums.len()..].iter().any(|&n| n > 0)
 }
 
 fn parse_prayers(bytes:&[u8],city:&str,date:&str)->Result<PrayerSchedule,String>{

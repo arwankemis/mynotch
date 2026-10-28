@@ -1,59 +1,87 @@
 # Changelog
 
-Semua pembaruan penting dan catatan rilis untuk **mynotch** didokumentasikan di berkas ini.
+Semua pembaruan penting dan catatan rilis untuk mynotch didokumentasikan di berkas ini.
 
 ---
 
-## [0.0.1.1 alpha] — 27 Oktober 2026
+## [0.0.1.2 alpha] - 28 Oktober 2026
 
-Rilis **0.0.1.1 (alpha)** adalah tonggak penting dalam penyempurnaan `mynotch`. Di versi ini, kami menindaklanjuti seluruh temuan audit menyeluruh terhadap UI/UX, memperbaiki bug fungsional, menambahkan fitur *Quick Sticky Notes* yang telah lama dinantikan, menghadirkan sistem mod modular, serta menambahkan dukungan bahasa antarmuka (Bahasa Indonesia & English) yang konsisten di semua tab.
+Rilis 0.0.1.2 alpha menambahkan kontrol volume master lewat scroll mouse, indikator baterai laptop, mod cuaca Open-Meteo, pencarian dan pin riwayat clipboard, opsi startup Windows, serta pemeriksa rilis GitHub.
 
-### 🌟 Fitur Baru (New Features)
+### Fitur baru
 
-- **Quick Sticky Notes (Catatan Cepat):**
-  - Tab baru *"Catatan"* (*Notes*) di notch dengan layout 2-kolom yang ringkas: daftar memo di kiri dan area baca/tulis di kanan.
-  - 5 palet warna pastel yang lembut (Kuning, Biru, Hijau, Pink, Ungu) untuk mengelompokkan catatan Anda secara visual.
-  - Fitur **Pop to Desktop**: klik tombol `⧉ Pop` untuk melepas catatan menjadi jendela melayang independen di desktop dengan pin *always-on-top*.
-  - Ekspor sekali klik: simpan catatan langsung ke format Markdown (`.md`) atau Plain Text (`.txt`), atau salin langsung seluruh isinya ke clipboard.
-  - Mekanisme *auto-save* instan tanpa perlu repot menekan tombol simpan manual.
-- **Sistem Mod & Ekstensi Modular:**
-  - Kategori baru *"Mod & Ekstensi"* di menu Pengaturan. Mod dikemas secara modular berbasis manifest (`.mod.json`) tanpa service latar belakang liar yang membebani CPU/RAM ketika fitur tidak diaktifkan.
-- **Dukungan Dua Bahasa Lengkap (Bilingual ID / EN):**
-  - Opsi pilihan bahasa di menu Pengaturan: **Bahasa Indonesia** dan **English**.
-  - Seluruh elemen antarmuka telah dilokalisasi secara utuh: judul tab atas, kalender (nama hari & bulan), submode reminder, status fokus/hidrasi/peregangan/sholat, tombol aksi, menu dropdown, kartu libur nasional, hingga pop-up toast notifikasi.
-- **Perilaku Stage 1 Cerdas (Smart Auto-revert):**
-  - Notch kini memiliki intuisi konteks: ketika Anda sedang mendengarkan musik dengan mode lirik aktif atau saat timer fokus sedang berjalan, notch akan tetap setia menampilkan status tersebut di Stage 1.
-  - Untuk tab lainnya (catatan, riwayat clipboard yang baru disalin, pengingat hidrasi, peregangan, atau sholat), notch akan menampilkan informasinya selama 5 detik, kemudian bertransisi kembali secara anggun (*smooth morph*) ke tampilan `Tanggal | Jam`.
+- Kontrol volume pada notch: gulirkan roda mouse di atas notch (Stage 0 dan Stage 1) untuk mengatur volume master Windows via Core Audio. HUD volume muncul sementara menampilkan persentase dan bar level.
+- Pemantau baterai di Stage 1: menampilkan persentase baterai laptop, ikon pengisian daya, dan peringatan baterai lemah di samping jam. Notifikasi toast muncul saat kabel adaptor terpasang atau dilepas.
+- Mod cuaca Open-Meteo:
+  - Panel native 560 x 240 dengan informasi suhu, kondisi bilingual, suhu terasa, kelembapan, kecepatan angin, peluang hujan, dan prakiraan per jam hingga empat jam ke depan.
+  - Background bergradasi dari hitam notch mengikuti kondisi langit serta status siang atau malam.
+  - Ikon MGC Weather dimuat dari atlas offline via WIC Direct2D (gaya gradasi pada panel dan prakiraan per jam; gaya color fill pada Stage 1).
+  - Pilihan kota preset untuk Jakarta, Bandung, dan Surabaya, serta formulir koordinat lintang dan bujur kustom.
+  - Refresh data dapat dipicu dengan klik tombol atau scroll mouse pada tab cuaca. Cache 30 menit dan pembatasan frekuensi refresh menjaga efisiensi jaringan. Mod bersifat opsional dan dapat dilepas lewat Pengaturan.
+- Pengelola clipboard:
+  - Tombol pin untuk menyematkan klip penting ke urutan teratas riwayat.
+  - Kolom pencarian instan untuk menyaring riwayat teks saat mengetik.
+- Jalankan saat startup Windows: opsi di menu Pengaturan > Umum yang memanfaatkan registry pengguna (HKCU) tanpa service latar belakang.
+- Pemeriksa pembaruan dalam aplikasi: menu Pembaruan di Pengaturan untuk memeriksa rilis baru dari GitHub, menampilkan versi terpasang, tag rilis baru, ukuran berkas, serta tautan unduh paket.
 
-### ⚡ Peningkatan & Kenyamanan UI/UX (Improvements & Polish)
+### Perbaikan dan penyempurnaan
 
-- **Pintasan `Ctrl+A` (Select All):** Kini Anda dapat memblok seluruh teks sekaligus di kotak judul catatan, kotak isi catatan, maupun kolom input teks lainnya tanpa suara *beep* Windows.
-- **Navigasi Roda Mouse (Mouse Wheel Scroll):** Gulirkan roda mouse untuk berpindah bulan secara cepat di Kalender, atau berpindah halaman di daftar riwayat Clipboard.
-- **Tombol "Ikuti" (Follow Lyrics):** Saat Anda menggulir teks lirik musik secara manual, tombol *"Ikuti"* akan muncul secara dinamis agar Anda bisa langsung melompat kembali ke baris lagu yang sedang dinyanyikan.
-- **Mode Minimal Disempurnakan:** Tampilan bar kecil (*minimal mode*) kini berupa kapsul hitam ramping yang solid tanpa glitch transparan atau outline artifisial.
-- **Pembersihan Efek Frosted Glass:** Menghilangkan efek frosted glass sintetis agar tampilan notch tetap setia pada estetika minimalis, bersih, dan berbobot ringan.
-- **Hover Debounce 140 ms:** Menambahkan jeda mikro saat kursor mouse menyentuh notch agar bilah tidak terpicu melebar tanpa sengaja saat kursor sekadar melintas.
-- **Penyesuaian Label Sholat:** Menampilkan teks *"Tepat waktu"* (atau *"On time"*) yang lebih natural ketika lead time notifikasi bernilai 0 menit.
-- **Lompat ke Libur Terdekat:** Mengklik kartu *"Libur Nasional Berikutnya"* di kalender kini langsung membawa tampilan kalender tepat ke tanggal libur yang bersangkutan.
-- **Fokus Keyboard & Aksesibilitas:** Seluruh kontrol tombol dan kartu interaktif kini memiliki penanda *focus ring* dan mendukung penekanan melalui tombol `Space` atau `Enter`.
-
-### 🐛 Perbaikan Bug (Bug Fixes)
-
-- **Isolasi Draf Catatan:** Memperbaiki bug di mana catatan yang baru dibuat setelah penghapusan catatan lama masih menampilkan isi teks sebelumnya.
-- **DirectWrite Word Wrapping:** Memperbaiki penanganan cache perender teks multiline agar teks panjang melakukan pembungkusan kata (*word-wrap*) secara rapi dan tidak meluap keluar layar.
-- **Pencegahan Kebocoran Memori & Handle:** Memperbaiki pelepasan handle GDI dan alokasi memori internal ICU pada pengurai lirik dan pengelola clipboard.
-- **Perlindungan Privasi Clipboard:** Mengabaikan secara otomatis format clipboard sensitif (`ClipboardHistoryIgnore` / `ExcludeClipboardContentFromMonitorProcessing`) dari aplikasi pengelola kata sandi (*Password Manager*).
-- **Transisi State Dropdown:** Memastikan menu pop-up pengaturan dan reminder tertutup bersih saat notch kembali ke mode bar kecil atau mode istirahat.
-- **Penanganan Notifikasi Prioritas:** Memperbaiki urutan klasifikasi toast agar notifikasi selesainya sesi fokus mendapatkan prioritas visual yang tepat.
+- Normalisasi layout Stage 1:
+  - Menyamakan format status kalender, cuaca, dan musik dengan gap 8 px di kedua sisi pemisah `|`.
+  - Teks informasi panjang dipotong dengan ellipsis sebelum pemisah agar jam dan baterai tetap terbaca.
+  - Ikon Stage 1 ikut bergeser bersama grup teks saat dipusatkan.
+  - Transisi perubahan ukuran compact menggunakan morph 260 ms yang mengambil sampel posisi saat berjalan.
+- Penanganan status musik sementara: pergantian lagu memunculkan status musik di Stage 1 selama lima detik tanpa mengubah tab pilihan pengguna, lalu kembali ke status sebelumnya setelah waktu habis.
+- Pemetaan ikon navigasi tab cuaca dipulihkan ke ikon awan (cloud).
+- Penyesuaian lebar Stage 1 untuk mengakomodasi indikator baterai laptop di semua tab aktif tanpa memotong teks tanggal.
+- Sinkronisasi label versi 0.0.1.2 alpha pada deskripsi menu Pengaturan Umum dan skrip pembuatan paket rilis.
 
 ---
 
-## [0.0.1 alpha] — 26 Oktober 2026
+## [0.0.1.1 alpha] - 27 Oktober 2026
 
-- Paket perdana dengan nama **mynotch**, executable `mynotch.exe`, dan distribusi portable Windows x64.
-- Integrasi kontrol media musik, lirik sinkron, visualizer spektrum audio WASAPI.
+Rilis 0.0.1.1 alpha menambahkan catatan cepat (quick sticky notes), sistem mod modular, dukungan bilingual Indonesia dan English, serta perbaikan navigasi dan bug UI.
+
+### Fitur baru
+
+- Quick Sticky Notes:
+  - Tab Catatan pada notch dengan tata letak dua kolom (daftar memo di kiri dan editor teks di kanan).
+  - Lima pilihan warna untuk mengelompokkan catatan.
+  - Tombol Pop to Desktop untuk melepas catatan menjadi jendela melayang di desktop dengan pin always-on-top.
+  - Ekspor catatan ke format Markdown (`.md`) atau teks biasa (`.txt`), serta tombol salin langsung ke clipboard.
+  - Penyimpanan otomatis tanpa tombol simpan manual.
+- Mod modular: menu Mod & Ekstensi di Pengaturan untuk memasang atau melepas fitur tambahan berbasis manifest (`.mod.json`).
+- Dukungan bilingual: pilihan bahasa Indonesia dan English di Pengaturan yang langsung diterapkan ke seluruh judul tab, kalender, pengingat, dan teks tombol.
+- Transisi status Stage 1: status musik aktif dan timer fokus tetap tampil di Stage 1, sedangkan catatan baru, klip tersalin, atau pengingat sholat tampil selama 5 detik sebelum kembali ke tampilan tanggal dan jam.
+
+### Perbaikan dan kenyamanan antarmuka
+
+- Dukungan tombol `Ctrl+A` di seluruh kotak input teks.
+- Dukungan scroll mouse untuk berpindah bulan di kalender dan halaman di clipboard.
+- Tombol Ikuti pada pemutar musik untuk kembali ke baris lirik aktif setelah digulir manual.
+- Mode minimal disesuaikan menjadi kapsul hitam solid.
+- Penambahan jeda hover 140 ms agar notch tidak terbuka saat kursor mouse lewat sepintas.
+- Penyesuaian teks pengingat sholat menjadi "Tepat waktu" saat lead time bernilai 0 menit.
+- Mengklik kartu libur nasional berikutnya langsung membuka tanggal terkait di kalender.
+- Penanda fokus keyboard dan dukungan penekanan tombol Space atau Enter pada kontrol interaktif.
+
+### Perbaikan bug
+
+- Mengatasi draf catatan baru yang sempat menampilkan teks dari catatan sebelumnya setelah penghapusan.
+- Memperbaiki pembungkusan kata DirectWrite agar teks panjang tidak meluap keluar batas panel.
+- Memperbaiki pelepasan handle GDI dan alokasi memori internal ICU pada pengurai lirik dan clipboard.
+- Mengabaikan format clipboard sensitif dari aplikasi pengelola kata sandi.
+- Memastikan menu pop-up pengaturan dan pengingat tertutup saat notch berpindah mode.
+- Memperbaiki prioritas notifikasi toast untuk penyelesaian sesi fokus.
+
+---
+
+## [0.0.1 alpha] - 26 Oktober 2026
+
+- Rilis perdana mynotch dengan executable `mynotch.exe` untuk Windows x64.
+- Integrasi kontrol media musik, lirik sinkron, dan visualizer spektrum audio WASAPI.
 - Kalender bulanan dengan penanda resmi Hari Libur Nasional Indonesia 2026.
-- Empat pilar pengingat harian: Fokus (Pomodoro), Hidrasi, Peregangan tubuh, dan Jadwal Sholat berbasis data myQuran (WIB).
-- Riwayat teks Clipboard opsional dengan penyimpanan lokal.
-- Navigasi Pengaturan terstruktur di sisi kiri dengan kontrol di sisi kanan.
-- Fallback Direct3D software WARP otomatis jika inisialisasi hardware Direct2D memerlukan dukungan cadangan.
+- Pengingat harian: fokus Pomodoro, hidrasi, peregangan tubuh, dan jadwal sholat berbasis data myQuran (WIB).
+- Riwayat teks clipboard lokal opsional.
+- Tata letak Pengaturan dua kolom.
+- Dukungan fallback Direct3D software WARP saat inisialisasi Direct2D perangkat keras membutuhkan cadangan.

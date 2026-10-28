@@ -179,7 +179,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
 
         // Settings Categories
         "cat.general" => if en { "General" } else { "Umum" },
-        "cat.general.desc" => if en { "mynotch 0.0.1.1 alpha · Portable Windows." } else { "mynotch 0.0.1.1 alpha · Portable Windows." },
+        "cat.general.desc" => if en { "mynotch 0.0.1.2 alpha · Portable Windows." } else { "mynotch 0.0.1.2 alpha · Portable Windows." },
         "cat.appearance" => if en { "Appearance" } else { "Tampilan" },
         "cat.appearance.desc" => if en { "Position and visual comfort." } else { "Posisi dan kenyamanan tampilan." },
         "cat.tabs" => if en { "Tabs & navigation" } else { "Tab & navigasi" },
@@ -190,6 +190,26 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "cat.reminders.desc" => if en { "Daily reminder and health settings." } else { "Buka pengaturan pengingat harian." },
         "cat.mods" => if en { "Mods & Extensions" } else { "Mod & Ekstensi" },
         "cat.mods.desc" => if en { "Install or uninstall optional modular features." } else { "Pasang atau lepas fitur modular opsional." },
+        "cat.update" => if en { "Updates" } else { "Pembaruan" },
+        "cat.update.desc" => if en { "Check and download the latest mynotch releases." } else { "Periksa dan unduh rilis terbaru mynotch." },
+
+        // Settings Update
+        "update.current" => if en { "Current Version" } else { "Versi Saat Ini" },
+        "update.current_desc" => if en { "Installed release on this machine." } else { "Rilis yang terpasang di komputer ini." },
+        "update.check" => if en { "Check for Updates" } else { "Periksa Pembaruan" },
+        "update.check_again" => if en { "Check Again" } else { "Cek Ulang" },
+        "update.checking" => if en { "Connecting to GitHub Releases..." } else { "Menghubungi GitHub Releases..." },
+        "update.up_to_date" => if en { "mynotch is up to date" } else { "mynotch sudah versi terbaru" },
+        "update.up_to_date_sub" => if en { "You are using the latest official build." } else { "Anda sedang menggunakan versi resmi terbaru." },
+        "update.available" => if en { "New Release Available!" } else { "Versi Baru Tersedia!" },
+        "update.download_zip" => if en { "Download Update (ZIP)" } else { "Unduh Update (ZIP)" },
+        "update.release_notes" => if en { "Release Notes" } else { "Catatan Rilis" },
+        "update.repo" => if en { "Official Repository" } else { "Repositori Resmi" },
+        "update.repo_desc" => if en { "github.com/arwankemis/mynotch" } else { "github.com/arwankemis/mynotch" },
+        "update.open_repo" => if en { "Open GitHub" } else { "Buka GitHub" },
+        "update.error" => if en { "Failed to check updates" } else { "Gagal memeriksa pembaruan" },
+        "update.retry" => if en { "Retry" } else { "Coba Lagi" },
+        "update.idle_hint" => if en { "Click 'Check for Updates' to fetch the latest release from GitHub." } else { "Klik 'Periksa Pembaruan' untuk mengecek rilis terbaru dari GitHub." },
 
         // Settings General
         "general.language" => if en { "Language" } else { "Bahasa" },
@@ -200,6 +220,8 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "general.minimal.desc" => if en { "Use a sleek mini bar when notch is collapsed." } else { "Gunakan bar kecil saat notch ditutup." },
         "general.default_tab" => if en { "Startup tab" } else { "Tab saat dibuka" },
         "general.default_tab.desc" => if en { "Initial tab when application starts." } else { "Halaman awal ketika aplikasi berjalan." },
+        "general.startup" => if en { "Run at Windows startup" } else { "Jalankan saat startup" },
+        "general.startup.desc" => if en { "Automatically launch mynotch on login." } else { "Otomatis jalankan mynotch saat masuk Windows." },
 
         // Settings Appearance
         "appearance.position" => if en { "Notch position" } else { "Posisi notch" },
@@ -370,8 +392,92 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "toast.stretch_alert" => if en { "🧘 Time to stretch! Stand up and move your body." } else { "🧘 Waktunya peregangan otot! Berdiri sejenak & regangkan tubuh." },
         "toast.eye_alert" => if en { "👀 20-20-20 eye break: look 20 feet away for 20 seconds." } else { "👀 Istirahat mata 20-20-20: pandang jauh 20 detik." },
         "toast.stretch_done" => if en { "Stretch finished. Ready to get back to work." } else { "Peregangan selesai. Tubuh siap kembali beraktivitas." },
+        // Clipboard Search & Pin
+        "clipboard.search_hint" => if en { "Search..." } else { "Cari..." },
+        "clipboard.pin" => if en { "Pin" } else { "Pin" },
+        "clipboard.unpin" => if en { "Unpin" } else { "Lepas Pin" },
+        "notice.clip_pinned" => if en { "Clip pinned to top 📌" } else { "Klip disematkan di atas 📌" },
+        "notice.clip_unpinned" => if en { "Clip unpinned." } else { "Sematkan klip dilepas." },
+        "notice.clip_deleted" => if en { "Clip deleted." } else { "Klip dihapus." },
+        "notice.startup_enabled" => if en { "mynotch will run at Windows startup 🚀" } else { "mynotch akan berjalan saat startup Windows 🚀" },
+        "notice.startup_disabled" => if en { "mynotch removed from Windows startup." } else { "mynotch dihapus dari startup Windows." },
+
+        // Weather
+        "mod.weather.name" => if en { "Weather" } else { "Prakiraan Cuaca" },
+        "mod.weather.description" => if en { "Current weather and hourly forecast (Open-Meteo)" } else { "Cuaca saat ini dan prakiraan per jam (Open-Meteo)" },
+        "weather.refresh" => if en { "Refresh" } else { "Segarkan" },
+        "weather.custom" => if en { "Custom" } else { "Kustom" },
+        "weather.cancel" => if en { "Cancel" } else { "Batal" },
+        "weather.humidity_short" => if en { "Humidity" } else { "Lembap" },
+        "weather.rain_short" => if en { "Rain" } else { "Hujan" },
+        "weather.wind_unit" => if en { "km/h" } else { "km/j" },
+        "weather.no_hourly" => if en { "Hourly forecast unavailable." } else { "Prakiraan per jam belum tersedia." },
+        "weather.no_rain_data" => if en { "Rain forecast unavailable." } else { "Prakiraan hujan belum tersedia." },
+        "weather.low_rain" => if en { "Low rain chance in the next few hours." } else { "Peluang hujan rendah beberapa jam ke depan." },
+        "weather.now" => if en { "Now" } else { "Kini" },
+        "weather.unavailable" => if en { "Weather unavailable. Try refreshing." } else { "Cuaca belum tersedia. Coba muat ulang." },
+        "weather.fetch_failed" => if en { "Could not update weather. Please try again later." } else { "Cuaca gagal diperbarui. Coba lagi nanti." },
+        "weather.stale" => if en { "Last known" } else { "Data terakhir" },
+        "weather.invalid_coords" => if en { "Invalid latitude/longitude." } else { "Lintang/bujur tidak valid." },
+        "weather.location_hint" => if en { "Example: -6.2088, 106.8456 (Jakarta)" } else { "Contoh: -6.2088, 106.8456 (Jakarta)" },
+        "weather.title" => if en { "WEATHER & FORECAST" } else { "CUACA & PRAKIRAAN" },
+        "weather.updated" => if en { "Updated" } else { "Diperbarui" },
+        "weather.feels_like" => if en { "Feels like" } else { "Terasa seperti" },
+        "weather.humidity" => if en { "Humidity" } else { "Kelembaban" },
+        "weather.wind" => if en { "Wind" } else { "Angin" },
+        "weather.rain_chance" => if en { "Rain Chance" } else { "Peluang Hujan" },
+        "weather.forecast_7d" => if en { "7-DAY FORECAST" } else { "PRAKIRAAN 7 HARI" },
+        "weather.city" => if en { "City" } else { "Kota" },
+        "weather.setup_title" => if en { "Weather Location" } else { "Pengaturan Lokasi Cuaca" },
+        "weather.setup_city" => if en { "City name" } else { "Nama kota" },
+        "weather.setup_lat" => if en { "Latitude" } else { "Lintang" },
+        "weather.setup_lon" => if en { "Longitude" } else { "Bujur" },
+        "weather.save_btn" => if en { "Save & Refresh" } else { "Simpan & Muat" },
+        "weather.not_configured" => if en { "Weather location is not configured." } else { "Lokasi cuaca belum diatur." },
+        "weather.loading" => if en { "Loading weather data…" } else { "Memuat data cuaca…" },
+        "weather.change_city" => if en { "⚙ Change Location" } else { "⚙ Ubah Lokasi" },
+        "weather.presets" => if en { "Quick Presets:" } else { "Pilihan Cepat:" },
+        "stage1.weather" => if en { "Weather" } else { "Cuaca" },
 
         _ => key,
+    }
+}
+
+
+pub fn battery_status(percentage: u8, is_charging: bool, lang: &str) -> String {
+    let en = lang == "en";
+    if is_charging {
+        if en { format!("⚡ Charging ({percentage}%)") } else { format!("⚡ Mengisi daya ({percentage}%)") }
+    } else {
+        if en { format!("🔋 On battery ({percentage}%)") } else { format!("🔋 Menggunakan baterai ({percentage}%)") }
+    }
+}
+
+pub fn weather_condition(code: u32, is_day: bool, lang: &str) -> (&'static str, &'static str) {
+    let en = lang == "en";
+    match code {
+        0 => if is_day {
+            ("☀️", if en { "Clear sky" } else { "Cerah" })
+        } else {
+            ("🌙", if en { "Clear night" } else { "Cerah malam" })
+        },
+        1 | 2 => if is_day {
+            ("⛅", if en { "Partly cloudy" } else { "Sebagian berawan" })
+        } else {
+            ("☁️", if en { "Partly cloudy" } else { "Sebagian berawan" })
+        },
+        3 => ("☁️", if en { "Overcast" } else { "Berawan tebal" }),
+        45 | 48 => ("🌫️", if en { "Foggy" } else { "Berkabut" }),
+        51 | 53 | 55 => ("🌦️", if en { "Drizzle" } else { "Gerimis" }),
+        56 | 57 => ("🌧️", if en { "Freezing drizzle" } else { "Gerimis beku" }),
+        61 | 63 | 65 => ("🌧️", if en { "Rain" } else { "Hujan" }),
+        66 | 67 => ("🌧️", if en { "Freezing rain" } else { "Hujan beku" }),
+        71 | 73 | 75 => ("❄️", if en { "Snow" } else { "Salju" }),
+        77 => ("❄️", if en { "Snow grains" } else { "Butiran salju" }),
+        80 | 81 | 82 => ("🌧️", if en { "Rain showers" } else { "Hujan lebat" }),
+        85 | 86 => ("❄️", if en { "Snow showers" } else { "Hujan salju" }),
+        95 | 96 | 99 => ("⛈️", if en { "Thunderstorm" } else { "Badai petir" }),
+        _ => ("☁️", if en { "Unavailable" } else { "Tidak tersedia" }),
     }
 }
 
@@ -380,11 +486,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn freezing_and_snow_showers_never_claim_fair_weather_in_either_language() {
+        for (code, id, en) in [(56,"Gerimis beku","Freezing drizzle"),(57,"Gerimis beku","Freezing drizzle"),(66,"Hujan beku","Freezing rain"),(67,"Hujan beku","Freezing rain"),(77,"Butiran salju","Snow grains"),(85,"Hujan salju","Snow showers"),(86,"Hujan salju","Snow showers"),(999,"Tidak tersedia","Unavailable")] {
+            assert_eq!(weather_condition(code,false,"id").1,id,"WMO {code}");
+            assert_eq!(weather_condition(code,false,"en").1,en,"WMO {code}");
+        }
+    }
+
+    #[test]
     fn test_i18n_translations_exist_for_both_languages() {
         let keys = [
             "settings.title", "settings.auto_saved", "settings.back",
             "cat.general", "cat.appearance", "cat.tabs", "cat.audio", "cat.reminders", "cat.mods",
-            "general.language", "general.fullscreen", "general.minimal", "general.default_tab",
+            "general.language", "general.fullscreen", "general.minimal", "general.default_tab", "general.startup",
             "appearance.position", "appearance.top", "appearance.bottom", "appearance.scale",
             "appearance.gap", "appearance.opacity",
             "audio.visualizer", "audio.glow", "audio.romanize", "audio.open_music",
@@ -466,5 +580,17 @@ mod tests {
         assert_eq!(move_summary(45, "en"), "Every 45 min");
         assert_eq!(move_desc(120, 60, "id"), "Jeda 2 menit setiap 60 menit.");
         assert_eq!(move_desc(120, 60, "en"), "2 min break every 60 min.");
+        assert_eq!(battery_status(85, true, "id"), "⚡ Mengisi daya (85%)");
+        assert_eq!(battery_status(85, true, "en"), "⚡ Charging (85%)");
+        assert_eq!(battery_status(50, false, "id"), "🔋 Menggunakan baterai (50%)");
+        assert_eq!(battery_status(50, false, "en"), "🔋 On battery (50%)");
+
+        let (icon, cond) = weather_condition(0, true, "id");
+        assert_eq!(icon, "☀️");
+        assert_eq!(cond, "Cerah");
+
+        let (icon_en, cond_en) = weather_condition(61, true, "en");
+        assert_eq!(icon_en, "🌧️");
+        assert_eq!(cond_en, "Rain");
     }
 }

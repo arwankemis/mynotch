@@ -48,6 +48,9 @@ pub struct Painter {
     factory:IDWriteFactory,
     brush:ID2D1SolidColorBrush,
     formats:BTreeMap<(u32,bool),IDWriteTextFormat>,
+    weather_gradient:Option<(u32,u32,ID2D1LinearGradientBrush)>,
+    // Outer None = not loaded; Some(None) = failed, do not retry on every paint.
+    weather_icons:[Option<Option<ID2D1Bitmap1>>;2],
     layers:u32,
     /// One layer per nesting depth. A layer object cannot be pushed twice at the same time,
     /// and the opacity scene now wraps the morph cross-fade, so pushes nest up to four deep.
@@ -70,11 +73,11 @@ fn pt(x: f32, y: f32) -> windows_numerics::Vector2 {
 }
 
 impl Painter {
-    pub unsafe fn new(hwnd:HWND,width:u32,height:u32,dpi:f32)->Result<Self>{unsafe{
+    pub unsafe fn new(hwnd:HWND,width:u32,height:u32,dpi:f32,software:bool)->Result<Self>{unsafe{
         let mut device:Option<ID3D11Device>=None;
         let mut immediate:Option<ID3D11DeviceContext>=None;
         let mut level=D3D_FEATURE_LEVEL_11_0;
-        let preferred=if std::env::args().any(|arg|arg=="--software-renderer"){D3D_DRIVER_TYPE_WARP}else{D3D_DRIVER_TYPE_HARDWARE};
+        let preferred=if software || std::env::args().any(|arg|arg=="--software-renderer"){D3D_DRIVER_TYPE_WARP}else{D3D_DRIVER_TYPE_HARDWARE};
         let first=D3D11CreateDevice(None::<&IDXGIAdapter>,preferred,Default::default(),D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&[D3D_FEATURE_LEVEL_11_0,D3D_FEATURE_LEVEL_10_1,D3D_FEATURE_LEVEL_10_0]),D3D11_SDK_VERSION,
             Some(&mut device),Some(&mut level),Some(&mut immediate));
@@ -106,7 +109,7 @@ impl Painter {
         context.SetDpi(dpi,dpi);
         let brush=context.CreateSolidColorBrush(&color(TEXT,1.),None)?;
         let factory:IDWriteFactory=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),layers:0,layer_pool:vec![None;8]})
+        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8]})
     }}
     /// Binds the current back buffer as the draw target. The bitmap is rebuilt every frame on
     /// purpose: a cached D2D bitmap wrapping a swap chain buffer goes stale once that buffer
@@ -150,6 +153,24 @@ impl Painter {
     pub unsafe fn fill_alpha(&self,x:f32,y:f32,width:f32,height:f32,radius:f32,rgb:u32,alpha:f32){unsafe{
         self.brush.SetColor(&color(rgb,alpha));
         self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x,y,width,height),radiusX:radius,radiusY:radius},&self.brush);
+    }}
+    /// One device-owned brush, rebuilt only when weather/daylight changes. No bitmap or blur.
+    pub unsafe fn weather_background(&mut self,width:f32,height:f32,mid:u32,bottom:u32){unsafe{
+        if self.weather_gradient.as_ref().is_none_or(|(m,b,_)|*m!=mid||*b!=bottom){
+            let stops=[D2D1_GRADIENT_STOP{position:0.,color:color(BG,1.)},D2D1_GRADIENT_STOP{position:0.28,color:color(mid,1.)},D2D1_GRADIENT_STOP{position:1.,color:color(bottom,1.)}];
+            let rt:Result<ID2D1RenderTarget>=self.context.cast();
+            self.weather_gradient=rt.and_then(|rt|rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP).and_then(|stops|rt.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{startPoint:pt(0.,44.),endPoint:pt(0.,height)},None,&stops))).ok().map(|brush|(mid,bottom,brush));
+        }
+        if let Some((_,_,brush))=&self.weather_gradient{
+            brush.SetStartPoint(pt(0.,44.));brush.SetEndPoint(pt(0.,height.max(45.)));
+            self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(0.,0.,width,height),radiusX:24.,radiusY:24.},brush);
+        }
+    }}
+    pub unsafe fn text_light(&mut self,text:&str,x:f32,y:f32,width:f32,height:f32,size:f32,rgb:u32){unsafe{
+        // Reserve the high bit for the light weight; ordinary text keys remain unchanged.
+        let key=(((size*10.)as u32)|(1<<31),false);
+        if !self.formats.contains_key(&key){if let Ok(format)=self.factory.CreateTextFormat(w!("Segoe UI"),None,DWRITE_FONT_WEIGHT_LIGHT,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,w!("id-ID")){self.formats.insert(key,format);}}
+        if let Some(format)=self.formats.get(&key){let text:Vec<u16>=text.encode_utf16().collect();self.brush.SetColor(&color(rgb,1.));self.context.DrawText(&text,format,&rect(x,y,width,height),&self.brush,D2D1_DRAW_TEXT_OPTIONS_CLIP,DWRITE_MEASURING_MODE_NATURAL);}
     }}
     /// Smooth physical notch contour with vector concave ear fillets and rounded bottom corners.
     pub unsafe fn fill_notch(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32){unsafe{
@@ -495,6 +516,23 @@ impl Painter {
         self.brush.SetColor(&color(rgb,1.));
         self.context.DrawRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x,y,width,height),radiusX:radius,radiusY:radius},&self.brush,thickness,None);
     }}
+    /// A bounded, device-owned atlas per style, decoded only on its first visible use.
+    pub unsafe fn weather_icon(&mut self,code:u32,is_day:bool,compact:bool,x:f32,y:f32,size:f32){unsafe{
+        use crate::weather_icons::{Icon,Style};
+        let index=usize::from(compact);let style=if compact{Style::Compact}else{Style::Gradient};
+        if self.weather_icons[index].is_none(){
+            self.weather_icons[index]=Some(crate::weather_icons::decode(style).and_then(|pixels|{
+                let props=D2D1_BITMAP_PROPERTIES1{pixelFormat:D2D1_PIXEL_FORMAT{format:DXGI_FORMAT_B8G8R8A8_UNORM,alphaMode:D2D1_ALPHA_MODE_PREMULTIPLIED},dpiX:96.,dpiY:96.,bitmapOptions:D2D1_BITMAP_OPTIONS_NONE,colorContext:std::mem::ManuallyDrop::new(None)};
+                self.context.CreateBitmapFromWicBitmap(&pixels,Some(&props))
+            }).ok());
+        }
+        if let Some(Some(bitmap))=&self.weather_icons[index]{
+            let cell=Icon::select(code,is_day)as u32;let tile=style.tile()as f32;
+            let source=rect((cell%7)as f32*tile,(cell/7)as f32*tile,tile,tile);
+            self.context.DrawBitmap(bitmap,Some(&rect(x,y,size,size)),1.,D2D1_INTERPOLATION_MODE_LINEAR,Some(&source),None);
+        }else{self.outline_icon("cloud",x+size*0.1,y+size*0.1,size*0.8,0xd4e3ee);}
+    }}
+    pub fn clear_weather_icons(&mut self){self.weather_icons=[None,None];self.weather_gradient=None;}
     pub unsafe fn cover(&mut self,art:Option<&crate::artwork::Artwork>,key:u64,x:f32,y:f32,size:f32,glow:bool)->bool{unsafe{
         if self.artwork_key!=key{self.artwork=None;self.artwork_key=key;
             if let Some(art)=art{let props=D2D1_BITMAP_PROPERTIES1{pixelFormat:D2D1_PIXEL_FORMAT{format:DXGI_FORMAT_B8G8R8A8_UNORM,alphaMode:D2D1_ALPHA_MODE_PREMULTIPLIED},dpiX:96.,dpiY:96.,bitmapOptions:D2D1_BITMAP_OPTIONS_NONE,colorContext:std::mem::ManuallyDrop::new(None)};self.artwork=self.context.CreateBitmap(D2D_SIZE_U{width:art.width,height:art.height},Some(art.pixels.as_ptr().cast()),art.width*4,&props).ok();}}
@@ -719,6 +757,12 @@ impl Painter {
             "pin"=>{line(&[(8.,3.),(18.,3.),(16.,8.),(19.,13.),(7.,13.),(10.,8.),(8.,3.)]);line(&[(13.,13.),(10.,21.)]);},
             "edit"=>{line(&[(18.,2.),(22.,6.),(7.,21.),(3.,21.),(3.,17.),(18.,2.)]);line(&[(15.,5.),(19.,9.)]);},
             "package"=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
+            "cloud"=>{line(&[(6.,19.),(18.,19.)]);circle(15.,15.,4.);circle(9.,15.,3.5);circle(12.,11.,4.);},
+            "navigation"=>line(&[(3.,11.),(21.,3.),(13.,21.),(11.,13.),(3.,11.)]),
+            "wind"=>{line(&[(3.,7.),(15.,7.),(18.,5.),(17.,3.),(14.,3.)]);line(&[(3.,12.),(20.,12.),(22.,10.),(21.,8.)]);line(&[(3.,17.),(13.,17.),(16.,19.),(15.,21.),(12.,21.)]);},
+            "volume"=>{line(&[(4.,9.),(8.,9.),(13.,5.),(13.,19.),(8.,15.),(4.,15.),(4.,9.)]);line(&[(16.,9.),(18.,12.),(16.,15.)]);},
+            "search"=>{circle(10.,10.,6.);line(&[(14.,14.),(20.,20.)]);},
+            "download"=>{line(&[(12.,4.),(12.,15.)]);line(&[(7.,11.),(12.,16.),(17.,11.)]);line(&[(5.,19.),(19.,19.)]);},
             "settings"=>{circle(12.,12.,4.);circle(12.,12.,9.);for i in 0..8{let a=i as f32*std::f32::consts::TAU/8.;line(&[(12.+a.cos()*8.,12.+a.sin()*8.),(12.+a.cos()*11.,12.+a.sin()*11.)]);}},
             _=>{}
         }

@@ -9,6 +9,8 @@ pub struct ClipItem {
     pub time: String,
     pub chars: usize,
     pub lines: usize,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[link(name = "user32")]
@@ -138,9 +140,11 @@ mod tests {
             time: "12:00".into(),
             chars: 11,
             lines: 1,
+            pinned: true,
         };
         assert_eq!(item.chars, 11);
         assert_eq!(item.lines, 1);
         assert_eq!(item.text, "Hello world");
+        assert!(item.pinned);
     }
 }

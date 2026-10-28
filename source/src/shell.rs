@@ -1,6 +1,6 @@
 use crate::{core::*, ui, media::{MediaService,MediaEvent,MediaSnapshot}, visualizer::Visualizer, render::{self,Painter}, online::{OnlineService,WeatherReport,LyricsResult}, ical::CalendarEvent};
 use chrono::{Local,Datelike,Timelike,NaiveDate};
-use std::{cell::RefCell,collections::BTreeMap,sync::{Arc,Mutex,mpsc},time::{Duration,Instant},thread};
+use std::{cell::RefCell,collections::BTreeMap,sync::{Arc,Mutex,mpsc,atomic::{AtomicIsize,Ordering}},time::{Duration,Instant},thread};
 use windows::core::{w,PCWSTR};
 use windows::Win32::{Foundation::*,System::{LibraryLoader::GetModuleHandleW,Com::*},Graphics::Gdi::*,Media::{timeSetEvent,timeKillEvent,TIME_PERIODIC},UI::{Controls::WM_MOUSELEAVE,WindowsAndMessaging::*,Input::KeyboardAndMouse::*,HiDpi::*}};
 
@@ -8,11 +8,49 @@ mod pages;
 mod reminder;
 mod settings;
 mod sticky_window;
+mod weather;
 pub(crate) use sticky_window::spawn_floating_sticky_note;
 const WAKE:u32=WM_APP+1;const TRAY:u32=WM_APP+2;const MORPH_MSG:u32=WM_APP+5;const EM_SETSEL:u32=0x00B1;
+const WM_APP_VOLUME_CHANGED:u32=WM_APP+55;
+static HOOK_HWND: AtomicIsize = AtomicIsize::new(0);
+static HOOK_HANDLE: AtomicIsize = AtomicIsize::new(0);
+
+unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let msg = wparam.0 as u32;
+        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+            unsafe {
+                if lparam.0 != 0 {
+                    let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
+                    let vk = kbd.vkCode as u16;
+                    if vk == 0xAD || vk == 0xAE || vk == 0xAF {
+                        let hwnd_val = HOOK_HWND.load(Ordering::Relaxed);
+                        if hwnd_val != 0 {
+                            let _ = PostMessageW(Some(HWND(hwnd_val as *mut _)), WM_APP_VOLUME_CHANGED, WPARAM(vk as usize), LPARAM(0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let hook_val = HOOK_HANDLE.load(Ordering::Relaxed);
+    let hook = if hook_val != 0 { Some(HHOOK(hook_val as *mut _)) } else { None };
+    unsafe { CallNextHookEx(hook, code, wparam, lparam) }
+}
 unsafe extern "system" {
     fn MessageBeep(utype: u32) -> i32;
 }
+pub const APP_VERSION: &str = "0.0.1.2";
+
+#[derive(Clone, Debug)]
+pub enum UpdateStatus {
+    Idle,
+    Checking,
+    Available(crate::online::GithubRelease),
+    UpToDate(String),
+    Error(String),
+}
+
 thread_local!{static APP:RefCell<Option<Shell>>=const{RefCell::new(None)};}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -40,12 +78,12 @@ enum Action {
     Tab(String),Settings,Back,Close,Exit,Bottom(bool),Minimal,Gap(i32),Scale(f32),Opacity(i32),ToggleModule(String),Toggle(&'static str),
     Play,Next,Previous,Seek(f64),SeekPointer,LyricsFollow,Lyric(usize),FocusStart,FocusPause,FocusReset,FocusBreak,FocusLength(i32),BreakLength(i32),
     AddTodo,Todo(u64),DeleteTodo(u64),TodoPage(i32),SaveNote,Water,UndoWater,WaterTarget(i32),WaterServing(i32),Breath,
-    Month(i32),Day(u32),JumpToDate(i32,u32,u32),CalendarSave,CalendarRefresh,WeatherSave,WeatherRefresh,AiSave,AiSend,AiClear,
+    Month(i32),Day(u32),JumpToDate(i32,u32,u32),CalendarSave,CalendarRefresh,WeatherSave,WeatherRefresh,WeatherToggleMenu,AiSave,AiSend,AiClear,
     ToggleLyrics,SelectMode(usize),
     CalendarToday,CalendarLeaveToggle,
     TogglePin,ToStage0,ToStage1,
     WaterInterval(i32),MoveInterval(i32),ReminderSelect(usize),ReminderStep(i32),StretchLength(i32),StretchStart,StretchDone,PrayerLead(i32),PrayerRefresh,ReminderMenu(&'static str),ReminderValue(&'static str,u32),
-    ConfirmWater,SelectClip(usize),CopyClip(usize),DeleteClip(u64),ClearClips,ClipPage(i32),
+    ConfirmWater,SelectClip(usize),CopyClip(usize),DeleteClip(u64),ClearClips,ClipPage(i32),TogglePinClip(u64),ClearClipFilter,ToggleClipSearch,WeatherSetCity(&'static str,f64,f64),WeatherToggleCustom,CheckUpdate,DownloadUpdate,OpenReleaseNotes,OpenRepoUrl,
     MoveTab(String, i32),
     SettingsCategory(usize),SetDefaultTab(String),SettingsMenu(&'static str,f32,f32,f32),SettingsValue(&'static str,u32),SettingsOpenTab(String,usize),
     InstallMod(String),UninstallMod(String),NoteAdd,NoteSelect(usize),NoteDelete(u64),NoteColor(u8),NoteExport(u8),NotePopout,
@@ -70,7 +108,7 @@ enum Event {
     Artwork(u64,Result<crate::artwork::Artwork,String>),
     Completed(&'static str,u64,Box<Event>),
     Media(MediaEvent),Levels(Vec<f32>),Lyrics(String,Result<LyricsResult,String>),Weather(Result<WeatherReport,String>),
-    Agenda(Result<Vec<CalendarEvent>,String>),Ai(Result<String,String>),Notice(String),
+    Agenda(Result<Vec<CalendarEvent>,String>),Ai(Result<String,String>),Notice(String),Update(Result<Option<crate::online::GithubRelease>,String>),
 }
 
 #[allow(dead_code)]
@@ -101,6 +139,18 @@ pub(super) struct Shell {
     /// Permanently 1.0 once fully visible; timer 11 is killed at that point.
     startup_alpha:f32,
     pub stage1_temporary_until: Option<Instant>,
+    stage1_media_until:Option<Instant>,
+    pub volume_hud: Option<(f32, bool, Instant)>,
+    pub battery: Option<crate::system::BatteryInfo>,
+    pub last_battery_check: Instant,
+    pub last_ac_status: Option<bool>,
+    pub clip_filter: String,
+    pub clip_search_open: bool,
+    pub update_status: UpdateStatus,
+    pub weather_custom_open: bool,
+    weather_menu_open: bool,
+    weather_refresh: crate::weather::RefreshState,
+    pub last_known_volume: Option<(f32, bool)>,
 }
 #[derive(Clone,serde::Deserialize)]struct HolidayRecord{date:NaiveDate,name:String,#[serde(default)]collective_leave:bool}
 #[derive(serde::Deserialize)]struct HolidayFile{holidays:Vec<HolidayRecord>}
@@ -134,11 +184,11 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
     let inputs_hwnd=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST,w!("mynotch.Inputs"),None,WS_POPUP,0,0,0,0,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
     let live_preview=args.iter().any(|s|s=="--live-preview");
     let preview=live_preview||args.iter().any(|s|s=="--preview");
-    let hwnd=CreateWindowExW(if preview{WS_EX_NOREDIRECTIONBITMAP|WS_EX_APPWINDOW|WS_EX_TOPMOST}else{WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_TOPMOST},w!("mynotch.Native"),w!("mynotch 0.0.1.1 alpha"),WS_POPUP,0,0,400,112,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
+    let hwnd=CreateWindowExW(if preview{WS_EX_NOREDIRECTIONBITMAP|WS_EX_APPWINDOW|WS_EX_TOPMOST}else{WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_TOPMOST},w!("mynotch.Native"),w!("mynotch 0.0.1.2 alpha"),WS_POPUP,0,0,400,112,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
     SetWindowLongPtrW(inputs_hwnd,GWLP_HWNDPARENT,hwnd.0 as isize);
     let executable=std::env::current_exe().map_err(|_|"Lokasi aplikasi tidak ditemukan.")?;
     let root=crate::app::storage_root(&executable,preview)?;
-    let mut store=Store::new(root)?;let mut settings:Settings=store.load("settings.json");settings.normalize();if preview&&args.iter().any(|a|a=="--edge-check"){settings.bottom=false;settings.edge_gap=0;if let Some(scale)=args.iter().find_map(|a|a.strip_prefix("--ui-scale=").and_then(|v|v.parse::<f32>().ok())){settings.scale=scale;settings.normalize();}}let state:State=store.load("state.json");
+    let mut store=Store::new(root)?;let mut settings:Settings=store.load("settings.json");settings.normalize();if !preview{settings.run_at_startup=crate::system::is_run_at_startup_enabled();}if preview&&args.iter().any(|a|a=="--edge-check"){settings.bottom=false;settings.edge_gap=0;if let Some(scale)=args.iter().find_map(|a|a.strip_prefix("--ui-scale=").and_then(|v|v.parse::<f32>().ok())){settings.scale=scale;settings.normalize();}}let state:State=store.load("state.json");
     let now=Local::now();let queue=Arc::new(Mutex::new(Vec::new()));let online=OnlineService::new(store.root.clone());
     let init_stage=initial_hover_stage(preview,settings.minimal);
     let mut app=Shell{
@@ -146,18 +196,22 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         render_ready:false,
         cover:None,cover_key:0,preview_silent:preview&&!live_preview,
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,stage1_temporary_until:None,};
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),};
     app.tab=app.settings.default_tab.clone();
-    if !app.settings.enabled(&app.tab)||!MODULES.contains(&app.tab.as_str()){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
+    if !app.settings.enabled(&app.tab)||!app.settings.is_known_module(&app.tab){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
     app.load_holidays();
     let init_pw=(ui::CANVAS_WIDTH*app.scale).max(1.)as u32;
     let init_ph=(ui::CANVAS_HEIGHT*app.scale).max(1.)as u32;
-    app.painter=Painter::new(hwnd,init_pw,init_ph,96.*app.scale).ok();
+    app.painter=Painter::new(hwnd,init_pw,init_ph,96.*app.scale,app.settings.software_renderer).ok();
     if app.painter.is_none(){return Err("Renderer tidak tersedia. Perbarui driver grafis atau jalankan dengan --software-renderer.".into())}
     app.layout();
     app.update_window_region();
     app.make_inputs();app.tray(true);
     crate::clipboard::listen_clipboard(hwnd);
+    HOOK_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+    if let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), None, 0) {
+        HOOK_HANDLE.store(hook.0 as isize, Ordering::Relaxed);
+    }
     app.sync_clipboard();
     let _=RegisterHotKey(Some(hwnd),1,MOD_ALT|MOD_NOREPEAT,0x4e);
     if !app.preview_silent{app.start_media();}
@@ -166,6 +220,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
     if !app.preview && app.hover_stage == 1 && app.should_revert_stage1_to_calendar() {
         app.trigger_stage1_temporary(5);
     }
+    app.poll_weather();
     if !app.preview{SetTimer(Some(hwnd),11,16,None);}
     SetTimer(Some(hwnd),5,150,None);
     if args.iter().any(|s|s=="--suspend-fixture"){SetTimer(Some(hwnd),7,4000,None);SetTimer(Some(hwnd),8,7500,None);}
@@ -213,8 +268,40 @@ unsafe extern "system" fn wndproc(hwnd:HWND,msg:u32,wparam:WPARAM,lparam:LPARAM)
 unsafe extern "system" fn inputs_wndproc(hwnd:HWND,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{
     unsafe{
         match msg{
-            WM_CTLCOLOREDIT=>{let dc=HDC(wparam.0 as *mut _);SetTextColor(dc,COLORREF(0x00f5f1e9));SetBkColor(dc,COLORREF(0x002d2319));SetDCBrushColor(dc,COLORREF(0x002d2319));return LRESULT(GetStockObject(DC_BRUSH).0 as isize)},
+            WM_CTLCOLOREDIT=>{
+                let dc=HDC(wparam.0 as *mut _);
+                let edit_hwnd=HWND(lparam.0 as *mut _);
+                let ctrl_id=GetDlgCtrlID(edit_hwnd);
+                if ctrl_id==60{
+                    SetTextColor(dc,COLORREF(0x00ffffff));
+                    SetBkColor(dc,COLORREF(0x00000000));
+                    SetDCBrushColor(dc,COLORREF(0x00000000));
+                }else{
+                    SetTextColor(dc,COLORREF(0x00f5f1e9));
+                    SetBkColor(dc,COLORREF(0x002d2319));
+                    SetDCBrushColor(dc,COLORREF(0x002d2319));
+                }
+                return LRESULT(GetStockObject(DC_BRUSH).0 as isize)
+            },
+
             WM_ERASEBKGND=>LRESULT(1),
+            WM_COMMAND=>{
+                let id=(wparam.0&0xffff)as u16;
+                let code=(wparam.0>>16)as u16;
+                if code==0x0300&&id==60{
+                    APP.with(|cell|{
+                        if let Ok(mut app)=cell.try_borrow_mut(){
+                            if let Some(app)=app.as_mut(){
+                                app.clip_filter=app.input(60);
+                                app.clip_offset=0;
+                                app.invalidate();
+                            }
+                        }
+                    });
+                    return LRESULT(0);
+                }
+                DefWindowProcW(hwnd,msg,wparam,lparam)
+            },
             _=>DefWindowProcW(hwnd,msg,wparam,lparam),
         }
     }
@@ -239,6 +326,7 @@ impl Shell {
             if let Some(mut media)=self.media.take(){media.stop();}
             if let Some(mut capture)=self.visualizer.take(){capture.stop();}
             self.track.playing=false;self.levels.fill(0.);self.save();
+            crate::system::trim_working_set();
         }else{
             self.lyrics_key.clear();
             self.start_media();
@@ -257,7 +345,7 @@ impl Shell {
         let post=self.poster();thread::spawn(move||{let result=crate::net::with_cancel(token.clone(),work);if !token.is_cancelled(){post.send(Event::Completed(module,id,Box::new(result)));}});
     }
     fn cancel_job(&mut self,module:&str){if let Some((_,token))=self.jobs.remove(module){token.cancel();}self.busy=self.jobs.keys().any(|m|matches!(*m,"AI"|"Cuaca"|"Kalender"));}
-    fn cancel_jobs(&mut self){for(_,(_,token))in std::mem::take(&mut self.jobs){token.cancel();}self.busy=false;}
+    fn cancel_jobs(&mut self){self.weather_refresh.cancel_pending(self.jobs.contains_key("Cuaca"));for(_,(_,token))in std::mem::take(&mut self.jobs){token.cancel();}self.busy=false;}
 
     fn poster(&self)->Poster{Poster{queue:self.queue.clone(),hwnd:self.hwnd.0 as usize}}
     fn relay<T:Send+'static>(&self,receiver:mpsc::Receiver<T>,map:fn(T)->Event){let post=self.poster();thread::spawn(move||while let Ok(event)=receiver.recv(){post.send(map(event));});}
@@ -312,15 +400,20 @@ impl Shell {
                     let now_str = Local::now().format("%H:%M").to_string();
                     let chars = text.chars().count();
                     let lines = text.lines().count().max(1);
-                    self.state.clipboard_history.insert(0, crate::clipboard::ClipItem {
+                                        self.state.clipboard_history.insert(0, crate::clipboard::ClipItem {
                         id: Local::now().timestamp_millis() as u64,
                         text,
                         time: now_str,
                         chars,
                         lines,
+                        pinned: false,
                     });
                     if self.state.clipboard_history.len() > 50 {
-                        self.state.clipboard_history.truncate(50);
+                        if let Some(pos) = self.state.clipboard_history.iter().rposition(|c| !c.pinned) {
+                            self.state.clipboard_history.remove(pos);
+                        } else {
+                            self.state.clipboard_history.truncate(50);
+                        }
                     }
                     let _ = self.store.save("state.json", &self.state);
                     if self.hover_stage == 1 && self.tab == "Clipboard" {
@@ -381,6 +474,8 @@ impl Shell {
                 (530.,236.,24.)
             }else if self.tab=="Catatan"{
                 (540.,280.,24.)
+            }else if self.tab=="Cuaca"{
+                (560.,if self.weather_custom_open{320.}else{240.},24.)
             }else{
                 (ui::EXPANDED_WIDTH,ui::EXPANDED_HEIGHT,24.)
             }
@@ -396,48 +491,73 @@ impl Shell {
                 (tw, 30., 15.)
             }
         }else if self.hover_stage==1{
-            if self.lyric_mode{
-                (300.,30.,15.)
+            let bat_extra = if self.battery.as_ref().is_some_and(|b| b.has_battery) { 54. } else { 0. };
+            if self.volume_hud.is_some() {
+                (200. + bat_extra, 30., 15.)
+            } else if self.lyric_mode{
+                (300. + bat_extra * 0.4, 30., 15.)
             }else if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
-                (158.,30.,15.)
-            }else if self.tab == "Kalender" {
-                (158.,30.,15.)
-            }else if self.tab == "Reminder" {
-                (158.,30.,15.)
-            }else if self.tab == "Clipboard" {
-                (195.,30.,15.)
-            }else if self.tab == "Catatan" {
-                (180.,30.,15.)
-            }else if self.tab == "Musik" {
+                (168. + bat_extra, 30., 15.)
+            }else if self.stage1_tab() == "Kalender" {
+                (168. + bat_extra, 30., 15.)
+            }else if self.stage1_tab() == "Reminder" {
+                (168. + bat_extra, 30., 15.)
+            }else if self.stage1_tab() == "Clipboard" {
+                (200. + bat_extra, 30., 15.)
+            }else if self.stage1_tab() == "Cuaca" {
+                (195. + bat_extra, 30., 15.)
+            }else if self.stage1_tab() == "Catatan" {
+                (195. + bat_extra, 30., 15.)
+            }else if self.stage1_tab() == "Musik" {
                 if self.track.playing || !self.track.title.is_empty() {
                     let len = if !self.track.artist.is_empty() {
                         self.track.title.chars().count() + self.track.artist.chars().count() + 3
                     } else {
                         self.track.title.chars().count()
                     };
-                    let w = (len as f32 * 7.2 + 110.).clamp(180., 340.);
+                    let w = (len as f32 * 7.2 + 110. + bat_extra).clamp(190. + bat_extra, 360.);
                     (w, 30., 15.)
                 } else {
-                    (158.,30.,15.)
+                    (168. + bat_extra, 30., 15.)
                 }
             }else{
-                (180.,30.,15.)
+                (190. + bat_extra, 30., 15.)
             }
         }else{
             (50.,10.,5.)
         }
     }
+    fn stage1_tab(&self)->&str{ui::stage1_tab(&self.tab,self.settings.enabled("Musik")&&self.stage1_media_until.is_some_and(|until|Instant::now()<until))}
     pub fn should_revert_stage1_to_calendar(&self) -> bool {
-        should_revert_stage1(&self.tab, self.reminder_index, self.lyric_mode)
+        should_revert_stage1(self.stage1_tab(), self.reminder_index, self.lyric_mode)
     }
     pub fn is_stage1_temporary_active(&self) -> bool {
-        self.stage1_temporary_until.is_some_and(|until| Instant::now() < until)
+        self.stage1_media_until.is_some_and(|until|Instant::now()<until)||self.stage1_temporary_until.is_some_and(|until| Instant::now() < until)
     }
-    pub fn trigger_stage1_temporary(&mut self, duration_secs: u64) {
-        self.stage1_temporary_until = Some(Instant::now() + Duration::from_secs(duration_secs));
-        unsafe {
-            SetTimer(Some(self.hwnd), 6, (duration_secs * 1000) as u32, None);
+    fn sync_stage1_timer(&self){unsafe{
+        if let Some(ms)=ui::stage1_deadline_ms(self.stage1_media_until,self.stage1_temporary_until,Instant::now()){
+            SetTimer(Some(self.hwnd),6,ms,None);
+        }else{let _=KillTimer(Some(self.hwnd),6);}
+    }}
+    pub fn trigger_stage1_temporary(&mut self,duration_secs:u64){
+        self.stage1_temporary_until=Some(Instant::now()+Duration::from_secs(duration_secs));
+        self.sync_stage1_timer();
+    }
+
+    pub fn show_volume_hud(&mut self, vol: f32, muted: bool) {
+        let is_new = self.volume_hud.is_none();
+        self.volume_hud = Some((vol, muted, Instant::now()));
+        self.last_known_volume = Some((vol, muted));
+        self.trigger_stage1_temporary(2);
+        if self.hover_stage == 0 {
+            self.set_hover_stage(1);
+        } else if is_new && self.hover_stage == 1 {
+            let from = self.geometry();
+            self.morph = Some(ui::Morph::new(from, self.target_geometry()));
+            self.update_window_region();
+            self.start_morph_timer();
         }
+        self.invalidate();
     }
     fn set_hover_stage(&mut self,stage:u8){
         if self.fullscreen{return}
@@ -456,11 +576,15 @@ impl Shell {
             self.settings_popup=None;
             self.reminder_menu=None;
             self.focused=None;
+            self.clip_search_open=false;
+            self.clip_filter.clear();
+            self.weather_custom_open=false;
+            self.weather_menu_open=false;
         }
         self.morph=Some(ui::Morph::new(from,self.target_geometry()));
         self.update_window_region();
         if self.hover_stage<2{self.make_inputs();}
-        self.sync_visualizer();self.clock_timer();self.start_morph_timer();self.invalidate();
+        self.poll_weather();self.sync_visualizer();self.clock_timer();self.start_morph_timer();self.invalidate();
     }
     fn geometry(&self)->(f32,f32,f32){match &self.morph{Some(morph)=>morph.sample(),None=>self.target_geometry()}}
     fn capsule_origin(&self)->(f32,f32){
@@ -568,6 +692,9 @@ impl Shell {
             self.make_inputs();
             self.sync_input_host();
             self.update_window_region();
+            if self.hover_stage == 0 {
+                crate::system::trim_working_set();
+            }
         }
         if self.tab_fade.as_ref().is_some_and(|(_,t,_)|t.elapsed()>=ui::TAB_FADE_DURATION){
             self.tab_fade=None;
@@ -606,11 +733,14 @@ impl Shell {
     fn clock_timer(&self){unsafe{let now=Local::now();let delay=if !self.fullscreen&&(self.focus.running()||self.breathing.is_some()||self.expanded||self.lyric_mode||self.track.playing||self.settings.water_reminder||self.settings.move_reminder||self.settings.prayer_enabled||self.stretch_deadline.is_some()){1000}else{(60-now.second()).max(1)*1000};SetTimer(Some(self.hwnd),1,delay,None);}}
     fn make_inputs(&mut self){unsafe{
         for &id in self.inputs.keys(){
-            if self.input_page != "Catatan" {
+            if self.input_page != "Catatan" && self.input_page != "Clipboard" {
                 self.drafts.insert((self.input_page.clone(),id),self.input(id));
             }
         }
         if self.input_page=="Tugas"{if let Some(note)=self.drafts.get(&("Tugas".into(),12)){self.state.notes=note.clone();}}
+        if self.input_page=="Clipboard" {
+            self.clip_filter = self.input(60);
+        }
         if self.input_page=="Catatan" && (self.tab != "Catatan" || self.settings_open || !self.expanded) {
             let title=self.input(50);let content=self.input(51);
             if let Some(note)=self.state.sticky_notes.get_mut(self.state.selected_note){
@@ -629,8 +759,24 @@ impl Shell {
         match self.tab.as_str(){
 
             "Tugas"=>{self.edit(10,"",16.,46.,220.,28.,false,false);self.edit(11,"",244.,46.,100.,28.,false,false);let notes=self.state.notes.clone();self.edit(12,&notes,16.,184.,330.,68.,false,true);},
-            "Cuaca"=>{let city=self.settings.weather_city.clone();self.edit(30,&city,28.,172.,140.,28.,false,false);self.edit(31,&self.settings.latitude.to_string(),176.,172.,86.,28.,false,false);self.edit(32,&self.settings.longitude.to_string(),270.,172.,86.,28.,false,false);},
             "AI"=>{let w=self.width;self.edit(40,"",28.,124.,w-56.,50.,false,true);self.edit(41,&self.settings.ai_endpoint.clone(),28.,72.,240.,26.,false,false);self.edit(42,&self.settings.ai_model.clone(),276.,72.,140.,26.,false,false);self.edit(43,"",28.,104.,240.,26.,true,false);},
+            "Clipboard"=>{
+                let filter = self.clip_filter.clone();
+                if self.clip_search_open || !self.clip_filter.is_empty() {
+                    self.edit(60, &filter, 44., 42., 164., 19., false, false);
+                }
+            },
+            "Cuaca"=>{
+                if self.weather_custom_open {
+                    let modal_w = 340.;
+                    let modal_x = (self.width - modal_w) / 2.;
+                    let modal_y = 65.;
+                    let city=self.settings.weather_city.clone();
+                    self.edit(30,&city,modal_x + 114.,modal_y + 44.,200.,24.,false,false);
+                    self.edit(31,&self.settings.latitude.to_string(),modal_x + 114.,modal_y + 76.,200.,24.,false,false);
+                    self.edit(32,&self.settings.longitude.to_string(),modal_x + 114.,modal_y + 108.,200.,24.,false,false);
+                }
+            },
             "Catatan"=>{
                 if let Some(note)=self.state.sticky_notes.get(self.state.selected_note){
                     let title = if note.title == "Catatan Baru" && self.settings.language == "en" {
@@ -648,13 +794,17 @@ impl Shell {
         self.rebuild_input_region();self.sync_input_host();
     }}
     unsafe fn edit(&mut self,id:u16,value:&str,x:f32,y:f32,width:f32,height:f32,password:bool,multiline:bool){unsafe{
-        let value=if self.input_page != "Catatan" {
+        let value=if self.input_page != "Catatan" && self.input_page != "Clipboard" {
             self.drafts.get(&(self.input_page.clone(),id)).map(|v|v.as_str()).unwrap_or(value)
         } else {
             value
         };
         let value:Vec<u16>=value.encode_utf16().chain(Some(0)).collect();
-        let style=WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_BORDER|WINDOW_STYLE(if multiline{(ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN)as u32|WS_VSCROLL.0}else{ES_AUTOHSCROLL as u32})|WINDOW_STYLE(if password{ES_PASSWORD as u32}else{0});
+        let style=if id == 60 {
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|WINDOW_STYLE(ES_AUTOHSCROLL as u32)
+        } else {
+            WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_BORDER|WINDOW_STYLE(if multiline{(ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN)as u32|WS_VSCROLL.0}else{ES_AUTOHSCROLL as u32})|WINDOW_STYLE(if password{ES_PASSWORD as u32}else{0})
+        };
         // Parent is the input host, not the composition window: child HWNDs do not render on a
         // WS_EX_NOREDIRECTIONBITMAP parent. The host sits exactly on top of the shell and is
         // clipped to these rectangles, so the shell keeps every click outside them.
@@ -662,7 +812,12 @@ impl Shell {
         // SHADOW_PAD above and left of the capsule.
         let (capsule_x,capsule_y)=self.capsule_origin();
         if let Ok(edit)=CreateWindowExW(WINDOW_EX_STYLE(0),w!("EDIT"),PCWSTR(value.as_ptr()),style,((x+capsule_x)*self.scale)as i32,((y+capsule_y)*self.scale)as i32,(width*self.scale)as i32,(height*self.scale)as i32,Some(self.inputs_hwnd),Some(HMENU(id as usize as *mut _)),None,None){
-            SendMessageW(edit,WM_SETFONT,Some(WPARAM(GetStockObject(DEFAULT_GUI_FONT).0 as usize)),Some(LPARAM(1)));self.inputs.insert(id,edit);
+            SendMessageW(edit,WM_SETFONT,Some(WPARAM(GetStockObject(DEFAULT_GUI_FONT).0 as usize)),Some(LPARAM(1)));
+            if id == 60 {
+                let cue: Vec<u16> = crate::i18n::t("clipboard.search_hint", &self.settings.language).encode_utf16().chain(Some(0)).collect();
+                let _ = SendMessageW(edit, 0x1501, Some(WPARAM(1)), Some(LPARAM(cue.as_ptr() as isize)));
+            }
+            self.inputs.insert(id,edit);
         }
     }}
     /// Clips the input host to exactly the rectangles of the EDIT controls. Everything outside
@@ -694,6 +849,13 @@ impl Shell {
     fn load_holidays(&mut self){self.holidays=if self.year==2026{serde_json::from_str::<HolidayFile>(include_str!("../data/holidays-2026.json")).map(|f|f.holidays).unwrap_or_default()}else{vec![]};}
     fn handle(&mut self,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{unsafe{
         match msg{
+            WM_APP_VOLUME_CHANGED=>{
+                if let Some((vol, muted)) = crate::system::get_master_volume() {
+                    self.show_volume_hud(vol, muted);
+                }
+                let _ = SetTimer(Some(self.hwnd), 14, 40, None);
+                return LRESULT(0);
+            },
             0x031D=>{self.sync_clipboard();return LRESULT(0)},
             WM_PAINT=>{let mut ps=PAINTSTRUCT::default();BeginPaint(self.hwnd,&mut ps);self.paint();let _=EndPaint(self.hwnd,&ps);return LRESULT(0)},
             WM_ERASEBKGND=>return LRESULT(1),
@@ -760,6 +922,7 @@ impl Shell {
                 return LRESULT(0)
             },
             WM_LBUTTONDOWN=>{let (x,y)=self.client_to_capsule(lparam);
+                if self.weather_menu_open{let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::WeatherSetCity(..)|Action::WeatherToggleCustom|Action::WeatherToggleMenu));if !inside{self.weather_menu_open=false;self.pressed=None;self.invalidate();return LRESULT(0)}}
                 if self.settings_popup.is_some(){let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::SettingsMenu(..)|Action::SettingsValue(..)|Action::SettingsCategory(..)|Action::Back));if !inside{self.settings_popup=None;self.pressed=None;self.invalidate();return LRESULT(0)}}
                 if self.reminder_menu.is_some(){let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::ReminderValue(..)|Action::ReminderMenu(..)));if !inside{self.reminder_menu=None;self.pressed=None;self.invalidate();return LRESULT(0)}}
                 if let Some(hit)=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).cloned(){
@@ -828,13 +991,29 @@ impl Shell {
                 }
                 return LRESULT(0)},
             WM_MOUSEWHEEL if self.expanded&&self.settings_open=>{let delta=(wparam.0>>16)as i16;if self.settings_popup.is_some(){self.handle_settings_key(if delta>0{0x26}else{0x28});}return LRESULT(0)},
-            WM_MOUSEWHEEL if (self.expanded || self.hover_stage == 1)&&!self.settings_open=>{
+            WM_MOUSEWHEEL if !self.expanded&&!self.settings_open=>{
+                let wheel_delta=(wparam.0>>16)as i16;
+                let delta=if wheel_delta>0{0.02}else{-0.02};
+                if let Some((vol,muted))=crate::system::adjust_master_volume(delta){
+                    self.volume_hud=Some((vol,muted,Instant::now()));
+                }else{
+                    crate::system::step_volume_fallback(wheel_delta>0);
+                    if let Some((vol,muted))=crate::system::get_master_volume(){
+                        self.volume_hud=Some((vol,muted,Instant::now()));
+                    }
+                }
+                self.trigger_stage1_temporary(2);
+                if self.hover_stage==0{self.set_hover_stage(1);}
+                self.invalidate();
+                return LRESULT(0);
+            },
+            WM_MOUSEWHEEL if self.expanded&&!self.settings_open=>{
                 let mut point=POINT{x:(lparam.0 as i16)as i32,y:((lparam.0>>16)as i16)as i32};let _=ScreenToClient(self.hwnd,&mut point);
                 let (ox,oy)=self.capsule_origin();
                 let rel_x=point.x as f32/self.scale-ox;
                 let rel_y=point.y as f32/self.scale-oy;
                 let wheel_delta=(wparam.0>>16)as i16;
-                if self.hover_stage == 1 || rel_y<=42.0{
+                if rel_y<=42.0{
                     let tabs = self.settings.active_tab_order();
                     if !tabs.is_empty(){
                         let curr_idx=tabs.iter().position(|t|t==&self.tab).unwrap_or(0);
@@ -847,6 +1026,7 @@ impl Shell {
                     }
                     return LRESULT(0);
                 }
+                if self.tab=="Cuaca"&&rel_y>42.{self.refresh_weather();return LRESULT(0);}
                 if self.tab=="Reminder"&&self.reminder_menu.is_some()&&rel_x>=229.{self.handle_reminder_menu_key(if wheel_delta>0{0x26}else{0x28});return LRESULT(0);}
                 if self.tab=="Reminder"&&rel_x<208.&&rel_y>48.{self.action(Action::ReminderStep(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
                 if self.tab=="Kalender"&&rel_x<308.&&rel_y>42.{self.action(Action::Month(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
@@ -904,12 +1084,24 @@ impl Shell {
                         self.set_hover_stage(1);
                     }
                 },
-                5=>{if !self.suspended{self.sync_foreground();}},
+                5=>{
+                    if !self.suspended{
+                        self.sync_foreground();
+                    }
+                },
+                14=>{
+                    let _ = KillTimer(Some(self.hwnd), 14);
+                    if let Some((vol, muted)) = crate::system::get_master_volume() {
+                        self.show_volume_hud(vol, muted);
+                    }
+                },
                 6=>{
-                    let _=KillTimer(Some(self.hwnd),6);
-                    self.stage1_temporary_until = None;
+                    let now=Instant::now();
+                    if self.stage1_temporary_until.is_some_and(|until|until<=now){self.stage1_temporary_until=None;}
+                    if self.stage1_media_until.is_some_and(|until|until<=now){self.stage1_media_until=None;}
+                    self.sync_stage1_timer();
                     if self.hover_stage<2{
-                        let from=self.geometry();
+                        let from=self.morph.as_ref().map(|m|m.sample()).unwrap_or((self.width,self.height,self.height*0.5));
                         self.morph=Some(ui::Morph::new(from,self.target_geometry()));
                         self.start_morph_timer();
                     }
@@ -919,7 +1111,7 @@ impl Shell {
                 7=>{let _=KillTimer(Some(self.hwnd),7);self.power_state(true);},
                 8=>{let _=KillTimer(Some(self.hwnd),8);self.power_state(false);},
                 10=>{if self.tab_fade.as_ref().is_some_and(|(_,t,_)|t.elapsed()>=ui::TAB_FADE_DURATION){self.tab_fade=None;let _=KillTimer(Some(self.hwnd),10);}self.invalidate();},
-                11=>{self.startup_alpha=(self.startup_alpha+0.05).min(1.);if self.startup_alpha>=1.{let _=KillTimer(Some(self.hwnd),11);}self.invalidate();},
+                11=>{self.startup_alpha=(self.startup_alpha+0.05).min(1.);if self.startup_alpha>=1.{let _=KillTimer(Some(self.hwnd),11);crate::system::trim_working_set();}self.invalidate();},
                 12=>{
                     let _=KillTimer(Some(self.hwnd),12);
                     if let Some(drag) = &mut self.tab_drag {
@@ -960,6 +1152,8 @@ impl Shell {
                         return LRESULT(0);
                     }
                 }
+                0x1B if self.weather_menu_open=>{self.weather_menu_open=false;self.invalidate();return LRESULT(0)},
+                0x1B if self.weather_custom_open=>{self.action(Action::WeatherToggleCustom);return LRESULT(0)},
                 0x1B if self.reminder_menu.is_some()=>{self.reminder_menu=None;self.invalidate();return LRESULT(0)},
                 0x1B=>{ // VK_ESCAPE
                     if self.hover_stage>=2{
@@ -979,7 +1173,22 @@ impl Shell {
             WM_DPICHANGED|WM_DISPLAYCHANGE=>{self.layout();self.make_inputs();self.invalidate();return LRESULT(0)},
             WM_CLOSE=>{self.set_expanded(false);return LRESULT(0)},
             WM_DESTROY=>{PostQuitMessage(0);return LRESULT(0)},
-            WM_CTLCOLOREDIT=>{let dc=HDC(wparam.0 as *mut _);SetTextColor(dc,COLORREF(0x00f5f1e9));SetBkColor(dc,COLORREF(0x002d2319));SetDCBrushColor(dc,COLORREF(0x002d2319));return LRESULT(GetStockObject(DC_BRUSH).0 as isize)},
+            WM_CTLCOLOREDIT=>{
+                let dc=HDC(wparam.0 as *mut _);
+                let edit_hwnd=HWND(lparam.0 as *mut _);
+                let ctrl_id=GetDlgCtrlID(edit_hwnd);
+                if ctrl_id==60{
+                    SetTextColor(dc,COLORREF(0x00ffffff));
+                    SetBkColor(dc,COLORREF(0x00000000));
+                    SetDCBrushColor(dc,COLORREF(0x00000000));
+                }else{
+                    SetTextColor(dc,COLORREF(0x00f5f1e9));
+                    SetBkColor(dc,COLORREF(0x002d2319));
+                    SetDCBrushColor(dc,COLORREF(0x002d2319));
+                }
+                return LRESULT(GetStockObject(DC_BRUSH).0 as isize)
+            },
+
             WM_COMMAND=>{match wparam.0&0xffff{900=>self.set_expanded(!self.expanded),901=>self.action(Action::Settings),902=>self.action(Action::Bottom(false)),903=>self.action(Action::Bottom(true)),999=>{let _=DestroyWindow(self.hwnd);},_=>{}}return LRESULT(0)},
             _=>{}
         }DefWindowProcW(self.hwnd,msg,wparam,lparam)
@@ -987,6 +1196,31 @@ impl Shell {
     fn tick(&mut self){
         if self.suspended{return}
         self.tick_reminder();
+        if self.last_battery_check.elapsed() >= Duration::from_secs(4) {
+            self.last_battery_check = Instant::now();
+            if let Some(new_bat) = crate::system::get_battery_status() {
+                if let Some(old_charging) = self.last_ac_status {
+                    if old_charging != new_bat.is_charging {
+                        let msg = crate::i18n::battery_status(new_bat.percentage, new_bat.is_charging, &self.settings.language);
+                        self.notice(&msg);
+                    }
+                }
+                self.last_ac_status = Some(new_bat.is_charging);
+                self.battery = Some(new_bat);
+            }
+        }
+        if let Some((_, _, at)) = self.volume_hud {
+            if at.elapsed() >= Duration::from_millis(1800) {
+                self.volume_hud = None;
+                if self.hover_stage == 1 {
+                    let from = self.geometry();
+                    self.morph = Some(ui::Morph::new(from, self.target_geometry()));
+                    self.update_window_region();
+                    self.start_morph_timer();
+                }
+                self.invalidate();
+            }
+        }
         let clip_seq = crate::clipboard::get_sequence_number();
         if clip_seq != self.last_clipboard_seq {
             self.sync_clipboard();
@@ -1024,6 +1258,7 @@ impl Shell {
         if self.breathing.is_some_and(|start|start.elapsed().as_secs()>=60){self.breathing=None;self.notice("Latihan napas selesai.");}
         let schedule=Local::now().format("%Y-%m-%d %H:%M").to_string();if self.settings.enabled("Reminder")&&self.settings.focus_enabled&&self.last_schedule!=schedule{let time=Local::now().format("%H:%M").to_string();if self.settings.focus_schedule.contains(&time){self.focus.start(self.settings.focus_minutes,false);self.notice("Jadwal fokus dimulai.");}self.last_schedule=schedule;}
         
+        self.poll_weather();
         self.sync_active_lyric();
         self.clock_timer();self.invalidate();
     }
@@ -1040,11 +1275,15 @@ impl Shell {
                 if cover_key!=0{let bytes=track.artwork.clone();self.job("Artwork",move||Event::Artwork(cover_key,crate::artwork::decode(&bytes)));}
             }
             if self.preview&&self.track.playing!=track.playing{eprintln!("media playing={} can_seek={}",track.playing,track.can_seek);}
-            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;if !self.lyric_mode{self.trigger_stage1_temporary(5);}if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
+            if !track.title.is_empty()&&(track.title!=self.track.title||track.artist!=self.track.artist){
+                self.stage1_media_until=Some(Instant::now()+Duration::from_secs(5));
+                if !self.lyric_mode{self.trigger_stage1_temporary(5);}
+            }
+            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
             if self.hover_stage==1 && !self.lyric_mode {
                 let target=self.target_geometry();
                 if (self.width-target.0).abs()>2.0||(self.height-target.1).abs()>2.0{
-                    let from=self.geometry();
+                    let from=self.morph.as_ref().map(|m|m.sample()).unwrap_or((self.width,self.height,self.height*0.5));
                     self.morph=Some(ui::Morph::new(from,target));
                     self.start_morph_timer();
                 }
@@ -1054,9 +1293,39 @@ impl Shell {
         Event::Artwork(key,result)=>{if key==self.cover_key&&self.settings.enabled("Musik"){self.cover=result.ok();if self.preview{eprintln!("artwork ready={}",self.cover.is_some());}}},
         Event::Levels(levels)=>{if self.visualizer.is_some(){self.levels=levels;self.sync_active_lyric();}},
         Event::Lyrics(key,result)=>{if key==self.lyrics_key&&self.settings.enabled("Musik"){match result{Ok(value)=>{self.lyrics=crate::lyrics::parse_lrc_with_options(&value.synced_lyrics,self.settings.romanize_lyrics);self.plain_lyrics=if value.instrumental{"Instrumental · nikmati musiknya.".into()}else if value.plain_lyrics.is_empty()&&self.lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini.".into()}else if self.settings.romanize_lyrics{crate::lyrics::romanize_text(&value.plain_lyrics)}else{value.plain_lyrics};self.layout();},Err(_)=>{self.plain_lyrics="Lirik belum tersedia untuk lagu ini.".into();}}}},
-        Event::Weather(result)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());},Err(e)=>self.notice(e)}}},
+        Event::Weather(result)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());self.weather_refresh.failed=false;},Err(_)=>{self.weather_refresh.failed=true;self.notice(crate::i18n::t("weather.fetch_failed",&self.settings.language));}}}},
         Event::Agenda(result)=>{if self.settings.enabled("Kalender"){match result{Ok(value)=>{self.agenda=value;self.agenda_updated=Some(Instant::now());},Err(e)=>self.notice(e)}}},
-        Event::Ai(result)=>{if self.settings.enabled("AI"){match result{Ok(text)=>self.ai_messages.push(crate::online::ChatMessage{role:"assistant".into(),content:text}),Err(e)=>self.notice(e)}}},Event::Notice(text)=>self.notice(text),
+        Event::Ai(result)=>{if self.settings.enabled("AI"){match result{Ok(text)=>self.ai_messages.push(crate::online::ChatMessage{role:"assistant".into(),content:text}),Err(e)=>self.notice(e)}}},Event::Update(result)=>{
+            match result{
+                Ok(Some(release))=>{
+                    let current=APP_VERSION;
+                    if crate::online::is_newer_release(&release.tag_name,current){
+                        let msg=if self.settings.language=="en"{
+                            format!("New version available: {}!", release.tag_name)
+                        }else{
+                            format!("Versi baru tersedia: {}!", release.tag_name)
+                        };
+                        self.notice(&msg);
+                        self.update_status=UpdateStatus::Available(release);
+                    }else{
+                        let msg=if self.settings.language=="en"{
+                            "mynotch is up to date."
+                        }else{
+                            "mynotch sudah menggunakan versi terbaru."
+                        };
+                        self.notice(msg);
+                        self.update_status=UpdateStatus::UpToDate(chrono::Local::now().format("%H:%M").to_string());
+                    }
+                },
+                Ok(None)=>{
+                    self.update_status=UpdateStatus::UpToDate(chrono::Local::now().format("%H:%M").to_string());
+                },
+                Err(e)=>{
+                    self.notice(&format!("Gagal memeriksa update: {e}"));
+                    self.update_status=UpdateStatus::Error(e);
+                }
+            }
+        },Event::Notice(text)=>self.notice(text),
     }}if repaint{self.invalidate();}}
     fn button_h(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,width:f32,height:f32,action:Action,primary:bool){
         let hovered=self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+width&&py>=y&&py<=y+height);
@@ -1110,9 +1379,19 @@ impl Shell {
         if self.painter.is_none(){
             let pw=(ui::CANVAS_WIDTH*self.scale).max(1.)as u32;
             let ph=(ui::CANVAS_HEIGHT*self.scale).max(1.)as u32;
-            self.painter=unsafe{Painter::new(self.hwnd,pw,ph,96.*self.scale)}.ok();
+            self.painter=unsafe{Painter::new(self.hwnd,pw,ph,96.*self.scale,self.settings.software_renderer)}.ok();
+        }
+        if self.hover_stage==1&&!self.expanded&&self.height>=29.&&self.height<=31.{
+            let target=self.target_geometry();
+            let destination=self.morph.as_ref().map(|m|m.to()).unwrap_or((self.width,self.height,self.height*0.5));
+            if (target.0-destination.0).abs()>0.1||(target.1-destination.1).abs()>0.1{
+                let from=self.morph.as_ref().map(|m|m.sample()).unwrap_or((self.width,self.height,self.height*0.5));
+                self.morph=Some(ui::Morph::new(from,target));
+                self.update_window_region();self.start_morph_timer();
+            }
         }
         if let Some(mut p)=self.painter.take(){
+            if !self.settings.enabled("Cuaca"){p.clear_weather_icons();}
             self.painting=true;
             let paint_started=std::time::Instant::now();
             let ok=unsafe{
@@ -1328,7 +1607,7 @@ impl Shell {
                     let cal = format!("{} {}", self.day, month_str);
                     ("calendar", cal)
                 } else {
-                    match self.tab.as_str() {
+                    match self.stage1_tab() {
                         "Kalender" => {
                             let month_str = crate::i18n::month_name(self.month, lang);
                             let cal = format!("{} {}", self.day, month_str);
@@ -1371,6 +1650,14 @@ impl Shell {
                             };
                             ("clipboard", text)
                         }
+                        "Cuaca" => {
+                            let text = if let Some(w) = &self.weather {
+                                format!("{:.0}°C · {}", w.temperature, self.settings.weather_city)
+                            } else {
+                                crate::i18n::t("stage1.weather", lang).into()
+                            };
+                            ("cloud", text)
+                        }
                         "Catatan" => {
                             let count = self.state.sticky_notes.len();
                             let notes_label = crate::i18n::t("stage1.notes", lang);
@@ -1392,15 +1679,21 @@ impl Shell {
                     }
                 };
 
+                if self.stage1_tab()=="Cuaca"&&self.volume_hud.is_none(){
+                    self.draw_weather_stage1(p,btn_up_x-4.);
+                    self.button_chevron_up(p,btn_up_x,btn_up_y,btn_up_w,btn_up_h,Action::ToStage0,0x88888e);
+                    p.unclip();p.pop_alpha();return;
+                }
                 // 1. Symbol / icon di kiri (x = 10, w = 16)
-                p.outline_icon(icon,10.,(self.height-14.)/2.,14.,0xd5d5dc);
+
 
                 // 2. Tombol chevron up di sisi paling kanan
                 self.button_chevron_up(p, btn_up_x, btn_up_y, btn_up_w, btn_up_h, Action::ToStage0, 0x88888e);
 
                 // 3. Status tengah seragam: <info> | <jam> dengan pemisah "|" light & subtle
                 let time_str = Local::now().format("%H:%M").to_string();
-                self.draw_stage1_status(p, &info_text, &time_str, btn_up_x);
+                let info_x=self.draw_stage1_status(p, &info_text, &time_str, btn_up_x);
+                p.outline_icon(icon,info_x-22.,(self.height-14.)/2.,14.,0xd5d5dc);
 
                 p.unclip();
             }
@@ -1462,41 +1755,39 @@ impl Shell {
         }
         if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x,y,w,h),action});}
     }
-    fn draw_stage1_status(&mut self,p:&mut Painter,info:&str,time_str:&str,btn_up_x:f32){unsafe{
-        let left_x=28.0;
+    fn draw_stage1_status(&mut self,p:&mut Painter,info:&str,time_str:&str,btn_up_x:f32)->f32{unsafe{
+        let left_x=36.0;
         let right_x=btn_up_x-4.0;
         let available_w=(right_x-left_x).max(10.0);
 
-        let info_w=p.measure_text(info,11.5,true);
-        let sep_w=6.0;
-        let time_w=p.measure_text(time_str,11.5,true);
-        let gap=7.0;
+        if let Some((vol, muted, _at)) = self.volume_hud {
+            let vol_icon = if muted || vol == 0.0 { "\u{1F507}" } else if vol < 0.33 { "\u{1F508}" } else if vol < 0.66 { "\u{1F509}" } else { "\u{1F50A}" };
+            let percent = format!("{}%", (vol * 100.0).round() as u32);
+            let bar_w = 54.0;
+            let bar_h = 4.0;
+            let bar_y = (self.height - bar_h) * 0.5;
 
-        let cluster_w=info_w+gap+sep_w+gap+time_w;
+            let icon_w = 18.0;
+            let pct_w = 30.0;
+            let total_w = icon_w + 4.0 + pct_w + 6.0 + bar_w;
+            let start_x = left_x + (available_w - total_w).max(0.0) * 0.5;
 
-        if cluster_w<=available_w{
-            let start_x=left_x+(available_w-cluster_w)*0.5;
-
-            // Info teks (putih semi-bold)
-            p.text_centered(info,start_x,0.,info_w,self.height,11.5,0xffffff,1.0,true);
-
-            // Pemisah "|": light/normal font (bold: false), warna soft slate (tidak pure white)
-            let sep_x=start_x+info_w+gap;
-            p.text_centered("|",sep_x,0.,sep_w,self.height,11.0,0x78808c,0.85,false);
-
-            // Jam (putih semi-bold)
-            let time_x=sep_x+sep_w+gap;
-            p.text_centered(time_str,time_x,0.,time_w,self.height,11.5,0xffffff,1.0,true);
-        }else{
-            let time_x=right_x-time_w;
-            p.text_centered(time_str,time_x,0.,time_w,self.height,11.5,0xffffff,1.0,true);
-
-            let sep_x=time_x-gap-sep_w;
-            p.text_centered("|",sep_x,0.,sep_w,self.height,11.0,0x78808c,0.85,false);
-
-            let info_max_w=(sep_x-gap-left_x).max(10.0);
-            p.text_ellipsis_vcenter(info,left_x,0.,info_max_w,self.height,11.5,0xffffff,true);
+            p.text_centered(vol_icon, start_x, 0., icon_w, self.height, 11.5, 0xffffff, 1.0, true);
+            p.text_centered(&percent, start_x + icon_w + 4.0, 0., pct_w, self.height, 11.0, 0x38bdf8, 1.0, true);
+            let bar_x = start_x + icon_w + 4.0 + pct_w + 6.0;
+            p.fill_alpha(bar_x, bar_y, bar_w, bar_h, 2.0, 0xffffff, 0.20);
+            p.fill_alpha(bar_x, bar_y, (bar_w * vol).clamp(0.0, bar_w), bar_h, 2.0, 0x38bdf8, 0.95);
+            return left_x;
         }
+
+        let footer=ui::stage1_footer(time_str,self.battery.as_ref().filter(|b|b.has_battery).map(|b|(b.percentage as u32,b.is_charging)));
+        let time_w=p.measure_text(&footer,11.5,true);
+        let info_w=p.measure_text(info,11.5,true);
+        let(info_x,sep_x,time_x)=ui::stage1_positions(left_x,right_x,info_w,time_w);
+        p.text_centered(&footer,time_x,0.,time_w,self.height,11.5,0xffffff,1.,true);
+        p.text_centered("|",sep_x,0.,6.,self.height,11.,0x78808c,0.85,false);
+        p.text_ellipsis_vcenter(info,info_x,0.,(sep_x-8.-info_x).max(0.),self.height,11.5,0xffffff,true);
+        info_x
     }}
     fn draw_top_tabs(&mut self,p:&mut Painter){unsafe{
         let is_rearranging = self.tab_drag.as_ref().map(|d| d.is_dragging).unwrap_or(false);
@@ -1654,10 +1945,10 @@ impl Shell {
         p.pop_alpha();
     }}
     fn active_lyric(&self)->Option<String>{let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);self.lyrics.iter().rev().find(|line|line.at<=position).map(|line|line.text.clone())}
-    fn tray(&self,add:bool){unsafe{use windows::Win32::UI::Shell::*;let mut data=NOTIFYICONDATAW{cbSize:std::mem::size_of::<NOTIFYICONDATAW>()as u32,hWnd:self.hwnd,uID:1,uFlags:NIF_MESSAGE|NIF_ICON|NIF_TIP,uCallbackMessage:TRAY,hIcon:LoadIconW(None,IDI_APPLICATION).unwrap_or_default(),..Default::default()};let text:Vec<u16>="mynotch 0.0.1.1 alpha".encode_utf16().collect();data.szTip[..text.len()].copy_from_slice(&text);let _=Shell_NotifyIconW(if add{NIM_ADD}else{NIM_DELETE},&data);}}
+    fn tray(&self,add:bool){unsafe{use windows::Win32::UI::Shell::*;let mut data=NOTIFYICONDATAW{cbSize:std::mem::size_of::<NOTIFYICONDATAW>()as u32,hWnd:self.hwnd,uID:1,uFlags:NIF_MESSAGE|NIF_ICON|NIF_TIP,uCallbackMessage:TRAY,hIcon:LoadIconW(None,IDI_APPLICATION).unwrap_or_default(),..Default::default()};let text:Vec<u16>="mynotch 0.0.1.2 alpha".encode_utf16().collect();data.szTip[..text.len()].copy_from_slice(&text);let _=Shell_NotifyIconW(if add{NIM_ADD}else{NIM_DELETE},&data);}}
     fn menu(&self){unsafe{if let Ok(menu)=CreatePopupMenu(){let _=AppendMenuW(menu,MF_STRING,900,w!("Buka / tutup notch"));let _=AppendMenuW(menu,MF_STRING,901,w!("Pengaturan"));let _=AppendMenuW(menu,MF_STRING,902,w!("Posisi atas"));let _=AppendMenuW(menu,MF_STRING,903,w!("Posisi bawah"));let _=AppendMenuW(menu,MF_SEPARATOR,0,PCWSTR::null());let _=AppendMenuW(menu,MF_STRING,999,w!("Keluar"));let mut cursor=POINT::default();let _=GetCursorPos(&mut cursor);let _=SetForegroundWindow(self.hwnd);let _=TrackPopupMenu(menu,TPM_RIGHTBUTTON,cursor.x,cursor.y,None,self.hwnd,None);let _=DestroyMenu(menu);}}}
 }
-impl Drop for Shell{fn drop(&mut self){crate::clipboard::unlisten_clipboard(self.hwnd);self.cancel_jobs();self.tray(false);if let Some(mut m)=self.media.take(){m.stop();}if let Some(mut v)=self.visualizer.take(){v.stop();}unsafe{for id in 1..=12{let _=KillTimer(Some(self.hwnd),id);}if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);}let _=UnregisterHotKey(Some(self.hwnd),1);let _=DestroyWindow(self.inputs_hwnd);}self.save();}}
+impl Drop for Shell{fn drop(&mut self){crate::clipboard::unlisten_clipboard(self.hwnd);self.cancel_jobs();self.tray(false);if let Some(mut m)=self.media.take(){m.stop();}if let Some(mut v)=self.visualizer.take(){v.stop();}unsafe{let h_val = HOOK_HANDLE.swap(0, Ordering::Relaxed); if h_val != 0 { let _ = UnhookWindowsHookEx(HHOOK(h_val as *mut _)); } HOOK_HWND.store(0, Ordering::Relaxed);for id in 1..=14{let _=KillTimer(Some(self.hwnd),id);}if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);}let _=UnregisterHotKey(Some(self.hwnd),1);let _=DestroyWindow(self.inputs_hwnd);}self.save();}}
 fn time_label(seconds:f64)->String{let secs=seconds.max(0.)as u64;format!("{:02}:{:02}",secs/60,secs%60)}
 
 fn covers_monitor(window:RECT,monitor:RECT)->bool{window.left<=monitor.left&&window.top<=monitor.top&&window.right>=monitor.right&&window.bottom>=monitor.bottom}
@@ -1705,7 +1996,7 @@ pub(super) fn should_revert_stage1(tab: &str, reminder_index: usize, lyric_mode:
     if lyric_mode {
         return false;
     }
-    if tab == "Kalender" {
+    if tab == "Kalender" || tab == "Cuaca" {
         return false;
     }
     if tab == "Reminder" && reminder_index == 0 {
@@ -1763,6 +2054,7 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
         // Clipboard, Catatan, Musik without lyrics revert to calendar
         assert!(should_revert_stage1("Clipboard", 0, false));
         assert!(should_revert_stage1("Catatan", 0, false));
+        assert!(!should_revert_stage1("Cuaca", 0, false));
         assert!(should_revert_stage1("Musik", 0, false));
     }
 }

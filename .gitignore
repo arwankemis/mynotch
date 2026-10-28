@@ -5,4 +5,5 @@
 *.tmp
 /target/
 /source/target/
+/scratch/
 /*.zip

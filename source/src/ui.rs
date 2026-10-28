@@ -11,7 +11,7 @@
 use std::time::{Duration, Instant};
 
 /// One vector icon vocabulary for navigation, settings and compact status.
-pub fn module_icon(module:&str)->&'static str{match module{"Musik"=>"music","Kalender"=>"calendar","Reminder"=>"bell","Clipboard"=>"clipboard","Catatan"=>"edit",_=>"bell"}}
+pub fn module_icon(module:&str)->&'static str{match module{"Musik"=>"music","Kalender"=>"calendar","Reminder"=>"bell","Clipboard"=>"clipboard","Catatan"=>"edit","Cuaca"=>"cloud",_=>"bell"}}
 
 /// Match the integer HWND position and the D2D origin in physical pixels.
 pub fn panel_origin_y(bottom:bool,height:f32,scale:f32)->f32{
@@ -212,5 +212,52 @@ mod tests {
         assert!((end.1 - 620.).abs() < 0.05, "height settles at the panel height, got {}", end.1);
         assert!((end.2 - 24.).abs() < 0.05, "radius settles at the panel radius, got {}", end.2);
         assert_eq!(morph.raw(), 1.);
+    }
+}
+
+/// Shared compact footer; omit the entire battery group on desktops.
+pub fn stage1_footer(time:&str,battery:Option<(u32,bool)>)->String{
+    match battery{Some((percent,charging))=>format!("{time} • {}{percent}%",if charging{"⚡"}else if percent<=20{"🪫"}else{"🔋"}),None=>time.into()}
+}
+#[cfg(test)] mod stage1_tests{
+    use super::*;
+    #[test] fn weather_navigation_is_a_cloud(){assert_eq!(module_icon("Cuaca"),"cloud");}
+    #[test] fn media_temporarily_overrides_reminder_without_changing_selection(){
+        assert_eq!(stage1_tab("Reminder",true),"Musik");
+        assert_eq!(stage1_tab("Reminder",false),"Reminder");
+        assert_eq!(stage1_tab("Cuaca",true),"Musik");
+    }
+    #[test] fn compact_groups_have_equal_gaps_and_never_overlap(){
+        let(a,b,c)=stage1_positions(28.,194.,40.,95.);
+        assert!((b-(a+40.)-8.).abs()<0.01);assert!((c-(b+6.)-8.).abs()<0.01);
+        let(a,b,c)=stage1_positions(28.,194.,300.,95.);
+        assert_eq!(a,28.);assert_eq!(c,99.);assert!(b>=a);
+    }
+    #[test] fn compact_footer_preserves_charging_low_battery_and_desktop(){
+        assert_eq!(stage1_footer("09:05",None),"09:05");
+        assert_eq!(stage1_footer("09:05",Some((100,true))),"09:05 • ⚡100%");
+        assert_eq!(stage1_footer("09:05",Some((20,false))),"09:05 • 🪫20%");
+        assert_eq!(stage1_footer("09:05",Some((21,false))),"09:05 • 🔋21%");
+    }
+}
+
+pub fn stage1_tab(selected:&str,media:bool)->&str{if media{"Musik"}else{selected}}
+pub fn stage1_positions(left:f32,right:f32,info:f32,footer:f32)->(f32,f32,f32){
+    let available=(right-left).max(0.);let info=info.min((available-footer-22.).max(0.));
+    let total=info+22.+footer;let start=left+((available-total)*0.5).max(0.);
+    (start,start+info+8.,start+info+22.)
+}
+
+pub fn stage1_deadline_ms(media:Option<Instant>,temporary:Option<Instant>,now:Instant)->Option<u32>{
+    [media,temporary].into_iter().flatten().filter(|until|*until>now).min().map(|until|until.duration_since(now).as_millis().clamp(1,u32::MAX as u128)as u32)
+}
+#[cfg(test)]mod stage1_deadline_tests{
+    use super::*;
+    #[test]fn volume_or_hover_never_delays_media_expiry(){
+        let now=Instant::now();let media=Some(now+Duration::from_secs(5));
+        assert_eq!(stage1_deadline_ms(media,Some(now+Duration::from_secs(2)),now),Some(2000));
+        assert_eq!(stage1_deadline_ms(media,Some(now+Duration::from_secs(9)),now),Some(5000));
+        assert_eq!(stage1_deadline_ms(media,None,now+Duration::from_secs(3)),Some(2000));
+        assert_eq!(stage1_deadline_ms(media,None,now+Duration::from_secs(5)),None);
     }
 }

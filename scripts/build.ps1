@@ -2,6 +2,8 @@ param([switch]$Test,[string]$Target='x86_64-pc-windows-gnullvm',[string]$Runtime
 $ErrorActionPreference='Stop'
 $packageRoot=Split-Path -Parent $PSScriptRoot
 $sourceRoot=Join-Path $packageRoot 'source'
+$defaultCargoBin=Join-Path $env:USERPROFILE '.cargo\bin'
+if (Test-Path $defaultCargoBin) { $env:PATH = "$defaultCargoBin;$env:PATH" }
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw 'Rust/cargo belum tersedia pada PATH lingkungan pengembangan.' }
 $sysroot=(& rustc --print sysroot).Trim()
 if ($Target -eq 'x86_64-pc-windows-gnullvm') {
@@ -10,11 +12,14 @@ if ($Target -eq 'x86_64-pc-windows-gnullvm') {
   $linkerCandidates=@((Join-Path $sysroot "lib/rustlib/$hostTarget/bin/rust-lld.exe"),(Join-Path $sysroot "lib/rustlib/$Target/bin/rust-lld.exe"))
   foreach($candidate in $linkerCandidates){if(Test-Path -LiteralPath $candidate){$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=$candidate;break}}
 }
-if(-not $Test){
-  $cargoHome=if($env:CARGO_HOME){$env:CARGO_HOME}else{Join-Path $env:USERPROFILE '.cargo'}
-  $remap=@("--remap-path-prefix=$packageRoot=.","--remap-path-prefix=$cargoHome=dependencies","--remap-path-prefix=$sysroot=toolchain")
-  $env:CARGO_ENCODED_RUSTFLAGS=$remap -join [char]31
-}
+$cargoHome=if($env:CARGO_HOME){$env:CARGO_HOME}else{Join-Path $env:USERPROFILE '.cargo'}
+$remap=@("--remap-path-prefix=$packageRoot=.","--remap-path-prefix=$cargoHome=dependencies","--remap-path-prefix=$sysroot=toolchain")
+$crt2 = Join-Path $sysroot 'lib/rustlib/x86_64-pc-windows-gnu/lib/self-contained/crt2.o'
+if (Test-Path -LiteralPath $crt2) { $remap += "-Clink-arg=$crt2" }
+$env:CARGO_ENCODED_RUSTFLAGS=$remap -join [char]31
+
+$env:PATH = "$packageRoot;$(Join-Path $sysroot 'bin');$env:PATH"
+
 Push-Location $sourceRoot
 try {
   if($Test){& cargo test --locked --target $Target}else{& cargo build --locked --release --target $Target}

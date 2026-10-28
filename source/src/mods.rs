@@ -23,7 +23,16 @@ pub fn available_mods() -> Vec<ModManifest> {
             version: "0.1.0".into(),
             author: "mynotch".into(),
             icon: "edit".into(),
-        }
+        },
+        ModManifest {
+            id: "weather".into(),
+            name: "Prakiraan Cuaca".into(),
+            tab_name: "Cuaca".into(),
+            description: "Cuaca saat ini dan prakiraan per jam (Open-Meteo)".into(),
+            version: "0.1.0".into(),
+            author: "mynotch".into(),
+            icon: "cloud".into(),
+        },
     ]
 }
 
@@ -54,7 +63,7 @@ pub fn uninstall_mod(root: &Path, settings: &mut Settings, id: &str) -> Result<(
     let manifest = available_mods().into_iter().find(|m| m.id == id).ok_or_else(|| "Mod tidak ditemukan".to_string())?;
     let mod_file = root.join("mods").join(format!("{id}.mod.json"));
     if mod_file.exists() {
-        let _ = std::fs::remove_file(mod_file);
+        std::fs::remove_file(mod_file).map_err(|e|e.to_string())?;
     }
     settings.installed_mods.retain(|m| m != id);
     settings.modules.remove(&manifest.tab_name);
@@ -68,11 +77,21 @@ pub fn uninstall_mod(root: &Path, settings: &mut Settings, id: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_manifest_removal_keeps_the_mod_installed() {
+        let root=std::env::temp_dir().join(format!("weather-uninstall-{}",std::process::id()));
+        let manifest=root.join("mods/weather.mod.json");std::fs::create_dir_all(&manifest).unwrap();
+        let mut settings=Settings::default();settings.installed_mods.push("weather".into());settings.normalize();
+        assert!(uninstall_mod(&root,&mut settings,"weather").is_err());
+        assert!(settings.enabled("Cuaca"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
-    fn test_available_mods_contains_sticky_notes() {
+    fn test_available_mods_contains_sticky_notes_and_weather() {
         let mods = available_mods();
         assert!(mods.iter().any(|m| m.id == "sticky_notes" && m.tab_name == "Catatan"));
+        assert!(mods.iter().any(|m| m.id == "weather" && m.tab_name == "Cuaca"));
     }
 
     #[test]
@@ -81,18 +100,18 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let mut settings = Settings::default();
-        assert!(!is_mod_installed(&temp_dir, "sticky_notes"));
-        assert!(!settings.active_tab_order().contains(&"Catatan".to_string()));
+        assert!(!is_mod_installed(&temp_dir, "weather"));
+        assert!(!settings.active_tab_order().contains(&"Cuaca".to_string()));
 
-        // Install mod
-        assert!(install_mod(&temp_dir, &mut settings, "sticky_notes").is_ok());
-        assert!(is_mod_installed(&temp_dir, "sticky_notes"));
-        assert!(settings.active_tab_order().contains(&"Catatan".to_string()));
+        // Install weather mod
+        assert!(install_mod(&temp_dir, &mut settings, "weather").is_ok());
+        assert!(is_mod_installed(&temp_dir, "weather"));
+        assert!(settings.active_tab_order().contains(&"Cuaca".to_string()));
 
-        // Uninstall mod
-        assert!(uninstall_mod(&temp_dir, &mut settings, "sticky_notes").is_ok());
-        assert!(!is_mod_installed(&temp_dir, "sticky_notes"));
-        assert!(!settings.active_tab_order().contains(&"Catatan".to_string()));
+        // Uninstall weather mod
+        assert!(uninstall_mod(&temp_dir, &mut settings, "weather").is_ok());
+        assert!(!is_mod_installed(&temp_dir, "weather"));
+        assert!(!settings.active_tab_order().contains(&"Cuaca".to_string()));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
