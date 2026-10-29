@@ -7,3 +7,5 @@
 /source/target/
 /scratch/
 /*.zip
+/.commandcode/
+/dist-test/

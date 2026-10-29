@@ -1,0 +1,11 @@
+{
+  "id": "ihsg_monitor",
+  "name": "Monitor IHSG",
+  "tab_name": "IHSG",
+  "description": "Top 5 gainer dan top 5 loser IHSG (^JKSE) dari 105 emiten likuid Yahoo Finance, dengan izin jaringan dan fallback data contoh.",
+  "version": "1.2.1",
+  "author": "Komunitas MyNotch",
+  "icon": "zap",
+  "mod_type": "lua",
+  "entry": "main.lua"
+}

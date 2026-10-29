@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HANDLE, HWND};
 
@@ -38,6 +39,34 @@ unsafe extern "system" {
 
 const CF_UNICODETEXT: u32 = 13;
 const GMEM_MOVEABLE: u32 = 0x0002;
+const OPEN_ATTEMPTS: usize = 5;
+
+/// Another process can hold the clipboard for a few milliseconds. Retry briefly instead of
+/// dropping the event, so a copy made while another app is writing is still captured.
+fn open_clipboard_with_retry() -> bool {
+    unsafe {
+        for attempt in 0..OPEN_ATTEMPTS {
+            if OpenClipboard(HWND::default()).as_bool() {
+                return true;
+            }
+            if attempt + 1 < OPEN_ATTEMPTS {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        false
+    }
+}
+
+/// Keeps clipboard history inside `max`, but never discards a pinned entry: unpinned items are
+/// removed first and a fully pinned history is left untouched.
+pub fn trim_history(items: &mut Vec<ClipItem>, max: usize) {
+    while items.len() > max {
+        match items.iter().rposition(|c| !c.pinned) {
+            Some(pos) => { items.remove(pos); }
+            None => break,
+        }
+    }
+}
 
 fn is_sensitive_clipboard() -> bool {
     unsafe {
@@ -57,7 +86,7 @@ pub fn read_clipboard_text() -> Option<String> {
         if !IsClipboardFormatAvailable(CF_UNICODETEXT).as_bool() || is_sensitive_clipboard() {
             return None;
         }
-        if !OpenClipboard(HWND::default()).as_bool() {
+        if !open_clipboard_with_retry() {
             return None;
         }
         let handle = GetClipboardData(CF_UNICODETEXT);
@@ -71,6 +100,11 @@ pub fn read_clipboard_text() -> Option<String> {
             return None;
         }
         let size_bytes = GlobalSize(handle);
+        if size_bytes < 2 {
+            let _ = GlobalUnlock(handle);
+            let _ = CloseClipboard();
+            return None;
+        }
         let max_chars = size_bytes / 2;
         let mut len = 0;
         while len < max_chars && *ptr.add(len) != 0 {
@@ -80,7 +114,7 @@ pub fn read_clipboard_text() -> Option<String> {
         let text = String::from_utf16_lossy(slice);
         let _ = GlobalUnlock(handle);
         let _ = CloseClipboard();
-        Some(text)
+        if text.is_empty() { None } else { Some(text) }
     }
 }
 
@@ -101,7 +135,7 @@ pub fn set_clipboard_text(text: &str) -> bool {
         std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
         let _ = GlobalUnlock(h_mem);
 
-        if !OpenClipboard(HWND::default()).as_bool() {
+        if !open_clipboard_with_retry() {
             let _ = GlobalFree(h_mem);
             return false;
         }
@@ -146,5 +180,28 @@ mod tests {
         assert_eq!(item.lines, 1);
         assert_eq!(item.text, "Hello world");
         assert!(item.pinned);
+    }
+
+    fn clip(id: u64, pinned: bool) -> ClipItem {
+        ClipItem { id, text: format!("item {id}"), time: "12:00".into(), chars: 1, lines: 1, pinned }
+    }
+
+    #[test]
+    fn history_trim_never_discards_pinned_items() {
+        let mut all_pinned: Vec<ClipItem> = (0..50).map(|id| clip(id, true)).collect();
+        trim_history(&mut all_pinned, 50);
+        assert_eq!(all_pinned.len(), 50);
+        all_pinned.push(clip(99, false));
+        trim_history(&mut all_pinned, 50);
+        assert_eq!(all_pinned.len(), 50);
+        assert!(all_pinned.iter().all(|c| c.pinned), "pinned items must survive a full history");
+
+        let mut mixed: Vec<ClipItem> = (0..49).map(|id| clip(id, true)).collect();
+        mixed.push(clip(100, false));
+        mixed.push(clip(101, false));
+        trim_history(&mut mixed, 50);
+        assert_eq!(mixed.len(), 50);
+        assert_eq!(mixed.iter().filter(|c| c.pinned).count(), 49);
+        assert_eq!(mixed.iter().filter(|c| !c.pinned).count(), 1);
     }
 }

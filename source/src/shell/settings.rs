@@ -128,9 +128,12 @@ impl Shell{
         self.st_toggle(p, 512., 311., self.settings.software_renderer, Action::Toggle("software_renderer"), true);
     }}
     fn settings_tabs(&mut self,p:&mut Painter){unsafe{
-        let mut order=self.settings.tab_order.clone();for &m in MODULES{if !order.iter().any(|v|v==m){order.push(m.into());}}order.retain(|t|MODULES.contains(&t.as_str()));
+        let order=self.settings.settings_tab_order();
+        let mods=self.mods();
         let count=order.len();let active=self.settings.active_tab_order().len();
-        for (i,module) in order.iter().enumerate(){let y=116.+i as f32*36.;let on=self.settings.enabled(module);p.outline_icon(ui::module_icon(module),196.,y+9.,17.,if on{0xd9d9e0}else{0x62626e});
+        for (i,module) in order.iter().enumerate(){let y=116.+i as f32*36.;let on=self.settings.enabled(module);
+            let icon=mods.iter().find(|m|&m.tab_name==module).map(|m|m.icon.clone()).unwrap_or_else(||ui::module_icon(module).to_string());
+            p.outline_icon(&icon,196.,y+9.,17.,if on{0xd9d9e0}else{0x62626e});
             let display_module = crate::i18n::tab_name(module, &self.settings.language);
             p.text(display_module,224.,y+8.,168.,22.,12.,if on{FG}else{MUTED},false);
             for (icon,x,d,ok) in [("up",412.,-1,i>0),("down",442.,1,i+1<count)]{
@@ -172,53 +175,127 @@ impl Shell{
     }}
     fn settings_mods(&mut self, p: &mut Painter) { unsafe {
         let lang = self.settings.language.clone();
-        
-        let upload_lbl = crate::i18n::t("mods.upload_btn", &lang);
-        let folder_lbl = crate::i18n::t("mods.open_folder_btn", &lang);
-        self.st_button(p, upload_lbl, 196., 68., 150., Action::PickAndInstallMod, true);
-        self.st_button(p, folder_lbl, 356., 68., 130., Action::OpenModsFolder, true);
+        let mods = self.mods();
 
-        let available = crate::mods::available_mods(&self.store.root);
-        for (i, m) in available.iter().enumerate() {
-            let y = 116. + i as f32 * 68.;
-            let installed = self.settings.installed_mods.contains(&m.id);
-            p.outline_icon(&m.icon, 196., y + 10., 18., if installed { 0x6ee7b7 } else { 0xa8a8b2 });
-            let name = if m.id == "weather" { crate::i18n::t("mod.weather.name", &lang) } else { &m.name };
-            let description = if m.id == "weather" { crate::i18n::t("mod.weather.description", &lang) } else { &m.description };
-            let badge = match m.mod_type {
-                crate::mods::ModType::Builtin => "",
-                crate::mods::ModType::Declarative => " [JSON]",
-                crate::mods::ModType::Lua => " [Lua]",
-            };
-            let title = format!("{}  v{}{}", name, m.version, badge);
-            p.text(&title, 224., y + 2., 180., 20., 12., FG, false);
-            p.text_ellipsis(description, 224., y + 24., 170., 16., 10., MUTED, false);
+        self.st_button(p, t("mods.import_btn", &lang), 196., 110., 150., Action::PickAndInstallMod, true);
+        self.st_button(p, t("mods.folder_btn", &lang), 356., 110., 130., Action::OpenModsFolder, true);
+        let refresh_hover = self.pointer.is_some_and(|(a, b)| (498.0..=530.0).contains(&a) && (110.0..=140.0).contains(&b));
+        p.fill(498., 110., 32., 30., 7., if refresh_hover { 0x292930 } else { 0x1c1c23 });
+        p.outline_icon("reset", 506., 117., 16., if refresh_hover { ACCENT } else { MUTED });
+        self.st_hit(498., 110., 32., 30., Action::RefreshMods, true);
 
-            let uninstall_lbl = if lang == "en" { "Uninstall" } else { "Lepas" };
-            let install_lbl = if lang == "en" { "Install" } else { "Pasang" };
-            let delete_lbl = crate::i18n::t("mods.delete_btn", &lang);
+        let list_x = 196.;
+        let list_w = 140.;
+        let list_top = 146.;
+        let list_bottom = self.height - 22.;
+        let row_h = 42.;
+        let visible = self.visible_mod_rows();
+        if self.mods_selected.as_ref().is_none_or(|id| !mods.iter().any(|m| &m.id == id)) {
+            self.mods_selected = mods.first().map(|m| m.id.clone());
+            self.mods_scroll = 0;
+        }
+        self.mods_scroll = crate::core::clamp_list_scroll(self.mods_scroll, mods.len(), visible);
 
-            if m.mod_type != crate::mods::ModType::Builtin {
-                let btn_w = 64.;
-                let btn_x = 470. - btn_w;
-                if installed {
-                    self.st_button(p, uninstall_lbl, btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
-                } else {
-                    self.st_button(p, install_lbl, btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
-                }
-                self.st_button(p, delete_lbl, 478., y + 8., 64., Action::DeleteCustomMod(m.id.clone()), true);
-            } else {
-                let btn_w = 78.;
-                let btn_x = 542. - btn_w;
-                if installed {
-                    self.st_button(p, uninstall_lbl, btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
-                } else {
-                    self.st_button(p, install_lbl, btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
-                }
+        if mods.is_empty() {
+            p.text_ellipsis(t("mods.empty", &lang), list_x, list_top + 8., list_w, 18., 10., MUTED, false);
+        }
+        for (i, m) in mods.iter().enumerate().skip(self.mods_scroll).take(visible) {
+            let y = list_top + (i - self.mods_scroll) as f32 * row_h;
+            let selected = self.mods_selected.as_ref() == Some(&m.id);
+            let hover = self.pointer.is_some_and(|(a, b)| a >= list_x && a <= list_x + list_w && b >= y && b <= y + row_h - 2.);
+            if selected || hover {
+                p.fill(list_x, y, list_w, row_h - 2., 7., if selected { 0x1c1d22 } else { 0x131318 });
             }
-            p.fill(196., y + 56., 346., 1., 0., 0x222229);
+            if selected { p.fill(list_x, y + 6., 2., row_h - 14., 1., ACCENT); }
+            p.outline_icon(&m.icon, list_x + 9., y + 13., 15., if selected { 0xefeff3 } else { 0x8c8c98 });
+            if self.settings.installed_mods.contains(&m.id) {
+                p.fill(list_x + list_w - 12., y + 9., 6., 6., 3., 0x6ee7b7);
+            }
+            let name = if m.id == "weather" { t("mod.weather.name", &lang) } else { &m.name };
+            p.text_ellipsis(name, list_x + 30., y + 5., list_w - 38., 16., 10.5, if selected { FG } else { MUTED }, selected);
+            let meta = format!("{} · v{}", self.mod_type_label(&m.mod_type), m.version);
+            p.text_ellipsis(&meta, list_x + 30., y + 22., list_w - 38., 12., 8.5, MUTED, false);
+            self.st_hit(list_x, y, list_w, row_h - 2., Action::SelectMod(m.id.clone()), true);
+        }
+        if mods.len() > visible {
+            let track_h = list_bottom - list_top;
+            let thumb_h = (track_h * visible as f32 / mods.len() as f32).max(20.);
+            let max_scroll = (mods.len() - visible) as f32;
+            let thumb_y = list_top + (track_h - thumb_h) * (self.mods_scroll as f32 / max_scroll.max(1.));
+            p.fill(list_x + list_w + 2., list_top, 3., track_h, 1.5, 0x26262c);
+            p.fill(list_x + list_w + 2., thumb_y, 3., thumb_h, 1.5, 0x5a5a66);
+        }
+
+        let detail_x = 348.;
+        let detail_w = self.width - 18. - detail_x;
+        let detail_h = list_bottom - list_top;
+        p.fill(detail_x, list_top, detail_w, detail_h, 8., 0x141419);
+        p.stroke(detail_x, list_top, detail_w, detail_h, 8., 0x2b2b36, 1.);
+        let Some(m) = mods.iter().find(|m| self.mods_selected.as_ref() == Some(&m.id)) else { return };
+        p.outline_icon(&m.icon, detail_x + 12., list_top + 12., 20., 0x6ee7b7);
+        let custom = m.mod_type != crate::mods::ModType::Builtin;
+        let meta = if custom {
+            format!("{} · v{} · {} {}", self.mod_type_label(&m.mod_type), m.version, t("mods.by", &lang), m.author)
+        } else {
+            format!("{} · v{}", self.mod_type_label(&m.mod_type), m.version)
+        };
+        p.text_ellipsis(&meta, detail_x + 40., list_top + 27., detail_w - 52., 13., 9., MUTED, false);
+        if custom {
+            let row_y = list_top + 44.;
+            let tab_on = self.settings.enabled(&m.tab_name);
+            let net_on = self.settings.network_mods.iter().any(|id| id == &m.id);
+            p.text(t("mods.tab_toggle", &lang), detail_x + 12., row_y + 3., 26., 12., 8., if tab_on { ACCENT } else { MUTED }, false);
+            self.st_toggle(p, detail_x + 40., row_y, tab_on, Action::ToggleModTab(m.tab_name.clone()), true);
+            p.text(t("mods.net_toggle", &lang), detail_x + 96., row_y + 3., 26., 12., 8., if net_on { ACCENT } else { MUTED }, false);
+            self.st_toggle(p, detail_x + 124., row_y, net_on, Action::ToggleModNetwork(m.id.clone()), true);
+        } else {
+            p.text_ellipsis(&format!("{} {}", t("mods.by", &lang), m.author), detail_x + 12., list_top + 44., detail_w - 24., 13., 9., 0x777781, false);
+        }
+        let description = if m.id == "weather" { t("mod.weather.description", &lang) } else { &m.description };
+        let desc_y = if custom { list_top + 66. } else { list_top + 60. };
+        for (i, line) in wrap_lines(p, description, detail_w - 24., 9.5, 4).iter().enumerate() {
+            p.text(line, detail_x + 12., desc_y + i as f32 * 13., detail_w - 24., 13., 9.5, MUTED, false);
+        }
+
+        let installed = self.settings.installed_mods.contains(&m.id);
+        let btn_w = detail_w - 24.;
+        let primary_y = list_top + detail_h - 68.;
+        let secondary_y = list_top + detail_h - 34.;
+        let id = m.id.clone();
+        if m.mod_type == crate::mods::ModType::Builtin {
+            let tab = m.tab_name.clone();
+            self.st_button(p, t("mods.open_btn", &lang), detail_x + 12., primary_y, btn_w, Action::SettingsOpenTab(tab.clone(), 0), self.settings.enabled(&tab));
+            if installed {
+                self.st_button(p, t("mods.uninstall_btn", &lang), detail_x + 12., secondary_y, btn_w, Action::UninstallMod(id), true);
+            } else {
+                self.st_button(p, t("mods.install_btn", &lang), detail_x + 12., secondary_y, btn_w, Action::InstallMod(id), true);
+            }
+        } else {
+            self.st_button(p, t("mods.open_btn", &lang), detail_x + 12., primary_y, btn_w, Action::OpenMod(id.clone()), true);
+            self.st_button(p, t("mods.delete_btn", &lang), detail_x + 12., secondary_y, btn_w, Action::DeleteCustomMod(id), true);
         }
     }}
+
+    fn mod_type_label(&self, kind: &crate::mods::ModType) -> String {
+        let lang = &self.settings.language;
+        match kind {
+            crate::mods::ModType::Builtin => t("mods.type_builtin", lang).to_string(),
+            crate::mods::ModType::Declarative => t("mods.type_json", lang).to_string(),
+            crate::mods::ModType::Lua => t("mods.type_lua", lang).to_string(),
+        }
+    }
+
+    fn visible_mod_rows(&self) -> usize {
+        ((self.height - 22. - 146.) / 42.).floor().max(1.) as usize
+    }
+
+    pub(super) fn scroll_mods(&mut self, delta: i32) {
+        let total = self.mods().len();
+        let visible = self.visible_mod_rows();
+        let next = (self.mods_scroll as i32 + delta).max(0) as usize;
+        self.mods_scroll = crate::core::clamp_list_scroll(next, total, visible);
+        self.invalidate();
+    }
     fn settings_options(&self,key:&str)->Vec<(u32,String)>{match key{
         "language"=>crate::i18n::LANGUAGES.iter().enumerate().map(|(i,(_,name))|(i as u32,name.to_string())).collect(),
         "default_tab"=>self.settings.active_tab_order().iter().enumerate().map(|(i,tab)|(i as u32, crate::i18n::tab_name(tab, &self.settings.language).to_string())).collect(),
@@ -230,7 +307,7 @@ impl Shell{
         if self.settings_popup.as_ref().is_some_and(|p|p.key==key){self.settings_popup=None;return}
         let current=match key{
             "language"=>crate::i18n::LANGUAGES.iter().position(|(c,_)|*c==self.settings.language).unwrap_or(0)as u32,
-            "default_tab"=>MODULES.iter().position(|m|*m==self.settings.default_tab).unwrap_or(0)as u32,
+            "default_tab"=>tab_option_index(&self.settings.active_tab_order(),&self.settings.default_tab),
             "scale"=>(self.settings.scale*100.).round()as u32,
             "gap"=>self.settings.edge_gap as u32,
             "opacity"=>(self.settings.opacity as f32/255.*100.).round()as u32,
@@ -246,7 +323,7 @@ impl Shell{
             "default_tab"=>{if let Some(tab)=self.settings.active_tab_order().get(value as usize){self.settings.default_tab=tab.clone();}},
             "scale"=>{self.settings.scale=value as f32/100.;self.layout();self.make_inputs();},
             "gap"=>{self.settings.edge_gap=value as i32;self.layout();},
-            "opacity"=>self.settings.opacity=((value as f32/100.)*255.).round()as u8,
+            "opacity"=>self.settings.opacity=((value as f32/100.)*255.).round().clamp(MIN_OPACITY as f32,255.)as u8,
             _=>{}
         }
     }
@@ -332,4 +409,44 @@ impl Shell{
         self.st_row_compact(p, row3_y, t("update.repo", &lang), t("update.repo_desc", &lang));
         self.st_button(p, t("update.open_repo", &lang), 418., row3_y + 6., 124., Action::OpenRepoUrl, true);
     }}
+}
+
+/// Index of `tab` inside the options list rendered by the "Tab default" dropdown. The dropdown
+/// uses `active_tab_order()`, which can include `Catatan`/`Cuaca`, so indexing into `MODULES`
+/// would highlight the wrong row.
+pub(super) fn tab_option_index(order: &[String], tab: &str) -> u32 {
+    order.iter().position(|t| t == tab).unwrap_or(0) as u32
+}
+
+/// Greedy word wrap for the mod detail panel. `Painter::measure_text` needs `&mut`.
+fn wrap_lines(p: &mut Painter, text: &str, width: f32, font: f32, max_lines: usize) -> Vec<String> { unsafe {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+        if line.is_empty() || p.measure_text(&candidate, font, false) <= width {
+            line = candidate;
+        } else {
+            lines.push(std::mem::take(&mut line));
+            if lines.len() == max_lines { return lines }
+            line = word.to_string();
+        }
+    }
+    if !line.is_empty() && lines.len() < max_lines { lines.push(line); }
+    lines
+}}
+
+#[cfg(test)]
+mod tests {
+    use super::tab_option_index;
+
+    #[test]
+    fn default_tab_cursor_matches_the_visible_tab_order() {
+        let order: Vec<String> = ["Musik", "Kalender", "Reminder", "Clipboard", "Catatan", "Cuaca"]
+            .iter().map(|t| t.to_string()).collect();
+        assert_eq!(tab_option_index(&order, "Musik"), 0);
+        assert_eq!(tab_option_index(&order, "Catatan"), 4);
+        assert_eq!(tab_option_index(&order, "Cuaca"), 5);
+        assert_eq!(tab_option_index(&order, "Hilang"), 0);
+    }
 }

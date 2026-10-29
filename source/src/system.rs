@@ -1,8 +1,9 @@
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{HANDLE, HWND};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
 #[link(name = "kernel32")]
@@ -41,6 +42,82 @@ pub fn get_battery_status() -> Option<BatteryInfo> {
             None
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TwsInfo {
+    pub name: String,
+    /// `None` when Windows does not publish `System.Devices.BatteryLife` for the device.
+    pub battery: Option<u8>,
+}
+
+/// Connected Bluetooth audio device (TWS earbuds, headset, speaker).
+/// Blocking: call from a worker thread, not the paint/timer thread.
+pub fn get_tws_status() -> Result<Option<TwsInfo>, String> {
+    use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice};
+    use windows::Devices::Enumeration::DeviceInformation;
+    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+    use windows::core::HSTRING;
+
+    unsafe {
+        // A fresh worker has no apartment; S_FALSE / RPC_E_CHANGED_MODE just means it already has one.
+        let _ = RoInitialize(RO_INIT_MULTITHREADED);
+        let selector = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(
+            BluetoothConnectionStatus::Connected,
+        )
+        .map_err(|e| e.to_string())?;
+        let requested: windows_collections::IIterable<HSTRING> = vec![
+            HSTRING::from("System.Devices.Aep.IsConnected"),
+            HSTRING::from("System.Devices.Aep.Bluetooth.Cod.Services.Audio"),
+            HSTRING::from("System.Devices.Aep.Bluetooth.Cod.Major"),
+            HSTRING::from("System.Devices.BatteryLife"),
+        ]
+        .into();
+        let devices =
+            DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&selector, &requested)
+                .map_err(|e| e.to_string())?
+                .join()
+                .map_err(|e| e.to_string())?;
+        // The selector also matches paired-but-disconnected devices, so check the live state.
+        for index in 0..devices.Size().map_err(|e| e.to_string())? {
+            let Ok(info) = devices.GetAt(index) else { continue };
+            let Ok(props) = info.Properties() else { continue };
+            if property(&props, "System.Devices.Aep.IsConnected", |v| v.GetBoolean()) != Some(true) {
+                continue;
+            }
+            let audio = property(&props, "System.Devices.Aep.Bluetooth.Cod.Services.Audio", |v| v.GetBoolean());
+            let major = property(&props, "System.Devices.Aep.Bluetooth.Cod.Major", |v| v.GetUInt16());
+            if !is_audio_device(audio, major) {
+                continue;
+            }
+            let name = info.Name().map(|n| n.to_string()).unwrap_or_default();
+            let battery = property(&props, "System.Devices.BatteryLife", |v| v.GetUInt8())
+                .or_else(|| property(&props, "System.Devices.BatteryLife", |v| v.GetInt32()).map(|v| v.clamp(0, 100) as u8));
+            return Ok(Some(TwsInfo {
+                name: if name.is_empty() { "Bluetooth audio".into() } else { name },
+                battery,
+            }));
+        }
+        Ok(None)
+    }
+}
+
+fn is_audio_device(services_audio: Option<bool>, cod_major: Option<u16>) -> bool {
+    // shortcut: LE-only earbuds with no class-of-device are skipped; add a BLE battery path if seen.
+    services_audio == Some(true) || cod_major == Some(4)
+}
+
+fn property<T>(
+    props: &windows_collections::IMapView<windows::core::HSTRING, windows::core::IInspectable>,
+    key: &str,
+    read: impl Fn(&windows::Foundation::IPropertyValue) -> windows::core::Result<T>,
+) -> Option<T> {
+    use windows::core::Interface;
+    let key = windows::core::HSTRING::from(key);
+    if !props.HasKey(&key).ok()? {
+        return None;
+    }
+    read(&props.Lookup(&key).ok()?.cast::<windows::Foundation::IPropertyValue>().ok()?).ok()
 }
 
 pub fn trim_working_set() {
@@ -98,6 +175,123 @@ pub fn adjust_master_volume(delta: f32) -> Option<(f32, bool)> {
             mute = false;
         }
         Some((new_level, mute))
+    }
+}
+
+pub fn toggle_master_mute() -> Option<(f32, bool)> {
+    unsafe {
+        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_INPROC_SERVER).ok()?;
+        let device = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia).ok()?;
+        let volume: IAudioEndpointVolume = device.Activate(CLSCTX_INPROC_SERVER, None).ok()?;
+        let muted = volume.GetMute().ok()?.as_bool();
+        volume.SetMute(!muted, std::ptr::null()).ok()?;
+        let level = volume.GetMasterVolumeLevelScalar().ok()?.clamp(0.0, 1.0);
+        Some((level, !muted))
+    }
+}
+
+/// Windows 11 hosts the volume/brightness flyout in one small `XamlExplorerHostIslandWindow`
+/// (its siblings are the full-screen Task Switching and Start hosts); Windows 10 uses
+/// `NativeHWNDHost` + `DirectUIHWND`. Keeping that host minimized stops the shell from painting
+/// its own OSD, so mynotch's volume HUD is the only indicator.
+static OSD_HWND: AtomicIsize = AtomicIsize::new(0);
+static OSD_TRIGGERED: AtomicBool = AtomicBool::new(false);
+static OSD_HIDDEN: AtomicBool = AtomicBool::new(false);
+
+fn find_volume_osd() -> Option<HWND> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowRect};
+    use windows::core::{w, PCWSTR};
+    unsafe {
+        let mut pick: Option<(i64, HWND)> = None;
+        let mut after = None;
+        loop {
+            let Ok(outer) = FindWindowExW(None, after, w!("XamlExplorerHostIslandWindow"), PCWSTR::null()) else { break };
+            after = Some(outer);
+            if FindWindowExW(Some(outer), None, w!("Windows.UI.Composition.DesktopWindowContentBridge"), PCWSTR::null()).is_err() {
+                continue;
+            }
+            let mut rect = RECT::default();
+            if GetWindowRect(outer, &mut rect).is_err() {
+                continue;
+            }
+            let (osd_w, osd_h) = (rect.right - rect.left, rect.bottom - rect.top);
+            // The OSD is a small pill; skip the full-screen islands used by Task Switching/Start.
+            if osd_w <= 0 || osd_h <= 0 || osd_w > 1000 || osd_h > 400 {
+                continue;
+            }
+            let area = osd_w as i64 * osd_h as i64;
+            if pick.is_none_or(|(best, _)| area < best) {
+                pick = Some((area, outer));
+            }
+        }
+        if let Some((_, window)) = pick {
+            return Some(window);
+        }
+        let mut after = None;
+        loop {
+            let Ok(outer) = FindWindowExW(None, after, w!("NativeHWNDHost"), PCWSTR::null()) else { break };
+            after = Some(outer);
+            if FindWindowExW(Some(outer), None, w!("DirectUIHWND"), PCWSTR::null()).is_ok() {
+                return Some(outer);
+            }
+        }
+        None
+    }
+}
+
+/// Creating the OSD once at startup means the host exists before the first hardware key, so it
+/// can already be minimized. Two mute taps cancel out and leave the audio state untouched.
+fn trigger_volume_osd() {
+    unsafe {
+        keybd_event(0xAD, 0, Default::default(), 0);
+        keybd_event(0xAD, 0, KEYEVENTF_KEYUP, 0);
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        keybd_event(0xAD, 0, Default::default(), 0);
+        keybd_event(0xAD, 0, KEYEVENTF_KEYUP, 0);
+    }
+}
+
+pub fn set_volume_osd_hidden(hidden: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{IsWindow, ShowWindow, SW_HIDE, SW_MINIMIZE, SW_RESTORE};
+    unsafe {
+        if !hidden {
+            if !OSD_HIDDEN.swap(false, Ordering::Relaxed) {
+                return;
+            }
+            let stored = OSD_HWND.swap(0, Ordering::Relaxed);
+            if stored != 0 {
+                let window = HWND(stored as *mut _);
+                if IsWindow(Some(window)).as_bool() {
+                    // Restore then hide: the stale pill must not linger, but the shell must be
+                    // able to show it normally on the next volume change after mynotch exits.
+                    let _ = ShowWindow(window, SW_RESTORE);
+                    let _ = ShowWindow(window, SW_HIDE);
+                }
+            }
+            return;
+        }
+        let stored = OSD_HWND.load(Ordering::Relaxed);
+        let mut window = if stored != 0 && IsWindow(Some(HWND(stored as *mut _))).as_bool() {
+            Some(HWND(stored as *mut _))
+        } else {
+            None
+        };
+        if window.is_none() {
+            window = find_volume_osd();
+            if window.is_none() && !OSD_TRIGGERED.swap(true, Ordering::Relaxed) {
+                trigger_volume_osd();
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                window = find_volume_osd();
+            }
+            if let Some(found) = window {
+                OSD_HWND.store(found.0 as isize, Ordering::Relaxed);
+            }
+        }
+        if let Some(window) = window {
+            let _ = ShowWindow(window, SW_MINIMIZE);
+            OSD_HIDDEN.store(true, Ordering::Relaxed);
+        }
     }
 }
 
@@ -183,10 +377,15 @@ pub fn open_browser(url: &str) {
     }
 }
 
-pub fn open_folder_in_explorer(path: &std::path::Path) -> Result<(), String> {
+fn ensure_directory(path: &std::path::Path) -> Result<(), String> {
     if !path.exists() {
-        let _ = std::fs::create_dir_all(path);
+        std::fs::create_dir_all(path).map_err(|e| format!("Gagal membuat folder: {e}"))?;
     }
+    Ok(())
+}
+
+pub fn open_folder_in_explorer(path: &std::path::Path) -> Result<(), String> {
+    ensure_directory(path)?;
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let path_str = path.to_string_lossy();
@@ -278,6 +477,14 @@ mod tests {
     }
 
     #[test]
+    fn test_tws_audio_detection() {
+        assert!(is_audio_device(Some(true), None));
+        assert!(is_audio_device(None, Some(4)));
+        assert!(!is_audio_device(Some(false), Some(1)));
+        assert!(!is_audio_device(None, None));
+    }
+
+    #[test]
     fn test_run_at_startup_check() {
         // Calling is_run_at_startup_enabled should safely succeed without panic
         let _ = is_run_at_startup_enabled();
@@ -292,8 +499,11 @@ mod tests {
     #[test]
     fn test_open_folder_creates_nonexistent() {
         let temp_dir = std::env::temp_dir().join(format!("mynotch_test_explorer_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
         assert!(!temp_dir.exists());
-        let _ = open_folder_in_explorer(&temp_dir);
+        // Do not call open_folder_in_explorer here: it would spawn a real Explorer window at a
+        // folder this test deletes a moment later, leaving a "Location is not available" dialog.
+        assert!(ensure_directory(&temp_dir).is_ok());
         assert!(temp_dir.exists());
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

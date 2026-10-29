@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use crate::core::Settings;
 
+/// A single archive entry may not exceed 8 MiB, and a package may not unpack past 64 MiB.
+const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_UNPACKED_BYTES: u64 = 64 * 1024 * 1024;
+
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ModType {
@@ -144,6 +148,22 @@ pub fn get_mod_dir(root: &Path, id: &str) -> PathBuf {
     root.join("mods").join(id)
 }
 
+/// Mod ids become directory names, so only a conservative charset is allowed. Anything else
+/// (`..`, `/`, `\`, `C:`) could escape `data/mods` when joined.
+pub fn safe_mod_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// Rejects absolute paths and any `..`/root component inside a zip entry name.
+fn safe_entry(rel: &str) -> bool {
+    let path = Path::new(rel);
+    !rel.is_empty()
+        && !path.is_absolute()
+        && path.components().all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
 #[allow(dead_code)]
 pub fn is_mod_installed(root: &Path, id: &str) -> bool {
     let mods = available_mods(root);
@@ -158,7 +178,18 @@ pub fn is_mod_installed(root: &Path, id: &str) -> bool {
     false
 }
 
+fn attach_builtin_tab(settings: &mut Settings, manifest: &ModManifest) {
+    if manifest.mod_type != ModType::Builtin {
+        return;
+    }
+    settings.modules.insert(manifest.tab_name.clone(), true);
+    if !settings.tab_order.iter().any(|t| t == &manifest.tab_name) {
+        settings.tab_order.push(manifest.tab_name.clone());
+    }
+}
+
 pub fn install_mod(root: &Path, settings: &mut Settings, id: &str) -> Result<(), String> {
+    if !safe_mod_id(id) { return Err("ID mod tidak valid: gunakan huruf, angka, '-' atau '_'.".into()) }
     let manifest = available_mods(root).into_iter().find(|m| m.id == id).ok_or_else(|| "Mod tidak ditemukan".to_string())?;
     let mods_dir = root.join("mods");
     std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
@@ -172,10 +203,7 @@ pub fn install_mod(root: &Path, settings: &mut Settings, id: &str) -> Result<(),
     if !settings.installed_mods.iter().any(|m| m == id) {
         settings.installed_mods.push(id.to_string());
     }
-    settings.modules.insert(manifest.tab_name.clone(), true);
-    if !settings.tab_order.iter().any(|t| t == &manifest.tab_name) {
-        settings.tab_order.push(manifest.tab_name.clone());
-    }
+    attach_builtin_tab(settings, &manifest);
     Ok(())
 }
 
@@ -186,10 +214,21 @@ pub fn uninstall_mod(root: &Path, settings: &mut Settings, id: &str) -> Result<(
         let _ = std::fs::remove_file(mod_file);
     }
     settings.installed_mods.retain(|m| m != id);
-    settings.modules.remove(&manifest.tab_name);
-    settings.tab_order.retain(|t| t != &manifest.tab_name);
-    if settings.default_tab == manifest.tab_name {
-        settings.default_tab = settings.active_tab_order().first().cloned().unwrap_or_else(|| "Musik".to_string());
+    settings.network_mods.retain(|m| m != id);
+    if manifest.mod_type == ModType::Builtin {
+        settings.modules.remove(&manifest.tab_name);
+        // Keep the slot in `tab_order` so reinstalling restores the user's chosen position.
+        if settings.default_tab == manifest.tab_name {
+            settings.default_tab = settings.active_tab_order().first().cloned().unwrap_or_else(|| "Musik".to_string());
+        }
+    } else {
+        // A deleted community mod must not leave a phantom Stage 2 tab behind.
+        settings.mod_tabs.retain(|t| t != &manifest.tab_name);
+        settings.modules.remove(&manifest.tab_name);
+        settings.tab_order.retain(|t| t != &manifest.tab_name);
+        if settings.default_tab == manifest.tab_name {
+            settings.default_tab = settings.active_tab_order().first().cloned().unwrap_or_else(|| "Musik".to_string());
+        }
     }
     Ok(())
 }
@@ -243,10 +282,12 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
             let stem = package_path.file_stem().and_then(|s| s.to_str()).unwrap_or("custom_mod");
             manifest.id = stem.to_string();
         }
+        if !safe_mod_id(&manifest.id) { return Err("ID mod tidak valid: gunakan huruf, angka, '-' atau '_'.".into()) }
 
         let target_dir = mods_dir.join(&manifest.id);
         std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
 
+        let mut extracted = 0_u64;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
             let name = entry.name().replace('\\', "/");
@@ -258,19 +299,15 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
             } else {
                 &name
             };
-            if rel_name.is_empty() || rel_name.starts_with('/') || rel_name.contains("..") {
-                continue;
-            }
+            if rel_name.ends_with('/') { continue }
+            if !safe_entry(rel_name) { continue }
+            if entry.size() > MAX_ENTRY_BYTES || extracted.saturating_add(entry.size()) > MAX_UNPACKED_BYTES { continue }
             let out_path = target_dir.join(rel_name);
-            if entry.is_dir() || rel_name.ends_with('/') {
-                std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
-            } else {
-                if let Some(parent) = out_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
-                let mut outfile = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
-                std::io::copy(&mut entry, &mut outfile).map_err(|e| e.to_string())?;
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
+            let mut outfile = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
+            extracted += std::io::copy(&mut entry, &mut outfile).map_err(|e| e.to_string())?;
         }
 
         if target_dir.join("main.lua").exists() && manifest.entry.is_none() {
@@ -283,10 +320,7 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
         if !settings.installed_mods.iter().any(|m| m == &manifest.id) {
             settings.installed_mods.push(manifest.id.clone());
         }
-        settings.modules.insert(manifest.tab_name.clone(), true);
-        if !settings.tab_order.iter().any(|t| t == &manifest.tab_name) {
-            settings.tab_order.push(manifest.tab_name.clone());
-        }
+        attach_builtin_tab(settings, &manifest);
 
         Ok(manifest)
     } else if ext == "json" {
@@ -300,6 +334,8 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
             manifest.mod_type = ModType::Declarative;
         }
 
+        if !safe_mod_id(&manifest.id) { return Err("ID mod tidak valid: gunakan huruf, angka, '-' atau '_'.".into()) }
+
         let target_dir = mods_dir.join(&manifest.id);
         std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
         std::fs::write(target_dir.join("mod.json"), &bytes).map_err(|e| e.to_string())?;
@@ -307,10 +343,7 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
         if !settings.installed_mods.iter().any(|m| m == &manifest.id) {
             settings.installed_mods.push(manifest.id.clone());
         }
-        settings.modules.insert(manifest.tab_name.clone(), true);
-        if !settings.tab_order.iter().any(|t| t == &manifest.tab_name) {
-            settings.tab_order.push(manifest.tab_name.clone());
-        }
+        attach_builtin_tab(settings, &manifest);
 
         Ok(manifest)
     } else {
@@ -321,6 +354,26 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_ids_and_archive_entries_cannot_escape_the_mods_folder() {
+        for bad in ["../evil", "a/b", "a\\b", "C:/evil", "", ".."] { assert!(!safe_mod_id(bad), "{bad} must be rejected"); }
+        for good in ["my_counter", "kurs-usd", "weather2"] { assert!(safe_mod_id(good), "{good} must be accepted"); }
+        for bad in ["../x.lua", "/x.lua", "C:/x.lua", "a/../../x.lua"] { assert!(!safe_entry(bad), "{bad} must be rejected"); }
+        for good in ["main.lua", "lib/helper.lua"] { assert!(safe_entry(good), "{good} must be accepted"); }
+    }
+
+    #[test]
+    fn install_rejects_a_traversal_id_without_touching_disk() {
+        let temp_dir = std::env::temp_dir().join(format!("mynotch_mod_escape_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let manifest = temp_dir.join("evil.json");
+        std::fs::write(&manifest, r#"{"id":"../escaped","name":"x","tab_name":"X","description":"x","version":"1","author":"x","icon":"star"}"#).unwrap();
+        let mut settings = Settings::default();
+        assert!(install_mod_package(&temp_dir, &mut settings, &manifest).is_err());
+        assert!(!temp_dir.parent().unwrap().join("escaped").exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     #[test]
     fn test_available_mods_contains_sticky_notes_and_weather() {
@@ -411,7 +464,82 @@ mod tests {
         assert_eq!(manifest.id, "my_widget");
         assert_eq!(manifest.mod_type, ModType::Declarative);
         assert!(settings.installed_mods.contains(&"my_widget".to_string()));
+        assert!(!settings.tab_order.contains(&"Widget".to_string()));
+        assert!(!settings.active_tab_order().contains(&"Widget".to_string()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn reinstalling_a_builtin_mod_keeps_its_tab_position() {
+        let temp_dir = std::env::temp_dir().join(format!("mynotch_mod_slot_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let mut settings = Settings::default();
+        install_mod(&temp_dir, &mut settings, "weather").unwrap();
+        settings.normalize();
+        settings.move_tab("Cuaca", -3);
+        let pos = settings.tab_order.iter().position(|t| t == "Cuaca").unwrap();
+
+        uninstall_mod(&temp_dir, &mut settings, "weather").unwrap();
+        settings.normalize();
+        assert!(!settings.active_tab_order().contains(&"Cuaca".to_string()));
+        assert_eq!(settings.tab_order.iter().position(|t| t == "Cuaca"), Some(pos));
+
+        install_mod(&temp_dir, &mut settings, "weather").unwrap();
+        settings.normalize();
+        assert_eq!(settings.tab_order.iter().position(|t| t == "Cuaca"), Some(pos));
+        assert!(settings.active_tab_order().contains(&"Cuaca".to_string()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn deleting_a_community_mod_removes_its_opted_in_tab() {
+        let temp_dir = std::env::temp_dir().join(format!("mynotch_mod_tab_del_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let json_file = temp_dir.join("widget.json");
+        std::fs::write(&json_file, r#"{
+            "id": "my_widget", "name": "My Widget", "tab_name": "Widget",
+            "description": "x", "version": "1.0.0", "author": "x", "icon": "grid",
+            "cards": [{ "title": "A", "value": "B" }]
+        }"#).unwrap();
+
+        let mut settings = Settings::default();
+        install_mod_package(&temp_dir, &mut settings, &json_file).unwrap();
+        settings.set_mod_tab("Widget", true);
         assert!(settings.active_tab_order().contains(&"Widget".to_string()));
+
+        delete_custom_mod(&temp_dir, &mut settings, "my_widget").unwrap();
+        assert!(!settings.mod_tabs.contains(&"Widget".to_string()));
+        assert!(!settings.active_tab_order().contains(&"Widget".to_string()));
+        assert!(!settings.tab_order.contains(&"Widget".to_string()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn installing_a_custom_mod_never_adds_a_tab() {
+        let temp_dir = std::env::temp_dir().join(format!("mynotch_mod_notab_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let json_file = temp_dir.join("counter.json");
+        std::fs::write(&json_file, r#"{
+            "id": "counter_lua",
+            "name": "Pusat Kontrol",
+            "tab_name": "Kontrol",
+            "description": "x",
+            "version": "1.0.0",
+            "author": "x",
+            "icon": "terminal",
+            "mod_type": "lua",
+            "entry": "main.lua"
+        }"#).unwrap();
+
+        let mut settings = Settings::default();
+        install_mod_package(&temp_dir, &mut settings, &json_file).unwrap();
+        assert!(settings.installed_mods.contains(&"counter_lua".to_string()));
+        assert!(!settings.modules.contains_key("Kontrol"));
+        assert!(!settings.tab_order.contains(&"Kontrol".to_string()));
+        assert!(!settings.active_tab_order().contains(&"Kontrol".to_string()));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

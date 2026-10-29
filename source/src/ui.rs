@@ -216,8 +216,11 @@ mod tests {
 }
 
 /// Shared compact footer; omit the entire battery group on desktops.
-pub fn stage1_footer(time:&str,battery:Option<(u32,bool)>)->String{
-    match battery{Some((percent,charging))=>format!("{time} • {}{percent}%",if charging{"⚡"}else if percent<=20{"🪫"}else{"🔋"}),None=>time.into()}
+pub fn stage1_footer(time:&str,battery:Option<(u32,bool)>,tws:Option<Option<u8>>)->String{
+    let mut out=time.to_string();
+    if let Some(tws)=tws{out.push_str(&format!(" • 🎧{}",tws.map(|p|format!("{p}%")).unwrap_or_default()));}
+    if let Some((percent,charging))=battery{out.push_str(&format!(" • {}{percent}%",if charging{"⚡"}else if percent<=20{"🪫"}else{"🔋"}));}
+    out
 }
 #[cfg(test)] mod stage1_tests{
     use super::*;
@@ -234,10 +237,15 @@ pub fn stage1_footer(time:&str,battery:Option<(u32,bool)>)->String{
         assert_eq!(a,28.);assert_eq!(c,99.);assert!(b>=a);
     }
     #[test] fn compact_footer_preserves_charging_low_battery_and_desktop(){
-        assert_eq!(stage1_footer("09:05",None),"09:05");
-        assert_eq!(stage1_footer("09:05",Some((100,true))),"09:05 • ⚡100%");
-        assert_eq!(stage1_footer("09:05",Some((20,false))),"09:05 • 🪫20%");
-        assert_eq!(stage1_footer("09:05",Some((21,false))),"09:05 • 🔋21%");
+        assert_eq!(stage1_footer("09:05",None,None),"09:05");
+        assert_eq!(stage1_footer("09:05",Some((100,true)),None),"09:05 • ⚡100%");
+        assert_eq!(stage1_footer("09:05",Some((20,false)),None),"09:05 • 🪫20%");
+        assert_eq!(stage1_footer("09:05",Some((21,false)),None),"09:05 • 🔋21%");
+    }
+    #[test] fn compact_footer_adds_tws_before_system_battery(){
+        assert_eq!(stage1_footer("09:05",None,Some(Some(80))),"09:05 • 🎧80%");
+        assert_eq!(stage1_footer("09:05",Some((90,false)),Some(Some(80))),"09:05 • 🎧80% • 🔋90%");
+        assert_eq!(stage1_footer("09:05",None,Some(None)),"09:05 • 🎧");
     }
 }
 

@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use windows::core::{w, PCWSTR};
 use windows::Win32::{
     Foundation::*,
@@ -10,6 +11,33 @@ use windows::Win32::{
 static CLASS_REGISTERED: AtomicBool = AtomicBool::new(false);
 
 const EDIT_ID: usize = 101;
+
+/// Posted to the main shell window when a floating note closes with edited content.
+pub const NOTE_SAVED: u32 = WM_APP + 56;
+
+/// A pop-out window lives on the same thread but has its own wndproc, so edited notes are handed
+/// over through this queue instead of borrowing the shell state directly. A queue (not a single
+/// slot) keeps every edit when two floats close before the shell pumps its messages.
+static PENDING_EDITS: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
+
+pub fn take_pending_note_edits() -> Vec<(u64, String)> {
+    PENDING_EDITS.lock().map(|mut queue| std::mem::take(&mut *queue)).unwrap_or_default()
+}
+
+/// Merges a pop-out edit back into the note list. Returns false when the note was deleted while
+/// the floating window was open.
+pub fn apply_popout_content(notes: &mut [crate::sticky::StickyNote], id: u64, content: &str) -> bool {
+    match notes.iter_mut().find(|n| n.id == id) {
+        Some(note) => {
+            if note.content != content {
+                note.content = content.to_string();
+                note.updated_at = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+            }
+            true
+        }
+        None => false,
+    }
+}
 
 unsafe extern "system" fn sticky_wndproc(
     hwnd: HWND,
@@ -82,11 +110,28 @@ unsafe extern "system" fn sticky_wndproc(
                 LRESULT(1)
             }
             WM_CLOSE => {
+                // Push the edited text back to the shell before the window disappears.
+                if let Ok(edit) = GetDlgItem(Some(hwnd), EDIT_ID as i32) {
+                    let len = GetWindowTextLengthW(edit).max(0) as usize;
+                    let mut buf = vec![0u16; len + 1];
+                    let copied = GetWindowTextW(edit, &mut buf).max(0) as usize;
+                    let content = String::from_utf16_lossy(&buf[..copied]);
+                    let note_id = GetPropW(hwnd, w!("NOTE_ID")).0 as usize as u64;
+                    let shell = HWND(GetPropW(hwnd, w!("SHELL_HWND")).0);
+                    if !shell.0.is_null() {
+                        if let Ok(mut queue) = PENDING_EDITS.lock() {
+                            queue.push((note_id, content));
+                        }
+                        let _ = PostMessageW(Some(shell), NOTE_SAVED, WPARAM(0), LPARAM(0));
+                    }
+                }
                 let _ = DestroyWindow(hwnd);
                 LRESULT(0)
             }
             WM_NCDESTROY => {
                 let _ = RemovePropW(hwnd, w!("COLOR_IDX"));
+                let _ = RemovePropW(hwnd, w!("NOTE_ID"));
+                let _ = RemovePropW(hwnd, w!("SHELL_HWND"));
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -94,7 +139,7 @@ unsafe extern "system" fn sticky_wndproc(
     }
 }
 
-pub fn spawn_floating_sticky_note(title: &str, content: &str, color_idx: u8) {
+pub fn spawn_floating_sticky_note(note_id: u64, title: &str, content: &str, color_idx: u8, shell: HWND) {
     unsafe {
         let instance = match GetModuleHandleW(None) {
             Ok(h) => h,
@@ -146,8 +191,41 @@ pub fn spawn_floating_sticky_note(title: &str, content: &str, color_idx: u8) {
 
         if let Ok(h) = hwnd {
             let _ = SetPropW(h, w!("COLOR_IDX"), Some(HANDLE(color_idx as isize as *mut _)));
+            let _ = SetPropW(h, w!("NOTE_ID"), Some(HANDLE(note_id as isize as *mut _)));
+            let _ = SetPropW(h, w!("SHELL_HWND"), Some(HANDLE(shell.0)));
             let _ = ShowWindow(h, SW_SHOW);
             let _ = UpdateWindow(h);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sticky::StickyNote;
+
+    fn note(id: u64, content: &str) -> StickyNote {
+        StickyNote { id, title: "N".into(), content: content.into(), color_idx: 0, updated_at: String::new() }
+    }
+
+    #[test]
+    fn popout_content_is_merged_back_into_the_matching_note() {
+        let mut notes = vec![note(1, "first"), note(2, "second")];
+        assert!(apply_popout_content(&mut notes, 2, "edited in the pop-out"));
+        assert_eq!(notes[1].content, "edited in the pop-out");
+        assert!(!notes[1].updated_at.is_empty());
+        assert_eq!(notes[0].content, "first");
+        assert!(!apply_popout_content(&mut notes, 404, "orphan"));
+    }
+
+    #[test]
+    fn pending_popout_edits_are_drained_in_order() {
+        {
+            let mut queue = PENDING_EDITS.lock().unwrap();
+            queue.push((1, "first".into()));
+            queue.push((2, "second".into()));
+        }
+        assert_eq!(take_pending_note_edits(), vec![(1, "first".to_string()), (2, "second".to_string())]);
+        assert!(take_pending_note_edits().is_empty());
     }
 }

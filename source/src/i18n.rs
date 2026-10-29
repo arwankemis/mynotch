@@ -179,7 +179,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
 
         // Settings Categories
         "cat.general" => if en { "General" } else { "Umum" },
-        "cat.general.desc" => if en { "mynotch 0.0.1.2 alpha · Portable Windows." } else { "mynotch 0.0.1.2 alpha · Portable Windows." },
+        "cat.general.desc" => if en { "Portable Windows notch settings." } else { "Pengaturan notch portable Windows." },
         "cat.appearance" => if en { "Appearance" } else { "Tampilan" },
         "cat.appearance.desc" => if en { "Position and visual comfort." } else { "Posisi dan kenyamanan tampilan." },
         "cat.tabs" => if en { "Tabs & navigation" } else { "Tab & navigasi" },
@@ -189,7 +189,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "cat.reminders" => if en { "Reminders" } else { "Reminder" },
         "cat.reminders.desc" => if en { "Daily reminder and health settings." } else { "Buka pengaturan pengingat harian." },
         "cat.mods" => if en { "Mods & Extensions" } else { "Mod & Ekstensi" },
-        "cat.mods.desc" => if en { "Install or uninstall optional modular features." } else { "Pasang atau lepas fitur modular opsional." },
+        "cat.mods.desc" => if en { "Install, open, or remove community mods." } else { "Pasang, buka, atau kelola mod komunitas." },
         "cat.update" => if en { "Updates" } else { "Pembaruan" },
         "cat.update.desc" => if en { "Check and download the latest mynotch releases." } else { "Periksa dan unduh rilis terbaru mynotch." },
 
@@ -201,6 +201,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "update.checking" => if en { "Connecting to GitHub Releases..." } else { "Menghubungi GitHub Releases..." },
         "update.up_to_date" => if en { "mynotch is up to date" } else { "mynotch sudah versi terbaru" },
         "update.up_to_date_sub" => if en { "You are using the latest official build." } else { "Anda sedang menggunakan versi resmi terbaru." },
+        "update.checked_at" => if en { "Last checked" } else { "Terakhir diperiksa" },
         "update.available" => if en { "New Release Available!" } else { "Versi Baru Tersedia!" },
         "update.download_zip" => if en { "Download Update (ZIP)" } else { "Unduh Update (ZIP)" },
         "update.release_notes" => if en { "Release Notes" } else { "Catatan Rilis" },
@@ -369,12 +370,51 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         // Notices & Feedback
         "notice.pinned" => if en { "Notch pinned" } else { "Notch disematkan (pin)" },
         "notice.unpinned" => if en { "Notch unpinned" } else { "Sematan notch dilepas" },
-        "notice.mod_installed" => if en { "Mod installed! New tab available." } else { "Mod berhasil dipasang! Tab baru tersedia." },
+        "notice.mod_installed" => if en { "Mod installed. Open it from Settings → Mod." } else { "Mod berhasil dipasang. Buka dari Pengaturan → Mod." },
         "notice.mod_uninstalled" => if en { "Mod uninstalled." } else { "Mod berhasil dilepas." },
         "notice.mod_deleted" => if en { "Mod deleted." } else { "Mod berhasil dihapus." },
-        "mods.upload_btn" => if en { "+ Install Mod" } else { "+ Pasang Mod" },
-        "mods.open_folder_btn" => if en { "📁 Mods Folder" } else { "📁 Folder Mod" },
         "mods.delete_btn" => if en { "Delete" } else { "Hapus" },
+        "mods.import_btn" => if en { "+ Import Mod" } else { "+ Impor Mod" },
+        "mods.folder_btn" => if en { "Mods Folder" } else { "Folder Mod" },
+        "mods.open_btn" => if en { "Open" } else { "Buka" },
+        "mods.install_btn" => if en { "Install" } else { "Pasang" },
+        "mods.uninstall_btn" => if en { "Uninstall" } else { "Lepas" },
+        "mods.type_builtin" => if en { "Built-in" } else { "Bawaan" },
+        "mods.type_json" => "JSON",
+        "mods.type_lua" => "Lua",
+        "mods.tab_toggle" => "Tab",
+        "mods.net_toggle" => "Net",
+        "mods.by" => if en { "by" } else { "oleh" },
+        "mods.empty" => if en { "No community mods yet." } else { "Belum ada mod komunitas." },
+        "mods.back" => if en { "‹ Back" } else { "‹ Kembali" },
+        "mods.missing" => if en { "Mod is no longer available." } else { "Mod tidak tersedia lagi." },
+        "mods.script_error" => if en { "Lua Mod Script Error" } else { "Kesalahan Skrip Mod Lua" },
+        "notice.breathing_done" => if en { "Breathing exercise complete." } else { "Latihan napas selesai." },
+        "notice.focus_scheduled" => if en { "Focus schedule started." } else { "Jadwal fokus dimulai." },
+        "notice.schedule_invalid" => if en { "Schedule must be HH:MM, e.g. 09:00,14:00." } else { "Format jadwal harus HH:MM, misalnya 09:00,14:00." },
+        "notice.schedule_saved" => if en { "Schedule and default tab saved." } else { "Jadwal dan tab default disimpan." },
+        "notice.todo_due_invalid" => if en { "Reminder date must be YYYY-MM-DD HH:MM." } else { "Tanggal pengingat harus YYYY-MM-DD HH:MM." },
+        "notice.note_saved" => if en { "Note saved." } else { "Catatan disimpan." },
+        "notice.ai_saved" => if en { "AI settings saved." } else { "Pengaturan AI tersimpan." },
+        "notice.ai_key_missing" => if en { "Save an API key and model first." } else { "Simpan API key dan model terlebih dahulu." },
+        "notice.ai_model_missing" => if en { "Model name is empty." } else { "Nama model belum diisi." },
+        "notice.calendar_feed_removed" => if en { "Calendar feed removed." } else { "Feed kalender dilepas." },
+        "notice.windows_sticky_open" => if en { "Opening Windows Sticky Notes... 📌" } else { "Membuka Sticky Notes Windows... 📌" },
+        "notice.windows_sticky_missing" => if en { "Windows Sticky Notes not found." } else { "Sticky Notes Windows tidak ditemukan." },
+        "notice.hotkey_conflict" => if en { "Hotkey is used by another app; pick another combination." } else { "Hotkey dipakai aplikasi lain; pilih kombinasi lain." },
+        "notice.media_unavailable" => if en { "Windows media is not available:" } else { "Media Windows belum tersedia:" },
+        "notice.visualizer_unavailable" => if en { "Visualizer is not available:" } else { "Visualizer belum tersedia:" },
+        "notice.todo_reminder" => if en { "Reminder:" } else { "Pengingat:" },
+        "notice.update_check_failed" => if en { "Failed to check updates:" } else { "Gagal memeriksa update:" },
+        "notice.update_available" => if en { "New version available:" } else { "Versi baru tersedia:" },
+        "notice.update_latest" => if en { "mynotch is already on the latest version." } else { "mynotch sudah menggunakan versi terbaru." },
+        "notice.mod_import_ok" => if en { "Installed mod:" } else { "Mod terpasang:" },
+        "error.mod_install" => if en { "Failed to install mod:" } else { "Gagal memasang mod:" },
+        "error.mod_uninstall" => if en { "Failed to uninstall mod:" } else { "Gagal melepas mod:" },
+        "error.mod_delete" => if en { "Failed to delete mod:" } else { "Gagal menghapus mod:" },
+        "error.open_folder" => if en { "Failed to open folder:" } else { "Gagal membuka folder:" },
+        "error.export" => if en { "Export failed:" } else { "Gagal export:" },
+        "toast.drink_confirm" => if en { "+ Drink" } else { "+ Minum" },
         "notice.at_least_one_tab" => if en { "Keep at least one active tab." } else { "Sisakan setidaknya satu tab aktif." },
         "notice.stretch_done" => if en { "Stretch recorded. See you next break." } else { "Peregangan tercatat. Sampai jeda berikutnya." },
         "notice.clip_copied" => if en { "Text copied to clipboard! 📋" } else { "Teks disalin ke clipboard! 📋" },
@@ -457,6 +497,20 @@ pub fn battery_status(percentage: u8, is_charging: bool, lang: &str) -> String {
     }
 }
 
+pub fn tws_connected(name: &str, battery: Option<u8>, lang: &str) -> String {
+    let state = match (lang == "en", battery) {
+        (true, Some(percent)) => format!("{name} connected · {percent}%"),
+        (false, Some(percent)) => format!("{name} terhubung · {percent}%"),
+        (true, None) => format!("{name} connected"),
+        (false, None) => format!("{name} terhubung"),
+    };
+    format!("🎧 {state}")
+}
+
+pub fn tws_disconnected(name: &str, lang: &str) -> String {
+    if lang == "en" { format!("🎧 {name} disconnected") } else { format!("🎧 {name} terputus") }
+}
+
 pub fn weather_condition(code: u32, is_day: bool, lang: &str) -> (&'static str, &'static str) {
     let en = lang == "en";
     match code {
@@ -514,6 +568,9 @@ mod tests {
             "notes.header", "notes.new_btn", "notes.no_notes", "notes.default_title",
             "reminder.remaining", "reminder.focusing", "reminder.pause", "reminder.start",
             "notice.pinned", "notice.clip_copied", "notice.note_added",
+            "mods.import_btn", "mods.folder_btn", "mods.open_btn", "mods.install_btn",
+            "mods.uninstall_btn", "mods.type_builtin", "mods.by", "mods.empty", "mods.back",
+            "mods.missing", "mods.script_error", "mods.tab_toggle", "mods.net_toggle",
             "toast.hydration_logged", "toast.break_ended", "toast.stretch_alert",
         ];
 
@@ -588,6 +645,10 @@ mod tests {
         assert_eq!(battery_status(85, true, "en"), "⚡ Charging (85%)");
         assert_eq!(battery_status(50, false, "id"), "🔋 Menggunakan baterai (50%)");
         assert_eq!(battery_status(50, false, "en"), "🔋 On battery (50%)");
+        assert_eq!(tws_connected("Buds", Some(80), "id"), "🎧 Buds terhubung · 80%");
+        assert_eq!(tws_connected("Buds", Some(80), "en"), "🎧 Buds connected · 80%");
+        assert_eq!(tws_connected("Buds", None, "id"), "🎧 Buds terhubung");
+        assert_eq!(tws_disconnected("Buds", "en"), "🎧 Buds disconnected");
 
         let (icon, cond) = weather_condition(0, true, "id");
         assert_eq!(icon, "☀️");
@@ -596,5 +657,91 @@ mod tests {
         let (icon_en, cond_en) = weather_condition(61, true, "en");
         assert_eq!(icon_en, "🌧️");
         assert_eq!(cond_en, "Rain");
+    }
+
+    fn rust_sources(dir: &std::path::Path) -> Vec<(std::path::PathBuf, String)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(current) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&current) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    if let Ok(source) = std::fs::read_to_string(&path) {
+                        out.push((path, source));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Collects the literal keys passed to `t("...")`. Dynamic calls such as `t(key, ..)` are
+    /// skipped, and a preceding `.`/identifier prevents matching unrelated `text(` methods.
+    fn t_keys(source: &str) -> Vec<String> {
+        let bytes = source.as_bytes();
+        let mut keys = Vec::new();
+        let mut i = 0;
+        while i + 2 < bytes.len() {
+            if bytes[i] == b't' && bytes[i + 1] == b'(' {
+                let prev = i.checked_sub(1).map(|p| bytes[p]);
+                let call_site = !matches!(prev, Some(c) if c.is_ascii_alphanumeric() || c == b'_' || c == b'.');
+                if call_site {
+                    let mut j = i + 2;
+                    while j < bytes.len() && bytes[j] == b' ' { j += 1; }
+                    if j < bytes.len() && bytes[j] == b'"' {
+                        let start = j + 1;
+                        let mut k = start;
+                        while k < bytes.len() && bytes[k] != b'"' { k += 1; }
+                        if k < bytes.len() {
+                            if let Ok(key) = std::str::from_utf8(&bytes[start..k]) {
+                                if !key.is_empty() && key.chars().next().is_some_and(|c| c.is_ascii_lowercase()) && key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.') {
+                                    keys.push(key.to_string());
+                                }
+                            }
+                            i = k;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        keys
+    }
+
+    #[test]
+    fn every_t_key_used_in_sources_has_a_translation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut checked = 0;
+        for (path, source) in rust_sources(&root) {
+            let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+            for key in t_keys(production) {
+                assert_ne!(t(&key, "id"), key.as_str(), "{}: missing Indonesian translation for {key}", path.display());
+                assert_ne!(t(&key, "en"), key.as_str(), "{}: missing English translation for {key}", path.display());
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "the source scan should find the t() calls, found {checked}");
+    }
+
+    #[test]
+    fn sources_do_not_hardcode_the_app_version() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let stale: Vec<String> = (0..=9).map(|patch| format!("0.0.1.{patch}")).collect();
+        for (path, source) in rust_sources(&root) {
+            let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+            for version in &stale {
+                let hits = production.lines().filter(|line| line.contains(version.as_str())).count();
+                if hits == 0 { continue }
+                if path.file_name().and_then(|n| n.to_str()) == Some("shell.rs") {
+                    let canonical = source.lines().filter(|line| line.contains("const APP_VERSION")).count();
+                    assert_eq!(hits, canonical, "{}: version {version} is hardcoded outside APP_VERSION", path.display());
+                } else {
+                    panic!("{} hardcodes the app version {version}; use APP_VERSION", path.display());
+                }
+            }
+        }
     }
 }

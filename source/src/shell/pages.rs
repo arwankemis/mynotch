@@ -1,4 +1,5 @@
 use super::*;
+use crate::mod_script::{LuaHeadline, LuaRanked};
 use render::MUTED;
 use chrono::Datelike;
 
@@ -12,7 +13,7 @@ impl Shell {
             "Catatan"=>self.notes_page(p),
             "Cuaca"=>self.weather_page(p),
             _=>{
-                if !self.custom_mod_page(p) {
+                if !self.draw_mod_tab(p) {
                     let msg = crate::i18n::t("shell.select_module", &self.settings.language);
                     p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
                 }
@@ -771,6 +772,7 @@ impl Shell {
             Action::Tab(tab)=>{
                 self.stage1_media_until=None;
                 self.reminder_menu=None;
+                self.mod_view=None;
                 if self.tab == tab && self.hover_stage >= 2 {
                     self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
                     self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
@@ -796,6 +798,7 @@ impl Shell {
                     self.update_window_region();
                     self.start_morph_timer();
                     self.make_inputs();
+                    self.refresh_mod_output();
                     self.invalidate();
                     unsafe{SetTimer(Some(self.hwnd),10,16,None);}
                 }
@@ -805,12 +808,12 @@ impl Shell {
                 self.save();
                 self.invalidate();
             },
-            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(6);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));},
+            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(6);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));if self.settings_cat==5{self.invalidate_mods();}},
             Action::InstallMod(id)=>{
                 let root=self.store.root.clone();
                 match crate::mods::install_mod(&root,&mut self.settings,&id){
-                    Ok(())=>{self.save();self.notice(crate::i18n::t("notice.mod_installed", &self.settings.language));}
-                    Err(e)=>self.notice(format!("Gagal memasang mod: {e}")),
+                    Ok(())=>{self.invalidate_mods();self.save();self.notice(crate::i18n::t("notice.mod_installed", &self.settings.language));}
+                    Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_install", &self.settings.language))),
                 }
                 self.invalidate();
             },
@@ -818,6 +821,7 @@ impl Shell {
                 let root=self.store.root.clone();
                 match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
                     Ok(()) => {
+                        self.invalidate_mods();
                         if !self.settings.enabled(&self.tab){
                             self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
                             self.make_inputs();
@@ -825,7 +829,7 @@ impl Shell {
                         self.save();
                         self.notice(crate::i18n::t("notice.mod_uninstalled", &self.settings.language));
                     }
-                    Err(e)=>self.notice(format!("Gagal melepas mod: {e}")),
+                    Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_uninstall", &self.settings.language))),
                 }
                 self.invalidate();
             },
@@ -833,6 +837,7 @@ impl Shell {
                 let root=self.store.root.clone();
                 match crate::mods::delete_custom_mod(&root,&mut self.settings,&id){
                     Ok(()) => {
+                        self.invalidate_mods();
                         if !self.settings.enabled(&self.tab){
                             self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
                             self.make_inputs();
@@ -840,7 +845,7 @@ impl Shell {
                         self.save();
                         self.notice(crate::i18n::t("notice.mod_deleted", &self.settings.language));
                     }
-                    Err(e)=>self.notice(format!("Gagal menghapus mod: {e}")),
+                    Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_delete", &self.settings.language))),
                 }
                 self.invalidate();
             },
@@ -849,19 +854,79 @@ impl Shell {
                     let root = self.store.root.clone();
                     match crate::mods::install_mod_package(&root, &mut self.settings, &path) {
                         Ok(manifest)=>{
+                            self.invalidate_mods();
+                            self.mods_selected=Some(manifest.id.clone());
                             self.save();
-                            self.notice(format!("Mod '{}' berhasil dipasang!", manifest.name));
+                            self.notice(format!("{} {}",crate::i18n::t("notice.mod_import_ok", &self.settings.language), manifest.name));
                         }
-                        Err(e)=>self.notice(format!("Gagal memasang mod: {e}")),
+                        Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_install", &self.settings.language))),
                     }
                     self.invalidate();
                 }
             },
+            Action::SelectMod(id)=>{
+                self.mods_selected=Some(id);
+                self.invalidate();
+            },
+            Action::OpenMod(id)=>{
+                if !self.mods().iter().any(|m| m.id==id){
+                    self.notice(crate::i18n::t("mods.missing", &self.settings.language));
+                    return;
+                }
+                self.mod_view=Some(id);
+                self.settings_open=false;
+                self.settings_popup=None;
+                self.reminder_menu=None;
+                self.focused=None;
+                self.tab_fade=None;
+                let from=self.geometry();
+                self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                self.update_window_region();
+                self.start_morph_timer();
+                self.make_inputs();
+                self.refresh_mod_output();
+                self.invalidate();
+            },
+            Action::CloseModView=>{
+                self.mod_view=None;
+                self.settings_open=true;
+                self.settings_cat=5;
+                self.settings_popup=None;
+                self.focused=None;
+                let from=self.geometry();
+                self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                self.update_window_region();
+                self.start_morph_timer();
+                self.make_inputs();
+                self.invalidate();
+            },
             Action::OpenModsFolder=>{
                 let mods_dir = self.store.root.join("mods");
                 if let Err(e) = crate::system::open_folder_in_explorer(&mods_dir) {
-                    self.notice(format!("Gagal membuka folder: {e}"));
+                    self.notice(format!("{} {e}",crate::i18n::t("error.open_folder", &self.settings.language)));
                 }
+                self.invalidate_mods();
+            },
+            Action::RefreshMods=>{self.invalidate_mods();self.invalidate();},
+            Action::ToggleModTab(tab)=>{
+                let on=!self.settings.enabled(&tab);
+                self.settings.set_mod_tab(&tab,on);
+                if self.tab==tab&&!self.settings.enabled(&tab){
+                    self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
+                    self.make_inputs();
+                }
+                self.save();
+                self.invalidate();
+            },
+            Action::ToggleModNetwork(id)=>{
+                let on=!self.settings.network_mods.iter().any(|m|m==&id);
+                self.settings.set_mod_network(&id,on);
+                self.save();
+                if self.active_mod_id().as_deref()==Some(id.as_str()){
+                    self.mod_output=None;
+                    self.refresh_mod_output();
+                }
+                self.invalidate();
             },
             Action::ModButtonClick(cmd)=>{
                 if let Some(url) = cmd.strip_prefix("url:") {
@@ -873,19 +938,20 @@ impl Shell {
                     self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
                 } else {
                     self.last_mod_button_clicked = Some(cmd);
+                    self.refresh_mod_output();
                 }
                 self.invalidate();
             },
             Action::SettingsMenu(key,x,y,w)=>self.open_settings_menu(key,x,y,w),
             Action::SettingsValue(key,value)=>{self.apply_settings_value(key,value);self.settings_popup=None;},
-            Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}let from=self.geometry();self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.start_morph_timer();self.make_inputs();self.update_window_region();},
+            Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}let from=self.geometry();self.mod_view=None;self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.start_morph_timer();self.make_inputs();self.update_window_region();},
             Action::SetDefaultTab(tab)=>{if self.settings.enabled(&tab){self.settings.default_tab=tab;}},
-            Action::Settings=>{self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.settings_open=true;self.set_expanded(true);let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
-            Action::Back=>{self.settings_popup=None;self.focused=None;self.settings_open=false;let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
-            Action::Close=>self.set_expanded(false),Action::Exit=>unsafe{let _=DestroyWindow(self.hwnd);},
+            Action::Settings=>{self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.mod_view=None;self.settings_open=true;self.set_expanded(true);let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
+            Action::Back=>{self.settings_popup=None;self.focused=None;self.mod_view=None;self.settings_open=false;let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
+            Action::Close=>self.set_expanded(false),Action::Exit=>{self.flush_note_edits();unsafe{let _=DestroyWindow(self.hwnd);}},
             Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},
             Action::Minimal=>{self.settings.minimal=!self.settings.minimal;if !self.expanded{self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));}self.sync_visualizer();self.save();},
-            Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(165,255)as u8;self.save();self.invalidate();},
+            Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(MIN_OPACITY as i32,255)as u8;self.save();self.invalidate();},
             Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
                 "auto_break"=>self.settings.auto_break=!self.settings.auto_break,
@@ -936,7 +1002,7 @@ impl Shell {
                 "water_reminder"=>{self.settings.water_reminder=!self.settings.water_reminder;self.last_water=Instant::now();self.save();},
                 "move_reminder"=>{self.settings.move_reminder=!self.settings.move_reminder;self.last_move=Instant::now();self.save();},
                 "lyrics_below"=>self.settings.lyrics_below=!self.settings.lyrics_below,
-                "save_schedule"=>{let schedule=self.input(100);let times:Vec<String>=schedule.split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();if times.iter().any(|t|chrono::NaiveTime::parse_from_str(t,"%H:%M").is_err()){self.notice("Format jadwal harus HH:MM, misalnya 09:00,14:00.");return}self.settings.focus_schedule=times;let tab=self.input(101);if MODULES.contains(&tab.trim()){self.settings.default_tab=tab.trim().into();}self.notice("Jadwal dan tab default disimpan.");},
+                "save_schedule"=>{let schedule=self.input(100);let times:Vec<String>=schedule.split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();if times.iter().any(|t|chrono::NaiveTime::parse_from_str(t,"%H:%M").is_err()){self.notice(crate::i18n::t("notice.schedule_invalid", &self.settings.language));return}self.settings.focus_schedule=times;let tab=self.input(101);if MODULES.contains(&tab.trim()){self.settings.default_tab=tab.trim().into();}self.notice(crate::i18n::t("notice.schedule_saved", &self.settings.language));},
                 _=>{}
             },
             Action::SeekPointer=>{},Action::LyricsFollow=>self.lyric_offset=0,
@@ -952,7 +1018,7 @@ impl Shell {
             Action::PrayerLead(d)=>self.settings.prayer_lead=(self.settings.prayer_lead as i32+d).clamp(0,30)as u32,
 
             Action::FocusStart=>self.focus.start(self.settings.focus_minutes,false),Action::FocusBreak=>self.focus.start(self.settings.break_minutes,true),Action::FocusPause=>{if self.focus.running(){self.focus.pause();}else{self.focus.resume();}},Action::FocusReset=>self.focus.reset(),Action::FocusLength(delta)=>{self.settings.focus_minutes=(self.settings.focus_minutes as i32+delta).clamp(1,180)as u32;self.save();},Action::BreakLength(delta)=>{self.settings.break_minutes=(self.settings.break_minutes as i32+delta).clamp(1,60)as u32;self.save();},
-            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice("Tanggal pengingat harus YYYY-MM-DD HH:MM.");return}}};self.state.todos.push(Todo{id:Local::now().timestamp_millis()as u64,text,done:false,due,reminded:false});self.clear_input(10);self.clear_input(11);},Action::Todo(id)=>{if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::DeleteTodo(id)=>self.state.todos.retain(|t|t.id!=id),Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice("Catatan disimpan.");},
+            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};self.state.todos.push(Todo{id:Local::now().timestamp_millis()as u64,text,done:false,due,reminded:false});self.clear_input(10);self.clear_input(11);},Action::Todo(id)=>{if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::DeleteTodo(id)=>self.state.todos.retain(|t|t.id!=id),Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
             Action::Water=>{self.state.water.push(Drink{date:Local::now().date_naive(),ml:self.settings.water_serving});self.last_water=Instant::now();},Action::UndoWater=>{if let Some(index)=self.state.water.iter().rposition(|d|d.date==Local::now().date_naive()){self.state.water.remove(index);}},Action::WaterTarget(delta)=>self.settings.water_target=(self.settings.water_target as i32+delta).clamp(250,10000)as u32,Action::WaterServing(delta)=>self.settings.water_serving=(self.settings.water_serving as i32+delta).clamp(50,2000)as u32,
             Action::WaterInterval(delta)=>{self.settings.water_interval=(self.settings.water_interval as i32+delta).clamp(5,180)as u32;self.save();},
             Action::MoveInterval(delta)=>{self.settings.move_interval=(self.settings.move_interval as i32+delta).clamp(5,180)as u32;self.save();},
@@ -1114,7 +1180,7 @@ impl Shell {
             Action::OpenRepoUrl=>{
                 crate::system::open_browser("https://github.com/arwankemis/mynotch");
             },
-            Action::AiSave=>{let key=self.input(43);if !key.is_empty(){match crate::secrets::protect(&key){Ok(secret)=>self.settings.ai_key=secret,Err(e)=>{self.notice(e);return}}}self.settings.ai_endpoint=self.input(41).trim().into();self.settings.ai_model=self.input(42).trim().into();self.clear_input(43);self.notice("Pengaturan AI tersimpan.");},Action::AiSend=>self.send_ai(),Action::AiClear=>self.ai_messages.clear(),
+            Action::AiSave=>{let key=self.input(43);if !key.is_empty(){match crate::secrets::protect(&key){Ok(secret)=>self.settings.ai_key=secret,Err(e)=>{self.notice(e);return}}}self.settings.ai_endpoint=self.input(41).trim().into();self.settings.ai_model=self.input(42).trim().into();self.clear_input(43);self.notice(crate::i18n::t("notice.ai_saved", &self.settings.language));},Action::AiSend=>self.send_ai(),Action::AiClear=>self.ai_messages.clear(),
             Action::ToggleLyrics=>{
                 self.lyric_mode=!self.lyric_mode;
                 let from=self.geometry();
@@ -1227,7 +1293,7 @@ impl Shell {
                 if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
                     match kind {
                         0 => {
-                            let export_dir = std::path::PathBuf::from("data").join("exports");
+                            let export_dir = crate::app::exports_directory(&self.store.root);
                             match crate::sticky::export_note_to_markdown(&export_dir, &note) {
                                 Ok(path) => {
                                     unsafe {
@@ -1238,11 +1304,11 @@ impl Shell {
                                     }
                                     self.notice(crate::i18n::t("notice.export_md", &self.settings.language));
                                 }
-                                Err(e) => self.notice(format!("Gagal export: {}", e)),
+                                Err(e) => self.notice(format!("{} {}",crate::i18n::t("error.export", &self.settings.language), e)),
                             }
                         }
                         1 => {
-                            let export_dir = std::path::PathBuf::from("data").join("exports");
+                            let export_dir = crate::app::exports_directory(&self.store.root);
                             match crate::sticky::export_note_to_txt(&export_dir, &note) {
                                 Ok(path) => {
                                     unsafe {
@@ -1253,7 +1319,7 @@ impl Shell {
                                     }
                                     self.notice(crate::i18n::t("notice.export_txt", &self.settings.language));
                                 }
-                                Err(e) => self.notice(format!("Gagal export: {}", e)),
+                                Err(e) => self.notice(format!("{} {}",crate::i18n::t("error.export", &self.settings.language), e)),
                             }
                         }
                         2 => {
@@ -1272,9 +1338,9 @@ impl Shell {
                                 let protocol = windows::core::w!("ms-stickynotes:");
                                 let res = ShellExecuteW(None, windows::core::w!("open"), protocol, None, None, SW_SHOW);
                                 if res.0 as isize > 32 {
-                                    self.notice("Membuka Sticky Notes Windows... 📌");
+                                    self.notice(crate::i18n::t("notice.windows_sticky_open", &self.settings.language));
                                 } else {
-                                    self.notice("Sticky Notes Windows tidak ditemukan.");
+                                    self.notice(crate::i18n::t("notice.windows_sticky_missing", &self.settings.language));
                                 }
                             }
                         }
@@ -1294,7 +1360,7 @@ impl Shell {
                     self.save();
                 }
                 if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
-                    super::spawn_floating_sticky_note(&note.title, &note.content, note.color_idx);
+                    super::spawn_floating_sticky_note(note.id, &note.title, &note.content, note.color_idx, self.hwnd);
                     self.notice(crate::i18n::t("notice.note_popout", &self.settings.language));
                 }
             },
@@ -1305,8 +1371,8 @@ impl Shell {
         self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.clock_timer();self.invalidate();
     }
     fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
-    fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice("Feed kalender dilepas.");return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
-    fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice("Simpan API key dan model terlebih dahulu.");return}};if self.settings.ai_model.trim().is_empty(){self.notice("Nama model belum diisi.");return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
+    fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice(crate::i18n::t("notice.calendar_feed_removed", &self.settings.language));return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
+    fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice(crate::i18n::t("notice.ai_key_missing", &self.settings.language));return}};if self.settings.ai_model.trim().is_empty(){self.notice(crate::i18n::t("notice.ai_model_missing", &self.settings.language));return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
 
         pub(super) fn hit(&mut self, x: f32, y: f32, w: f32, h: f32, action: Action) {
         if self.hit_enabled {
@@ -1324,34 +1390,164 @@ impl Shell {
         self.hit(x, y, w, h, action);
     }}
 
-    fn custom_mod_page(&mut self, p: &mut Painter) -> bool { unsafe {
-        let root = self.store.root.clone();
-        let available = crate::mods::available_mods(&root);
-        let current_tab = self.tab.clone();
-        let manifest = match available.into_iter().find(|m| m.tab_name == current_tab || m.id == current_tab || m.name == current_tab) {
-            Some(m) => m,
-            None => return false,
+    /// Community mods are listed in Settings → Mod. The manifest list is cached so painting never
+    /// touches the disk; the cache is dropped on install/uninstall/delete.
+    pub(super) fn mods(&mut self) -> Vec<crate::mods::ModManifest> {
+        if self.mods_cache.is_none() {
+            let mut list = crate::mods::available_mods(&self.store.root);
+            list.sort_by(|a, b| {
+                let rank = |m: &crate::mods::ModManifest| match m.id.as_str() { "sticky_notes" => 0u8, "weather" => 1, _ => 2 };
+                rank(a).cmp(&rank(b)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
+            self.mods_cache = Some(list);
+        }
+        self.mods_cache.clone().unwrap_or_default()
+    }
+    pub(super) fn invalidate_mods(&mut self) { self.mods_cache = None; }
+
+    /// Community mod currently being shown, whether via Settings → Buka or via a tab the user
+    /// opted into. The Lua cache is keyed by the manifest id, so both routes share it.
+    pub(super) fn active_mod_id(&mut self) -> Option<String> {
+        if let Some(id) = self.mod_view.clone() {
+            return Some(id);
+        }
+        let tab = self.tab.clone();
+        if self.settings.mod_tabs.iter().any(|t| t == &tab) {
+            return self.mods().into_iter().find(|m| m.tab_name == tab).map(|m| m.id);
+        }
+        None
+    }
+
+    /// Runs the Lua mod once and stores the result for painting. Called from action handling
+    /// and the 1 s tick — never from `paint()`.
+    pub(super) fn refresh_mod_output(&mut self) {
+        let Some(id) = self.active_mod_id() else {
+            self.mod_output = None;
+            return
         };
+        let Some(manifest) = self.mods().into_iter().find(|m| m.id == id) else {
+            self.mod_output = None;
+            return
+        };
+        if manifest.mod_type != crate::mods::ModType::Lua {
+            self.mod_output = None;
+            return
+        }
+        let button = self.last_mod_button_clicked.take();
+        let mod_dir = crate::mods::get_mod_dir(&self.store.root, &manifest.id);
+        let script = mod_dir.join("main.lua");
+        let config = std::fs::read(mod_dir.join("config.json"))
+            .ok()
+            .filter(|bytes| bytes.len() <= 64 * 1024)
+            .and_then(|bytes| {
+                let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF][..]).unwrap_or(&bytes);
+                serde_json::from_slice::<serde_json::Value>(bytes).ok()
+            });
+        self.mod_http_ttl = Duration::from_secs(
+            config.as_ref()
+                .and_then(|value| value.get("refresh_seconds"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(60)
+                .clamp(15, 600),
+        );
+        let now = Instant::now();
+        let http_cache: std::collections::BTreeMap<String, Result<String, String>> = self.mod_http_cache.iter()
+            .filter(|(_, (fetched_at, _))| now.duration_since(*fetched_at) < self.mod_http_ttl)
+            .map(|(url, (_, result))| (url.clone(), result.clone()))
+            .collect();
+        let http_allowed = self.settings.network_mods.iter().any(|mod_id| mod_id == &manifest.id);
+        let output = crate::mod_script::run_lua_mod_with_config(
+            &script,
+            button.as_deref(),
+            config.as_ref(),
+            http_allowed,
+            &http_cache,
+        );
+        // Side effects only on a click or the first run of this mod; a periodic refresh must not
+        // reopen the browser or re-copy to the clipboard every second.
+        let first_run = self.mod_output.as_ref().is_none_or(|(cached, _)| cached != &manifest.id);
+        if let Ok(value) = &output {
+            if button.is_some() || first_run {
+                for toast in value.toasts.clone() { self.notice(toast); }
+                for url in &value.urls_to_open { crate::system::open_browser(url); }
+                for text in &value.clipboard_copies {
+                    crate::clipboard::set_clipboard_text(text);
+                    self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
+                }
+            }
+            // One background fetch at a time; the completion event re-runs the Lua with the body.
+            if http_allowed && !self.jobs.contains_key("ModHttp") {
+                if let Some(url) = value.http_requests.first().cloned() {
+                    self.job("ModHttp", move || {
+                        let result = crate::net::request(
+                            "GET",
+                            &url,
+                            &[
+                                ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+                                ("Accept", "application/json"),
+                            ],
+                            &[],
+                        ).map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+                        Event::ModHttp(url, result)
+                    });
+                }
+            }
+        }
+        self.mod_output = Some((manifest.id, output));
+    }
 
-        // Header
-        p.outline_icon(&manifest.icon, 24., 42., 24., 0x6ee7b7);
-        let header = format!("{} v{}", manifest.name, manifest.version);
-        p.text(&header, 58., 36., 400., 22., 14., render::TEXT, false);
-        p.text_ellipsis(&manifest.description, 58., 58., 500., 18., 11., MUTED, false);
-        p.fill(24., 80., 600., 1., 0., 0x222229);
+    /// Stage 2 view for a community mod, opened from Settings → Mod. It owns its own header and
+    /// back button, so community mods never take a slot in the main tab strip.
+    pub(super) fn draw_mod_view(&mut self, p: &mut Painter) { unsafe {
+        let Some(id) = self.mod_view.clone() else { return };
+        let Some(manifest) = self.mods().into_iter().find(|m| m.id == id) else {
+            self.mod_view = None;
+            self.settings_open = true;
+            self.settings_cat = 5;
+            self.notice(crate::i18n::t("mods.missing", &self.settings.language));
+            let from = self.geometry();
+            self.morph = Some(ui::Morph::new(from, self.target_geometry()));
+            self.start_morph_timer();
+            return
+        };
+        let lang = self.settings.language.clone();
+        self.draw_button(p, crate::i18n::t("mods.back", &lang), 18., 12., 92., 26., Action::CloseModView);
+        p.outline_icon(&manifest.icon, 122., 16., 18., 0x6ee7b7);
+        p.text_ellipsis(&manifest.name, 148., 9., self.width - 166., 18., 13., render::TEXT, true);
+        let kind = match manifest.mod_type {
+            crate::mods::ModType::Lua => "Lua",
+            crate::mods::ModType::Declarative => "JSON",
+            crate::mods::ModType::Builtin => crate::i18n::t("mods.type_builtin", &lang),
+        };
+        p.text_ellipsis(&format!("v{} · {}", manifest.version, kind), 148., 27., self.width - 166., 14., 9.5, MUTED, false);
+        p.text_ellipsis(&manifest.description, 18., 47., self.width - 36., 16., 10., MUTED, false);
+        p.fill(18., 67., self.width - 36., 1., 0., 0x222229);
+        self.draw_mod_body(p, &manifest, 77.);
+    }}
 
+    /// Renders a community mod that the user opted into the Stage 2 tab strip.
+    fn draw_mod_tab(&mut self, p: &mut Painter) -> bool { unsafe {
+        let tab = self.tab.clone();
+        if !self.settings.mod_tabs.iter().any(|t| t == &tab) { return false }
+        let Some(manifest) = self.mods().into_iter().find(|m| m.tab_name == tab) else { return false };
+        p.outline_icon(&manifest.icon, 24., 38., 20., 0x6ee7b7);
+        p.text_ellipsis(&manifest.name, 52., 34., self.width - 76., 18., 13., render::TEXT, true);
+        p.text_ellipsis(&manifest.description, 52., 53., self.width - 76., 14., 9.5, MUTED, false);
+        p.fill(24., 74., self.width - 48., 1., 0., 0x222229);
+        self.draw_mod_body(p, &manifest, 82.);
+        true
+    }}
+
+    fn draw_mod_body(&mut self, p: &mut Painter, manifest: &crate::mods::ModManifest, start_y: f32) { unsafe {
+        let margin = 18.;
+        let content_w = self.width - margin * 2.;
         match manifest.mod_type {
             crate::mods::ModType::Declarative => {
-                let cards = &manifest.cards;
-                let start_y = 92.;
-                for (i, card) in cards.iter().enumerate() {
-                    let col = (i % 2) as f32;
-                    let row = (i / 2) as f32;
-                    let card_w = 294.;
-                    let card_h = 68.;
-                    let x = 24. + col * (card_w + 12.);
-                    let y = start_y + row * (card_h + 10.);
-
+                let card_w = (content_w - 12.) / 2.;
+                let card_h = 68.;
+                for (i, card) in manifest.cards.iter().enumerate() {
+                    let x = margin + (i % 2) as f32 * (card_w + 12.);
+                    let y = start_y + (i / 2) as f32 * (card_h + 10.);
                     p.fill(x, y, card_w, card_h, 8., 0x16161d);
                     p.stroke(x, y, card_w, card_h, 8., 0x2b2b36, 1.);
                     p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., MUTED, false);
@@ -1360,58 +1556,48 @@ impl Shell {
                         p.text(&card.subtext, x + 12., y + 48., card_w - 24., 14., 9., MUTED, false);
                     }
                 }
-
-                let buttons = &manifest.buttons;
-                let btn_start_y = if cards.is_empty() { start_y } else { start_y + ((cards.len() + 1) / 2) as f32 * 78. };
-                for (i, btn) in buttons.iter().enumerate() {
-                    let col = (i % 3) as f32;
-                    let row = (i / 3) as f32;
-                    let btn_w = 192.;
-                    let x = 24. + col * (btn_w + 12.);
-                    let y = btn_start_y + row * 38.;
-
-                    if btn.action == "open_url" && !btn.target.is_empty() {
-                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(format!("url:{}", btn.target)));
+                let btn_w = (content_w - 24.) / 3.;
+                let btn_start_y = if manifest.cards.is_empty() {
+                    start_y
+                } else {
+                    start_y + ((manifest.cards.len() + 1) / 2) as f32 * (card_h + 10.) + 2.
+                };
+                for (i, btn) in manifest.buttons.iter().enumerate() {
+                    let x = margin + (i % 3) as f32 * (btn_w + 12.);
+                    let y = btn_start_y + (i / 3) as f32 * 38.;
+                    let action = if btn.action == "open_url" && !btn.target.is_empty() {
+                        Action::ModButtonClick(format!("url:{}", btn.target))
                     } else if btn.action == "toast" && !btn.target.is_empty() {
-                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(format!("toast:{}", btn.target)));
+                        Action::ModButtonClick(format!("toast:{}", btn.target))
                     } else if btn.action == "copy" && !btn.target.is_empty() {
-                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(format!("copy:{}", btn.target)));
+                        Action::ModButtonClick(format!("copy:{}", btn.target))
                     } else {
-                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(btn.label.clone()));
-                    }
+                        Action::ModButtonClick(btn.label.clone())
+                    };
+                    self.draw_button(p, &btn.label, x, y, btn_w, 30., action);
                 }
             }
             crate::mods::ModType::Lua => {
-                let mod_dir = crate::mods::get_mod_dir(&root, &manifest.id);
-                let script_path = mod_dir.join("main.lua");
-                let last_btn = self.last_mod_button_clicked.take();
-
-                match crate::mod_script::run_lua_mod(&script_path, last_btn.as_deref()) {
-                    Ok(output) => {
-                        for toast in output.toasts {
-                            self.notice(toast);
-                        }
-                        for url in output.urls_to_open {
-                            crate::system::open_browser(&url);
-                        }
-                        for text in output.clipboard_copies {
-                            crate::clipboard::set_clipboard_text(&text);
-                            self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
-                        }
-
+                // The VM never runs here: paint only renders the last result computed in
+                // `refresh_mod_output()` (open, button click, 1 s tick).
+                match self.mod_output.clone().filter(|(cached, _)| cached == &manifest.id) {
+                    Some((_, Ok(output))) => {
                         for t in &output.texts {
                             p.text(&t.text, t.x, t.y, 400., 20., 11., render::TEXT, false);
                         }
-
-                        let start_y = 92.;
+                        let mut body_y = start_y;
+                        if let Some(headline) = &output.headline {
+                            body_y = draw_headline(p, headline, body_y, self.width);
+                        }
+                        if output.ranked_left.is_some() || output.ranked_right.is_some() {
+                            draw_ranked(p, output.ranked_left.as_ref(), output.ranked_right.as_ref(), body_y, self.width);
+                            return;
+                        }
+                        let card_w = (content_w - 12.) / 2.;
+                        let card_h = 68.;
                         for (i, card) in output.cards.iter().enumerate() {
-                            let col = (i % 2) as f32;
-                            let row = (i / 2) as f32;
-                            let card_w = 294.;
-                            let card_h = 68.;
-                            let x = 24. + col * (card_w + 12.);
-                            let y = start_y + row * (card_h + 10.);
-
+                            let x = margin + (i % 2) as f32 * (card_w + 12.);
+                            let y = body_y + (i / 2) as f32 * (card_h + 10.);
                             p.fill(x, y, card_w, card_h, 8., 0x16161d);
                             p.stroke(x, y, card_w, card_h, 8., 0x2b2b36, 1.);
                             p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., MUTED, false);
@@ -1420,27 +1606,113 @@ impl Shell {
                                 p.text(sub, x + 12., y + 48., card_w - 24., 14., 9., MUTED, false);
                             }
                         }
-
-                        let btn_start_y = if output.cards.is_empty() { start_y } else { start_y + ((output.cards.len() + 1) / 2) as f32 * 78. };
+                        let btn_w = (content_w - 24.) / 3.;
+                        let btn_start_y = if output.cards.is_empty() {
+                            body_y
+                        } else {
+                            body_y + ((output.cards.len() + 1) / 2) as f32 * (card_h + 10.) + 2.
+                        };
                         for (i, btn) in output.buttons.iter().enumerate() {
-                            let col = (i % 3) as f32;
-                            let row = (i / 3) as f32;
-                            let btn_w = 192.;
-                            let x = 24. + col * (btn_w + 12.);
-                            let y = btn_start_y + row * 38.;
+                            let x = margin + (i % 3) as f32 * (btn_w + 12.);
+                            let y = btn_start_y + (i / 3) as f32 * 38.;
                             self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(btn.id.clone()));
                         }
                     }
-                    Err(err) => {
-                        p.fill(24., 96., 600., 60., 8., 0x2b1515);
-                        p.stroke(24., 96., 600., 60., 8., 0x7f2323, 1.);
-                        p.text("Kesalahan Skrip Mod Lua", 36., 104., 576., 20., 12., 0xff8888, false);
-                        p.text_ellipsis(&err, 36., 126., 576., 20., 10., 0xddaaaa, false);
+                    Some((_, Err(err))) => {
+                        p.fill(margin, start_y + 6., content_w, 60., 8., 0x2b1515);
+                        p.stroke(margin, start_y + 6., content_w, 60., 8., 0x7f2323, 1.);
+                        p.text(crate::i18n::t("mods.script_error", &self.settings.language), margin + 12., start_y + 14., content_w - 24., 20., 12., 0xff8888, false);
+                        p.text_ellipsis(&err, margin + 12., start_y + 36., content_w - 24., 20., 10., 0xddaaaa, false);
+                    }
+                    None => {
+                        p.text_ellipsis(crate::i18n::t("music.loading_lyrics", &self.settings.language), margin, start_y + 6., content_w, 20., 11., MUTED, false);
                     }
                 }
             }
             crate::mods::ModType::Builtin => {}
         }
-        true
     }}
 }
+
+const LANE_GREEN: u32 = 0x6ee7b7;
+const LANE_RED: u32 = 0xf87171;
+const LANE_FAINT: u32 = 0x7f7f8a;
+
+/// Summary band for a market-style mod: label, big value, signed delta, and a right-aligned
+/// meta line plus an optional badge. Returns the y coordinate below the band.
+unsafe fn draw_headline(p: &mut Painter, headline: &LuaHeadline, y: f32, width: f32) -> f32 { unsafe {
+    let margin = 18.;
+    let content_w = width - margin * 2.;
+    p.text_ellipsis(&headline.label, margin, y, content_w - 150., 12., 9., LANE_FAINT, false);
+    if !headline.badge.trim().is_empty() {
+        let badge_w = p.measure_text(&headline.badge, 7.5, false) + 12.;
+        let badge_x = width - margin - badge_w;
+        p.stroke(badge_x, y - 1., badge_w, 14., 4., 0x3a3a45, 1.);
+        p.text_ellipsis(&headline.badge, badge_x + 5., y + 1., badge_w - 9., 11., 7.5, LANE_FAINT, false);
+    }
+    let value_y = y + 11.;
+    p.text(&headline.value, margin, value_y, content_w, 24., 20., render::TEXT, true);
+    let value_w = p.measure_text(&headline.value, 20., true);
+    if !headline.delta.trim().is_empty() {
+        let color = if headline.delta.trim_start().starts_with('-') { LANE_RED } else { LANE_GREEN };
+        p.text_ellipsis(&headline.delta, margin + value_w + 10., value_y + 9., 150., 14., 10.5, color, true);
+    }
+    if !headline.meta.trim().is_empty() {
+        let meta_w = p.measure_text(&headline.meta, 8.5, false).min(210.);
+        p.text_ellipsis(&headline.meta, width - margin - meta_w, y + 19., meta_w, 12., 8.5, MUTED, false);
+    }
+    y + 44.
+}}
+
+/// Two ranked lanes separated by a hairline. Rows are fixed at 32 px so five entries fit the
+/// Stage 2 panel under the headline.
+unsafe fn draw_ranked(p: &mut Painter, left: Option<&LuaRanked>, right: Option<&LuaRanked>, y: f32, width: f32) { unsafe {
+    let margin = 18.;
+    let gap = 14.;
+    let content_w = width - margin * 2.;
+    let both = left.is_some() && right.is_some();
+    let lane_w = if both { (content_w - gap - 1.) / 2. } else { content_w };
+    let count = left.map(|l| l.rows.len()).unwrap_or(0).max(right.map(|r| r.rows.len()).unwrap_or(0)).min(5);
+    let lane_h = 18. + count as f32 * 32.;
+    if let Some(lane) = left {
+        draw_ranked_lane(p, lane, margin, y, lane_w, true);
+    }
+    if both {
+        let divider_x = margin + lane_w + gap * 0.5;
+        p.fill_alpha(divider_x, y + 2., 1., lane_h, 0., 0xffffff, 0.07);
+    }
+    if let Some(lane) = right {
+        let x = if left.is_some() { margin + lane_w + gap } else { margin };
+        draw_ranked_lane(p, lane, x, y, lane_w, false);
+    }
+}}
+
+unsafe fn draw_ranked_lane(p: &mut Painter, lane: &LuaRanked, x: f32, y: f32, width: f32, positive: bool) { unsafe {
+    let color = if positive { LANE_GREEN } else { LANE_RED };
+    let arrow = if positive { "▲" } else { "▼" };
+    let title = format!("{arrow} {}", lane.title.to_uppercase());
+    p.text_ellipsis(&title, x, y, width - 112., 12., 9., color, true);
+    p.text_ellipsis(&lane.meta, x + width - 108., y + 1., 108., 12., 8., color, false);
+    if lane.rows.is_empty() {
+        p.text("Tidak ada data", x, y + 26., width, 16., 9., MUTED, false);
+        return;
+    }
+    let max = lane.rows.iter().map(|r| r.change.abs()).fold(0.0_f64, f64::max).max(0.0001);
+    let name_w = (width - 22. - 68.).max(40.);
+    for (i, row) in lane.rows.iter().take(5).enumerate() {
+        let row_y = y + 18. + i as f32 * 32.;
+        p.text(&format!("{:02}", i + 1), x + 2., row_y + 9., 16., 12., 8.5, LANE_FAINT, false);
+        p.text_ellipsis(&row.ticker, x + 22., row_y + 3., name_w, 14., 11.5, render::TEXT, true);
+        p.text_ellipsis(&row.name, x + 22., row_y + 17., name_w, 12., 8.5, MUTED, false);
+        let price_w = p.measure_text(&row.price, 10.5, false);
+        p.text(&row.price, x + width - price_w - 1., row_y + 3., price_w + 2., 14., 10.5, render::TEXT, false);
+        let change = format!("{:+.2}%", row.change).replace('.', ",");
+        let change_w = p.measure_text(&change, 9.5, true);
+        // A filled lane can contain the opposite sign, so colour the value by its own direction.
+        let change_color = if row.change >= 0.0 { LANE_GREEN } else { LANE_RED };
+        p.text(&change, x + width - change_w - 1., row_y + 17., change_w + 2., 12., 9.5, change_color, true);
+        p.fill_alpha(x + 22., row_y + 30., width - 22., 2., 1., 0xffffff, 0.045);
+        let bar_w = (((row.change.abs() / max) as f32) * (width - 22.)).max(6.);
+        p.fill_alpha(x + 22., row_y + 30., bar_w, 2., 1., change_color, 0.32);
+    }
+}}

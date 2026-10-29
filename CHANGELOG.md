@@ -6,28 +6,36 @@ Semua pembaruan penting dan catatan rilis untuk mynotch didokumentasikan di berk
 
 ## [0.0.1.3 alpha] - 29 Oktober 2026
 
-Rilis 0.0.1.3 alpha menambahkan dukungan mod kustom buatan pengguna berbasis deklaratif JSON dan skrip Lua 5.4, tombol pemasang paket mod di menu Pengaturan, pintasan folder mod ke Windows Explorer, serta rendering kartu interaktif.
+Rilis ini menambah mod komunitas berbasis JSON dan Lua, pengelola mod di Pengaturan, deteksi TWS, dan indikator volume bawaan mynotch.
 
 ### Fitur baru
 
-- Pemasang mod mandiri:
-  - Tombol "+ Pasang Mod" di menu Pengaturan Mod untuk memilih paket `.zip` atau berkas manifest `.json`.
-  - Ekstraksi aman paket ZIP langsung ke direktori `data/mods/` tanpa dependensi eksternal.
-  - Tombol "Folder Mod" untuk membuka direktori `data/mods/` langsung di Windows Explorer.
-  - Tombol "Hapus" pada daftar mod untuk menghapus berkas mod buatan sendiri dari disk.
-- Mesin mod skrip Lua 5.4:
-  - Mesin virtual pure Rust (Piccolo) yang berjalan di lingkungan sandbox terisolasi tanpa akses I/O file atau jaringan bebas.
-  - API antarmuka pengguna: `ui.card`, `ui.button`, dan `ui.text`.
-  - API sistem: `system.toast`, `system.open_url`, dan `system.copy`.
-  - Perlindungan perulangan tak terbatas berbasis alokasi instruksi (fuel limits).
-- Rendering dinamis tab mod:
-  - Mod yang diaktifkan otomatis terdaftar pada bar navigasi notch.
-  - Tampilan grid responsif untuk kartu ringkasan, teks kustom, dan tombol interaktif.
-  - Kotak diagnostik kesalahan skrip jika mod Lua mengalami kegagalan saat dieksekusi.
-- Berkas contoh dan dokumentasi:
-  - Contoh mod deklaratif kurs valuta asing di `examples/mods/kurs_usd/`.
-  - Contoh mod interaktif skrip Lua di `examples/mods/counter_lua/`.
-  - Buku panduan pembuatan dan pengemasan mod di `docs/PANDUAN-MOD.md`.
+- Mod komunitas:
+  - Tombol "Impor Mod" menerima paket `.zip` atau manifest `.json`, lalu mengekstraknya ke `data/mods/`. Tombol "Folder Mod" membuka direktori itu di Explorer.
+  - Tiap mod punya tombol Buka, Pasang/Lepas, dan Hapus. Toggle "Tab" menampilkan halaman mod di bilah notch. Toggle "Net" memberi izin permintaan HTTPS ke host yang diminta skrip.
+  - Mesin Lua 5.4 berbasis Piccolo berjalan di sandbox tanpa akses file bebas. Batas instruksi menghentikan skrip yang berulang tanpa henti.
+  - API Lua: `ui.card`, `ui.button`, `ui.text`, `ui.headline`, `ui.ranked`, `system.toast`, `system.open_url`, `system.copy`, `system.config`, `system.json_decode`, dan `system.http_get` dengan cache mengikuti `refresh_seconds` (default 60 detik).
+  - Halaman mod merender grid kartu, panel headline, dua lane peringkat, dan pesan galat skrip. Galat tidak menghentikan aplikasi.
+- Deteksi TWS dan headset Bluetooth:
+  - Perangkat audio Bluetooth yang terhubung dibaca lewat Windows Devices Enumeration.
+  - Toast berisi nama perangkat muncul saat perangkat tersambung atau terputus.
+  - Stage 1 menampilkan ikon 🎧 dan persentase baterai bila Windows menyediakan `System.Devices.BatteryLife`.
+  - Pemeriksaan berjalan di thread terpisah setiap 10 detik.
+- Indikator volume:
+  - Selama notch terlihat, mynotch menahan OSD volume Windows dan menampilkan HUD-nya sendiri.
+  - HUD muncul untuk perubahan volume dari tombol media, tombol HID laptop, scroll di notch, atau aplikasi lain.
+  - Di fullscreen yang menyembunyikan notch, OSD Windows dibiarkan tampil.
+- Contoh mod `examples/mods/ihsg-monitor/`:
+  - Mengambil 105 emiten likuid dari Yahoo Finance dalam enam permintaan berisi maksimal 20 simbol.
+  - Menampilkan top 5 gainer dan top 5 loser. Jika tidak ada emiten yang naik, lane kiri berisi lima emiten dengan penurunan paling kecil dan judulnya menjadi "Paling Tahan".
+  - Data contoh dipakai saat izin jaringan mati atau permintaan gagal.
+
+### Perbaikan dan penyempurnaan
+
+- Baris di lane peringkat mod diwarnai menurut tanda nilainya sendiri, bukan warna lane. Lane "Paling Tahan" tidak lagi menampilkan angka negatif berwarna hijau.
+- Footer Stage 1 menempatkan baterai TWS sebelum baterai laptop dan melebarkan pill sesuai isi teks.
+- Deskripsi Pengaturan Umum tidak lagi menulis versi aplikasi secara hardcode.
+- Contoh mod yang tersedia: `kurs_usd`, `counter_lua`, dan `ihsg-monitor`. Panduan pembuatan dan pengemasan mod ada di `docs/PANDUAN-MOD.md`.
 
 ---
 

@@ -28,8 +28,10 @@ fn main(){
     let preview=app::is_preview_args(&args);
     if let Err(error)=shell::run(&args){
         if let Ok(exe)=std::env::current_exe(){if let Ok(root)=app::storage_root(&exe,preview){let _=std::fs::create_dir_all(&root);let _=std::fs::write(root.join("error.log"),&error);}}
-        use windows::Win32::UI::WindowsAndMessaging::*;use windows::core::{w,PCWSTR};
-        let message:Vec<u16>=format!("mynotch tidak dapat dibuka.\n\n{error}\n\nPastikan folder aplikasi dapat ditulis.").encode_utf16().chain(Some(0)).collect();unsafe{MessageBoxW(None,PCWSTR(message.as_ptr()),w!("mynotch 0.0.1.3 alpha"),MB_OK|MB_ICONERROR);}
+        use windows::Win32::UI::WindowsAndMessaging::*;use windows::core::PCWSTR;
+        let message:Vec<u16>=format!("mynotch tidak dapat dibuka.\n\n{error}\n\nPastikan folder aplikasi dapat ditulis.").encode_utf16().chain(Some(0)).collect();
+        let title:Vec<u16>=shell::app_title().encode_utf16().chain(Some(0)).collect();
+        unsafe{MessageBoxW(None,PCWSTR(message.as_ptr()),PCWSTR(title.as_ptr()),MB_OK|MB_ICONERROR);}
         std::process::exit(1);
     }
 }

@@ -9,12 +9,18 @@ Proyek ini dikembangkan melalui proses vibe coding, terinspirasi dari aplikasi n
 mynotch menggunakan tiga tingkat tampilan:
 
 - Stage 0: bilah minimal di tepi layar saat diminimalkan.
-- Stage 1: bilah status ringkas yang menampilkan jam, status baterai laptop, serta status tab aktif (kalender, musik, atau cuaca).
+- Stage 1: bilah status ringkas yang menampilkan jam, status baterai laptop, baterai TWS/headset Bluetooth yang terhubung, serta status tab aktif (kalender, musik, atau cuaca).
 - Stage 2: panel interaktif lengkap yang terbuka saat notch diklik.
 
-Memutar roda mouse di atas bilah notch (Stage 0 dan Stage 1) mengatur volume master Windows secara langsung. Indikator angka volume dan bar level muncul sementara di layar.
+Memutar roda mouse di atas bilah notch (Stage 0 dan Stage 1) mengatur volume master Windows. Selama notch terlihat, mynotch menahan OSD volume Windows dan menampilkan HUD-nya sendiri. HUD yang sama muncul saat volume diubah dari tombol media, tombol HID laptop, atau aplikasi lain. Kalau notch disembunyikan di fullscreen, Windows kembali menampilkan OSD-nya.
 
 ## Fitur
+
+### Deteksi TWS dan headset Bluetooth
+mynotch memantau perangkat audio Bluetooth yang sedang terhubung (TWS, headset, atau speaker). Saat perangkat tersambung atau terputus, notch menampilkan notifikasi berisi nama perangkat, dan Stage 1 menampilkan ikon 🎧 beserta persentase baterai bila Windows menyediakan datanya. Pemeriksaan berjalan di latar belakang setiap 10 detik sehingga tidak mengganggu animasi notch.
+
+### Indikator volume
+mynotch membaca dan mengubah volume master lewat Core Audio. Selama notch terlihat, jendela OSD volume Windows ditahan minimized, jadi hanya HUD mynotch yang muncul. HUD dipicu oleh perubahan volume dari jalur mana pun: scroll di notch, tombol media, tombol HID laptop, atau aplikasi lain. Di fullscreen yang menyembunyikan notch, OSD Windows dibiarkan bekerja.
 
 ### Musik dan lirik
 Aplikasi terhubung dengan Windows Media Transport Controls (Spotify, YouTube Music di browser, Apple Music, dan pemutar media lainnya). Panel musik menyediakan kendali putar, jeda, lompat lagu, visualizer audio, serta lirik terjemahan atau romanisasi CJK. Pergantian lagu memunculkan status judul lagu di Stage 1 selama lima detik sebelum kembali ke tampilan awal.
@@ -36,7 +42,7 @@ Tab reminder menyediakan empat pengingat:
 Mod catatan sticky menyediakan memo cepat dengan lima pilihan warna. Catatan dapat dilepas menjadi jendela melayang di desktop (pop to desktop), disalin ke clipboard, atau diekspor ke berkas Markdown (`.md`) dan teks biasa (`.txt`).
 
 ### Sistem mod dan skrip Lua
-mynotch mendukung mod buatan komunitas yang dapat dipasang langsung dari menu Pengaturan. Pengguna dapat memilih berkas arsip `.zip` atau `.json` menggunakan tombol "Pasang Mod", atau membuka folder penyimpanan dengan tombol "Folder Mod". Mod dapat dibuat secara deklaratif lewat format JSON sederhana atau dinamis menggunakan skrip Lua 5.4 yang berjalan di lingkungan sandbox terisolasi. Panduan pembuatan mod tersedia di [Panduan Mod](docs/PANDUAN-MOD.md).
+mynotch mendukung mod buatan komunitas yang dapat dipasang langsung dari menu Pengaturan. Pengguna dapat memilih berkas arsip `.zip` atau `.json` menggunakan tombol "Impor Mod", atau membuka folder penyimpanan dengan tombol "Folder Mod". Tiap mod punya tombol Buka, Pasang/Lepas, dan Hapus, plus toggle Tab dan Net. Mod dapat dibuat secara deklaratif lewat format JSON sederhana atau dinamis menggunakan skrip Lua 5.4 yang berjalan di lingkungan sandbox terisolasi. Contoh mod tersedia di `examples/mods/`: kurs USD, counter Lua, dan monitor IHSG. Panduan pembuatan mod ada di [Panduan Mod](docs/PANDUAN-MOD.md).
 
 ### Pengelola clipboard
 Mencatat riwayat teks yang disalin secara lokal. Item dapat disematkan ke posisi teratas dengan tombol pin. Tersedia kotak pencarian teks untuk menyaring riwayat. Format sensitif dari pengelola kata sandi diabaikan otomatis.
@@ -51,7 +57,7 @@ Mencatat riwayat teks yang disalin secara lokal. Item dapat disematkan ke posisi
 
 mynotch berupa berkas portabel tanpa instalasi:
 
-1. Unduh arsip rilis `mynotch-0.0.1.2-alpha-windows-x64.zip` dari halaman [Releases](https://github.com/arwankemis/mynotch/releases).
+1. Unduh arsip rilis `mynotch-0.0.1.3-alpha-windows-x64.zip` dari halaman [Releases](https://github.com/arwankemis/mynotch/releases).
 2. Ekstrak isi ZIP ke folder pilihan Anda.
 3. Jalankan `mynotch.exe`. Simpan berkas `libunwind.dll` di folder yang sama di samping executable.
 
