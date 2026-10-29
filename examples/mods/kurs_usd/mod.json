@@ -1,0 +1,49 @@
+{
+  "id": "kurs_usd",
+  "name": "Kurs Valuta Asing",
+  "tab_name": "Kurs",
+  "description": "Pantau pergerakan kurs mata uang asing dan informasi pasar terkini.",
+  "version": "1.0.0",
+  "author": "Komunitas MyNotch",
+  "icon": "globe",
+  "mod_type": "declarative",
+  "cards": [
+    {
+      "title": "USD ke IDR",
+      "value": "Rp 16.280",
+      "subtext": "Bank Indonesia, Kurs Tengah"
+    },
+    {
+      "title": "EUR ke IDR",
+      "value": "Rp 17.650",
+      "subtext": "Pasar Spot, Stabil"
+    },
+    {
+      "title": "SGD ke IDR",
+      "value": "Rp 12.140",
+      "subtext": "Terakhir diperbarui 09:00 WIB"
+    },
+    {
+      "title": "JPY ke IDR (100)",
+      "value": "Rp 10.520",
+      "subtext": "Tren mingguan menguat"
+    }
+  ],
+  "buttons": [
+    {
+      "label": "Buka Situs BI",
+      "action": "open_url",
+      "target": "https://www.bi.go.id"
+    },
+    {
+      "label": "Salin Kurs USD",
+      "action": "copy",
+      "target": "Kurs USD saat ini: Rp 16.280 (BI)"
+    },
+    {
+      "label": "Info Pasar",
+      "action": "toast",
+      "target": "Pasar valuta terpantau stabil pada sesi perdagangan hari ini."
+    }
+  ]
+}

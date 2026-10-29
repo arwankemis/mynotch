@@ -18,6 +18,7 @@ mod clipboard;
 mod mods;
 mod sticky;
 pub mod i18n;
+pub mod mod_script;
 mod system;
 mod shell;
 
@@ -28,7 +29,7 @@ fn main(){
     if let Err(error)=shell::run(&args){
         if let Ok(exe)=std::env::current_exe(){if let Ok(root)=app::storage_root(&exe,preview){let _=std::fs::create_dir_all(&root);let _=std::fs::write(root.join("error.log"),&error);}}
         use windows::Win32::UI::WindowsAndMessaging::*;use windows::core::{w,PCWSTR};
-        let message:Vec<u16>=format!("mynotch tidak dapat dibuka.\n\n{error}\n\nPastikan folder aplikasi dapat ditulis.").encode_utf16().chain(Some(0)).collect();unsafe{MessageBoxW(None,PCWSTR(message.as_ptr()),w!("mynotch 0.0.1.2 alpha"),MB_OK|MB_ICONERROR);}
+        let message:Vec<u16>=format!("mynotch tidak dapat dibuka.\n\n{error}\n\nPastikan folder aplikasi dapat ditulis.").encode_utf16().chain(Some(0)).collect();unsafe{MessageBoxW(None,PCWSTR(message.as_ptr()),w!("mynotch 0.0.1.3 alpha"),MB_OK|MB_ICONERROR);}
         std::process::exit(1);
     }
 }

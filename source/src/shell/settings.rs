@@ -172,24 +172,49 @@ impl Shell{
     }}
     fn settings_mods(&mut self, p: &mut Painter) { unsafe {
         let lang = self.settings.language.clone();
-        let available = crate::mods::available_mods();
+        
+        let upload_lbl = crate::i18n::t("mods.upload_btn", &lang);
+        let folder_lbl = crate::i18n::t("mods.open_folder_btn", &lang);
+        self.st_button(p, upload_lbl, 196., 68., 150., Action::PickAndInstallMod, true);
+        self.st_button(p, folder_lbl, 356., 68., 130., Action::OpenModsFolder, true);
+
+        let available = crate::mods::available_mods(&self.store.root);
         for (i, m) in available.iter().enumerate() {
             let y = 116. + i as f32 * 68.;
             let installed = self.settings.installed_mods.contains(&m.id);
             p.outline_icon(&m.icon, 196., y + 10., 18., if installed { 0x6ee7b7 } else { 0xa8a8b2 });
-            let name=if m.id=="weather"{crate::i18n::t("mod.weather.name",&lang)}else{&m.name};
-            let description=if m.id=="weather"{crate::i18n::t("mod.weather.description",&lang)}else{&m.description};
-            let title = format!("{}  v{}", name, m.version);
+            let name = if m.id == "weather" { crate::i18n::t("mod.weather.name", &lang) } else { &m.name };
+            let description = if m.id == "weather" { crate::i18n::t("mod.weather.description", &lang) } else { &m.description };
+            let badge = match m.mod_type {
+                crate::mods::ModType::Builtin => "",
+                crate::mods::ModType::Declarative => " [JSON]",
+                crate::mods::ModType::Lua => " [Lua]",
+            };
+            let title = format!("{}  v{}{}", name, m.version, badge);
             p.text(&title, 224., y + 2., 180., 20., 12., FG, false);
-            p.text_ellipsis(description, 224., y + 24., 200., 16., 10., MUTED, false);
-            let btn_w = 78.;
-            let btn_x = 542. - btn_w;
+            p.text_ellipsis(description, 224., y + 24., 170., 16., 10., MUTED, false);
+
             let uninstall_lbl = if lang == "en" { "Uninstall" } else { "Lepas" };
             let install_lbl = if lang == "en" { "Install" } else { "Pasang" };
-            if installed {
-                self.st_button(p, uninstall_lbl, btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
+            let delete_lbl = crate::i18n::t("mods.delete_btn", &lang);
+
+            if m.mod_type != crate::mods::ModType::Builtin {
+                let btn_w = 64.;
+                let btn_x = 470. - btn_w;
+                if installed {
+                    self.st_button(p, uninstall_lbl, btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
+                } else {
+                    self.st_button(p, install_lbl, btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
+                }
+                self.st_button(p, delete_lbl, 478., y + 8., 64., Action::DeleteCustomMod(m.id.clone()), true);
             } else {
-                self.st_button(p, install_lbl, btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
+                let btn_w = 78.;
+                let btn_x = 542. - btn_w;
+                if installed {
+                    self.st_button(p, uninstall_lbl, btn_x, y + 8., btn_w, Action::UninstallMod(m.id.clone()), true);
+                } else {
+                    self.st_button(p, install_lbl, btn_x, y + 8., btn_w, Action::InstallMod(m.id.clone()), true);
+                }
             }
             p.fill(196., y + 56., 346., 1., 0., 0x222229);
         }

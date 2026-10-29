@@ -35,6 +35,9 @@ Tab reminder menyediakan empat pengingat:
 ### Catatan cepat
 Mod catatan sticky menyediakan memo cepat dengan lima pilihan warna. Catatan dapat dilepas menjadi jendela melayang di desktop (pop to desktop), disalin ke clipboard, atau diekspor ke berkas Markdown (`.md`) dan teks biasa (`.txt`).
 
+### Sistem mod dan skrip Lua
+mynotch mendukung mod buatan komunitas yang dapat dipasang langsung dari menu Pengaturan. Pengguna dapat memilih berkas arsip `.zip` atau `.json` menggunakan tombol "Pasang Mod", atau membuka folder penyimpanan dengan tombol "Folder Mod". Mod dapat dibuat secara deklaratif lewat format JSON sederhana atau dinamis menggunakan skrip Lua 5.4 yang berjalan di lingkungan sandbox terisolasi. Panduan pembuatan mod tersedia di [Panduan Mod](docs/PANDUAN-MOD.md).
+
 ### Pengelola clipboard
 Mencatat riwayat teks yang disalin secara lokal. Item dapat disematkan ke posisi teratas dengan tombol pin. Tersedia kotak pencarian teks untuk menyaring riwayat. Format sensitif dari pengelola kata sandi diabaikan otomatis.
 
@@ -73,6 +76,7 @@ Semua konfigurasi, catatan, dan riwayat clipboard disimpan di dalam folder `data
 ## Dokumentasi
 
 - [Panduan Pengguna](docs/PANDUAN.md): petunjuk penggunaan tiap modul dan kontrol.
+- [Panduan Pembuatan Mod](docs/PANDUAN-MOD.md): petunjuk pembuatan mod deklaratif JSON dan skrip Lua.
 - [Catatan Rilis dan Perubahan](CHANGELOG.md): riwayat perubahan tiap versi.
 - [Data dan Portabilitas](docs/PORTABILITAS.md): struktur penyimpanan data lokal dan prosedur pencadangan.
 - [Kompilasi dan Pengembangan](docs/PENGEMBANGAN.md): panduan build menggunakan Rust toolchain.

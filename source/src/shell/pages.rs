@@ -12,8 +12,10 @@ impl Shell {
             "Catatan"=>self.notes_page(p),
             "Cuaca"=>self.weather_page(p),
             _=>{
-                let msg = crate::i18n::t("shell.select_module", &self.settings.language);
-                p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
+                if !self.custom_mod_page(p) {
+                    let msg = crate::i18n::t("shell.select_module", &self.settings.language);
+                    p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
+                }
             }
         }
     }}
@@ -815,7 +817,7 @@ impl Shell {
             Action::UninstallMod(id)=>{
                 let root=self.store.root.clone();
                 match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
-                    Ok(())=>{
+                    Ok(()) => {
                         if !self.settings.enabled(&self.tab){
                             self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
                             self.make_inputs();
@@ -824,6 +826,53 @@ impl Shell {
                         self.notice(crate::i18n::t("notice.mod_uninstalled", &self.settings.language));
                     }
                     Err(e)=>self.notice(format!("Gagal melepas mod: {e}")),
+                }
+                self.invalidate();
+            },
+            Action::DeleteCustomMod(id)=>{
+                let root=self.store.root.clone();
+                match crate::mods::delete_custom_mod(&root,&mut self.settings,&id){
+                    Ok(()) => {
+                        if !self.settings.enabled(&self.tab){
+                            self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
+                            self.make_inputs();
+                        }
+                        self.save();
+                        self.notice(crate::i18n::t("notice.mod_deleted", &self.settings.language));
+                    }
+                    Err(e)=>self.notice(format!("Gagal menghapus mod: {e}")),
+                }
+                self.invalidate();
+            },
+            Action::PickAndInstallMod=>{
+                if let Some(path) = crate::system::pick_mod_file() {
+                    let root = self.store.root.clone();
+                    match crate::mods::install_mod_package(&root, &mut self.settings, &path) {
+                        Ok(manifest)=>{
+                            self.save();
+                            self.notice(format!("Mod '{}' berhasil dipasang!", manifest.name));
+                        }
+                        Err(e)=>self.notice(format!("Gagal memasang mod: {e}")),
+                    }
+                    self.invalidate();
+                }
+            },
+            Action::OpenModsFolder=>{
+                let mods_dir = self.store.root.join("mods");
+                if let Err(e) = crate::system::open_folder_in_explorer(&mods_dir) {
+                    self.notice(format!("Gagal membuka folder: {e}"));
+                }
+            },
+            Action::ModButtonClick(cmd)=>{
+                if let Some(url) = cmd.strip_prefix("url:") {
+                    crate::system::open_browser(url);
+                } else if let Some(msg) = cmd.strip_prefix("toast:") {
+                    self.notice(msg);
+                } else if let Some(txt) = cmd.strip_prefix("copy:") {
+                    crate::clipboard::set_clipboard_text(txt);
+                    self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
+                } else {
+                    self.last_mod_button_clicked = Some(cmd);
                 }
                 self.invalidate();
             },
@@ -1266,4 +1315,132 @@ impl Shell {
     }
 
 
+
+    fn draw_button(&mut self, p: &mut Painter, label: &str, x: f32, y: f32, w: f32, h: f32, action: Action) { unsafe {
+        let hover = self.pointer.is_some_and(|(px, py)| px >= x && px <= x + w && py >= y && py <= y + h);
+        p.fill(x, y, w, h, 6., if hover { 0x2e2e38 } else { 0x22222b });
+        p.stroke(x, y, w, h, 6., if hover { 0x4e4e5d } else { 0x33333f }, 1.);
+        p.text(label, x + 8., y + 7., w - 16., 16., 11., render::TEXT, false);
+        self.hit(x, y, w, h, action);
+    }}
+
+    fn custom_mod_page(&mut self, p: &mut Painter) -> bool { unsafe {
+        let root = self.store.root.clone();
+        let available = crate::mods::available_mods(&root);
+        let current_tab = self.tab.clone();
+        let manifest = match available.into_iter().find(|m| m.tab_name == current_tab || m.id == current_tab || m.name == current_tab) {
+            Some(m) => m,
+            None => return false,
+        };
+
+        // Header
+        p.outline_icon(&manifest.icon, 24., 42., 24., 0x6ee7b7);
+        let header = format!("{} v{}", manifest.name, manifest.version);
+        p.text(&header, 58., 36., 400., 22., 14., render::TEXT, false);
+        p.text_ellipsis(&manifest.description, 58., 58., 500., 18., 11., MUTED, false);
+        p.fill(24., 80., 600., 1., 0., 0x222229);
+
+        match manifest.mod_type {
+            crate::mods::ModType::Declarative => {
+                let cards = &manifest.cards;
+                let start_y = 92.;
+                for (i, card) in cards.iter().enumerate() {
+                    let col = (i % 2) as f32;
+                    let row = (i / 2) as f32;
+                    let card_w = 294.;
+                    let card_h = 68.;
+                    let x = 24. + col * (card_w + 12.);
+                    let y = start_y + row * (card_h + 10.);
+
+                    p.fill(x, y, card_w, card_h, 8., 0x16161d);
+                    p.stroke(x, y, card_w, card_h, 8., 0x2b2b36, 1.);
+                    p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., MUTED, false);
+                    p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., render::TEXT, false);
+                    if !card.subtext.is_empty() {
+                        p.text(&card.subtext, x + 12., y + 48., card_w - 24., 14., 9., MUTED, false);
+                    }
+                }
+
+                let buttons = &manifest.buttons;
+                let btn_start_y = if cards.is_empty() { start_y } else { start_y + ((cards.len() + 1) / 2) as f32 * 78. };
+                for (i, btn) in buttons.iter().enumerate() {
+                    let col = (i % 3) as f32;
+                    let row = (i / 3) as f32;
+                    let btn_w = 192.;
+                    let x = 24. + col * (btn_w + 12.);
+                    let y = btn_start_y + row * 38.;
+
+                    if btn.action == "open_url" && !btn.target.is_empty() {
+                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(format!("url:{}", btn.target)));
+                    } else if btn.action == "toast" && !btn.target.is_empty() {
+                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(format!("toast:{}", btn.target)));
+                    } else if btn.action == "copy" && !btn.target.is_empty() {
+                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(format!("copy:{}", btn.target)));
+                    } else {
+                        self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(btn.label.clone()));
+                    }
+                }
+            }
+            crate::mods::ModType::Lua => {
+                let mod_dir = crate::mods::get_mod_dir(&root, &manifest.id);
+                let script_path = mod_dir.join("main.lua");
+                let last_btn = self.last_mod_button_clicked.take();
+
+                match crate::mod_script::run_lua_mod(&script_path, last_btn.as_deref()) {
+                    Ok(output) => {
+                        for toast in output.toasts {
+                            self.notice(toast);
+                        }
+                        for url in output.urls_to_open {
+                            crate::system::open_browser(&url);
+                        }
+                        for text in output.clipboard_copies {
+                            crate::clipboard::set_clipboard_text(&text);
+                            self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
+                        }
+
+                        for t in &output.texts {
+                            p.text(&t.text, t.x, t.y, 400., 20., 11., render::TEXT, false);
+                        }
+
+                        let start_y = 92.;
+                        for (i, card) in output.cards.iter().enumerate() {
+                            let col = (i % 2) as f32;
+                            let row = (i / 2) as f32;
+                            let card_w = 294.;
+                            let card_h = 68.;
+                            let x = 24. + col * (card_w + 12.);
+                            let y = start_y + row * (card_h + 10.);
+
+                            p.fill(x, y, card_w, card_h, 8., 0x16161d);
+                            p.stroke(x, y, card_w, card_h, 8., 0x2b2b36, 1.);
+                            p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., MUTED, false);
+                            p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., render::TEXT, false);
+                            if let Some(sub) = &card.subtext {
+                                p.text(sub, x + 12., y + 48., card_w - 24., 14., 9., MUTED, false);
+                            }
+                        }
+
+                        let btn_start_y = if output.cards.is_empty() { start_y } else { start_y + ((output.cards.len() + 1) / 2) as f32 * 78. };
+                        for (i, btn) in output.buttons.iter().enumerate() {
+                            let col = (i % 3) as f32;
+                            let row = (i / 3) as f32;
+                            let btn_w = 192.;
+                            let x = 24. + col * (btn_w + 12.);
+                            let y = btn_start_y + row * 38.;
+                            self.draw_button(p, &btn.label, x, y, btn_w, 30., Action::ModButtonClick(btn.id.clone()));
+                        }
+                    }
+                    Err(err) => {
+                        p.fill(24., 96., 600., 60., 8., 0x2b1515);
+                        p.stroke(24., 96., 600., 60., 8., 0x7f2323, 1.);
+                        p.text("Kesalahan Skrip Mod Lua", 36., 104., 576., 20., 12., 0xff8888, false);
+                        p.text_ellipsis(&err, 36., 126., 576., 20., 10., 0xddaaaa, false);
+                    }
+                }
+            }
+            crate::mods::ModType::Builtin => {}
+        }
+        true
+    }}
 }

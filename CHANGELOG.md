@@ -4,6 +4,33 @@ Semua pembaruan penting dan catatan rilis untuk mynotch didokumentasikan di berk
 
 ---
 
+## [0.0.1.3 alpha] - 29 Oktober 2026
+
+Rilis 0.0.1.3 alpha menambahkan dukungan mod kustom buatan pengguna berbasis deklaratif JSON dan skrip Lua 5.4, tombol pemasang paket mod di menu Pengaturan, pintasan folder mod ke Windows Explorer, serta rendering kartu interaktif.
+
+### Fitur baru
+
+- Pemasang mod mandiri:
+  - Tombol "+ Pasang Mod" di menu Pengaturan Mod untuk memilih paket `.zip` atau berkas manifest `.json`.
+  - Ekstraksi aman paket ZIP langsung ke direktori `data/mods/` tanpa dependensi eksternal.
+  - Tombol "Folder Mod" untuk membuka direktori `data/mods/` langsung di Windows Explorer.
+  - Tombol "Hapus" pada daftar mod untuk menghapus berkas mod buatan sendiri dari disk.
+- Mesin mod skrip Lua 5.4:
+  - Mesin virtual pure Rust (Piccolo) yang berjalan di lingkungan sandbox terisolasi tanpa akses I/O file atau jaringan bebas.
+  - API antarmuka pengguna: `ui.card`, `ui.button`, dan `ui.text`.
+  - API sistem: `system.toast`, `system.open_url`, dan `system.copy`.
+  - Perlindungan perulangan tak terbatas berbasis alokasi instruksi (fuel limits).
+- Rendering dinamis tab mod:
+  - Mod yang diaktifkan otomatis terdaftar pada bar navigasi notch.
+  - Tampilan grid responsif untuk kartu ringkasan, teks kustom, dan tombol interaktif.
+  - Kotak diagnostik kesalahan skrip jika mod Lua mengalami kegagalan saat dieksekusi.
+- Berkas contoh dan dokumentasi:
+  - Contoh mod deklaratif kurs valuta asing di `examples/mods/kurs_usd/`.
+  - Contoh mod interaktif skrip Lua di `examples/mods/counter_lua/`.
+  - Buku panduan pembuatan dan pengemasan mod di `docs/PANDUAN-MOD.md`.
+
+---
+
 ## [0.0.1.2 alpha] - 28 Oktober 2026
 
 Rilis 0.0.1.2 alpha menambahkan kontrol volume master lewat scroll mouse, indikator baterai laptop, mod cuaca Open-Meteo, pencarian dan pin riwayat clipboard, opsi startup Windows, serta pemeriksa rilis GitHub.

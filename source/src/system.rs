@@ -183,6 +183,84 @@ pub fn open_browser(url: &str) {
     }
 }
 
+pub fn open_folder_in_explorer(path: &std::path::Path) -> Result<(), String> {
+    if !path.exists() {
+        let _ = std::fs::create_dir_all(path);
+    }
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let path_str = path.to_string_lossy();
+    let path_w: Vec<u16> = path_str.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let res = ShellExecuteW(
+            None,
+            windows::core::w!("explore"),
+            windows::core::PCWSTR(path_w.as_ptr()),
+            windows::core::PCWSTR::null(),
+            windows::core::PCWSTR::null(),
+            SW_SHOWNORMAL,
+        );
+        if (res.0 as usize) > 32 {
+            Ok(())
+        } else {
+            let res2 = ShellExecuteW(
+                None,
+                windows::core::w!("open"),
+                windows::core::PCWSTR(path_w.as_ptr()),
+                windows::core::PCWSTR::null(),
+                windows::core::PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+            if (res2.0 as usize) > 32 {
+                Ok(())
+            } else {
+                Err(format!("Gagal membuka explorer: {:?}", res2.0))
+            }
+        }
+    }
+}
+
+pub fn pick_mod_file() -> Option<std::path::PathBuf> {
+    use windows::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OPENFILENAMEW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR,
+        OFN_PATHMUSTEXIST,
+    };
+
+    let mut file_buf = [0u16; 1024];
+
+    let mut filter: Vec<u16> = Vec::new();
+    filter.extend("Mod Package (*.zip, *.json)\0".encode_utf16());
+    filter.extend("*.zip;*.json;*.mod.json\0".encode_utf16());
+    filter.extend("ZIP Package (*.zip)\0".encode_utf16());
+    filter.extend("*.zip\0".encode_utf16());
+    filter.extend("JSON Manifest (*.json)\0".encode_utf16());
+    filter.extend("*.json;*.mod.json\0".encode_utf16());
+    filter.extend("All Files (*.*)\0".encode_utf16());
+    filter.extend("*.*\0".encode_utf16());
+    filter.push(0);
+
+    let title: Vec<u16> = "Pilih Mod MyNotch (.zip / .json)\0".encode_utf16().collect();
+
+    let mut ofn = OPENFILENAMEW::default();
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    ofn.lpstrFilter = windows::core::PCWSTR(filter.as_ptr());
+    ofn.lpstrFile = windows::core::PWSTR(file_buf.as_mut_ptr());
+    ofn.nMaxFile = file_buf.len() as u32;
+    ofn.lpstrTitle = windows::core::PCWSTR(title.as_ptr());
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+
+    unsafe {
+        if GetOpenFileNameW(&mut ofn).as_bool() {
+            let len = file_buf.iter().position(|&c| c == 0).unwrap_or(file_buf.len());
+            let path_str = String::from_utf16_lossy(&file_buf[..len]);
+            if !path_str.trim().is_empty() {
+                return Some(std::path::PathBuf::from(path_str));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +287,15 @@ mod tests {
     fn test_open_browser_url_valid() {
         let url = "https://github.com/arwankemis/mynotch";
         assert!(url.starts_with("https://"));
+    }
+
+    #[test]
+    fn test_open_folder_creates_nonexistent() {
+        let temp_dir = std::env::temp_dir().join(format!("mynotch_test_explorer_{}", std::process::id()));
+        assert!(!temp_dir.exists());
+        let _ = open_folder_in_explorer(&temp_dir);
+        assert!(temp_dir.exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 

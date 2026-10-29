@@ -1,0 +1,11 @@
+{
+  "id": "counter_lua",
+  "name": "Pusat Kontrol Lua",
+  "tab_name": "Kontrol",
+  "description": "Contoh mod interaktif berbasis Lua dengan kartu ringkasan dan aksi tombol.",
+  "version": "1.0.0",
+  "author": "Komunitas MyNotch",
+  "icon": "terminal",
+  "mod_type": "lua",
+  "entry": "main.lua"
+}
