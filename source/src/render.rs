@@ -55,6 +55,7 @@ pub struct Painter {
     /// One layer per nesting depth. A layer object cannot be pushed twice at the same time,
     /// and the opacity scene now wraps the morph cross-fade, so pushes nest up to four deep.
     layer_pool:Vec<Option<ID2D1Layer>>,
+    pub is_warp:bool,
 }
 fn color(rgb:u32,alpha:f32)->D2D1_COLOR_F{D2D1_COLOR_F{r:((rgb>>16)&255)as f32/255.,g:((rgb>>8)&255)as f32/255.,b:(rgb&255)as f32/255.,a:alpha}}
 fn lerp_color(rgb:u32,factor:f32,alpha:f32)->D2D1_COLOR_F{
@@ -109,7 +110,8 @@ impl Painter {
         context.SetDpi(dpi,dpi);
         let brush=context.CreateSolidColorBrush(&color(TEXT,1.),None)?;
         let factory:IDWriteFactory=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8]})
+        let is_warp=preferred==D3D_DRIVER_TYPE_WARP||first.is_err();
+        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp})
     }}
     /// Binds the current back buffer as the draw target. The bitmap is rebuilt every frame on
     /// purpose: a cached D2D bitmap wrapping a swap chain buffer goes stale once that buffer
@@ -215,6 +217,112 @@ impl Painter {
             self.fill_alpha(0.,0.,width,height,radius,rgb,alpha);
         }
     }}
+    /// Material backdrop rendering hook. Supports `solid` (default fallback),
+    /// `lite`, and `adaptive`.
+    /// Falls back cleanly to solid OLED black / surface tint under WARP (software rendering),
+    /// Windows high contrast, or reduced transparency.
+    pub unsafe fn fill_notch_material(
+        &mut self,
+        width: f32,
+        height: f32,
+        ear: f32,
+        radius: f32,
+        material: &str,
+        stage: u8,
+        is_light: bool,
+        reduced_transparency: bool,
+        high_contrast: bool,
+        is_warp: bool,
+        body_bg: u32,
+    ) {
+        unsafe {
+            let mode = crate::spike::liquid_glass::MaterialMode::from_str(material);
+            let should_fallback_solid = !mode.is_glass()
+                || reduced_transparency
+                || high_contrast
+                || is_warp;
+
+            if should_fallback_solid {
+                self.fill_notch(width, height, ear, radius, body_bg);
+                return;
+            }
+
+            let config = crate::spike::liquid_glass::LiquidGlassConfig::for_stage(mode, stage, is_light);
+            if let Ok(path) = self.notch_path(width, height, ear, radius) {
+                let depth = self.layers as usize;
+                if depth < self.layer_pool.len() {
+                    if self.layer_pool[depth].is_none() {
+                        self.layer_pool[depth] = self.context.CreateLayer(None).ok();
+                    }
+                    if let Some(layer) = &self.layer_pool[depth] {
+                        let layer_params = D2D1_LAYER_PARAMETERS1 {
+                            contentBounds: rect(-ear - 4.0, -4.0, width + 2.0 * ear + 8.0, height + 8.0),
+                            geometricMask: std::mem::ManuallyDrop::new(Some(path.clone().into())),
+                            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                            maskTransform: windows_numerics::Matrix3x2 {
+                                M11: 1.0, M12: 0.0, M21: 0.0, M22: 1.0, M31: 0.0, M32: 0.0,
+                            },
+                            opacity: 1.0,
+                            opacityBrush: std::mem::ManuallyDrop::new(None),
+                            layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+                        };
+
+                        self.context.PushLayer(&layer_params, layer);
+
+                        // Backdrop tint fill
+                        self.brush.SetColor(&color(config.tint_rgb, config.tint_alpha));
+                        self.context.FillGeometry(&path, &self.brush, None);
+
+                        // Specular top highlight if active
+                        if config.specular_opacity > 0.0 {
+                            self.brush.SetColor(&color(0xffffff, config.specular_opacity * 0.4));
+                            self.context.FillRectangle(&rect(-ear, 0.0, width + 2.0 * ear, 1.5), &self.brush);
+                        }
+
+                        self.context.PopLayer();
+
+                        // Outline stroke on exact same unified contour
+                        self.brush.SetColor(&color(config.outline_rgb, config.outline_alpha));
+                        self.context.DrawGeometry(&path, &self.brush, config.outline_width, None);
+                        return;
+                    }
+                }
+            }
+
+            // Fallback if layer creation fails
+            self.fill_notch(width, height, ear, radius, body_bg);
+        }
+    }
+    pub unsafe fn fill_notch_with_settings(
+        &mut self,
+        width: f32,
+        height: f32,
+        ear: f32,
+        radius: f32,
+        settings: &crate::core::Settings,
+        stage: u8,
+        is_light: bool,
+        body_bg: u32,
+    ) {
+        unsafe {
+            let reduced = is_reduced_transparency();
+            let hc = is_high_contrast();
+            let warp = self.is_warp || settings.software_renderer;
+            self.fill_notch_material(
+                width,
+                height,
+                ear,
+                radius,
+                &settings.theme_material,
+                stage,
+                is_light,
+                reduced,
+                hc,
+                warp,
+                body_bg,
+            );
+        }
+    }
     pub unsafe fn fill_notch_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,top_rgb:u32,bottom_rgb:u32,top_alpha:f32,bottom_alpha:f32){unsafe{
         if let Ok(path)=self.notch_path(width,height,ear,radius){
             let stops=[
@@ -767,4 +875,99 @@ impl Painter {
             _=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
         }
     }}
+}
+
+pub fn is_high_contrast() -> bool {
+    unsafe {
+        #[repr(C)]
+        struct HIGHCONTRASTW {
+            cb_size: u32,
+            flags: u32,
+            default_scheme: *mut u16,
+        }
+        let mut hc = HIGHCONTRASTW {
+            cb_size: std::mem::size_of::<HIGHCONTRASTW>() as u32,
+            flags: 0,
+            default_scheme: std::ptr::null_mut(),
+        };
+        if windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_ACTION(0x0042),
+            hc.cb_size,
+            Some(&mut hc as *mut _ as *mut _),
+            windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        ).is_ok() {
+            return (hc.flags & 1) != 0;
+        }
+    }
+    false
+}
+
+pub fn is_reduced_transparency() -> bool {
+    unsafe {
+        use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, REG_DWORD, REG_VALUE_TYPE};
+        use windows::core::w;
+        let mut hkey = Default::default();
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            None,
+            KEY_READ,
+            &mut hkey,
+        ).is_ok() {
+            let mut value = 1u32;
+            let mut size = 4u32;
+            let mut val_type = REG_VALUE_TYPE(0);
+            let res = RegQueryValueExW(
+                hkey,
+                w!("EnableTransparency"),
+                None,
+                Some(&mut val_type),
+                Some(&mut value as *mut u32 as *mut u8),
+                Some(&mut size),
+            );
+            let _ = windows::Win32::System::Registry::RegCloseKey(hkey);
+            if res.is_ok() && val_type == REG_DWORD {
+                return value == 0;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_fallbacks_safe_detection() {
+        let _ = is_high_contrast();
+        let _ = is_reduced_transparency();
+    }
+
+    #[test]
+    fn test_material_mode_fallback_conditions() {
+        use crate::spike::liquid_glass::MaterialMode;
+        // Verify fallback conditions:
+        let test_fallback = |mode_str: &str, reduced: bool, hc: bool, warp: bool| -> bool {
+            let mode = MaterialMode::from_str(mode_str);
+            !mode.is_glass() || reduced || hc || warp
+        };
+
+        // Solid always falls back to solid
+        assert!(test_fallback("solid", false, false, false));
+
+        // Glass with optimal conditions stays glass
+        assert!(!test_fallback("lite", false, false, false));
+        assert!(!test_fallback("adaptive", false, false, false));
+
+        // Reduced transparency falls back to solid
+        assert!(test_fallback("adaptive", true, false, false));
+        assert!(test_fallback("lite", true, false, false));
+
+        // High contrast falls back to solid
+        assert!(test_fallback("adaptive", false, true, false));
+
+        // WARP (software rendering) falls back to solid
+        assert!(test_fallback("adaptive", false, false, true));
+    }
 }
