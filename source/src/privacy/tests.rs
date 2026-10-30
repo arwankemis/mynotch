@@ -208,3 +208,94 @@ fn test_stale_generation_rejection_in_mailbox() {
         Err(MailboxError::StaleGeneration { .. })
     ));
 }
+
+#[test]
+fn test_privacy_monitor_handle_clean_start_stop() {
+    let (tx, rx) = mailbox(1);
+    let handle = crate::privacy::PrivacyMonitorHandle::start(tx);
+    std::thread::sleep(std::time::Duration::from_millis(60));
+    let initial = rx.poll_latest();
+    assert!(initial.is_some(), "Initial snapshot should be posted on monitor start");
+    drop(handle);
+}
+
+#[test]
+fn test_stage0_geometry_override_calculation() {
+    use crate::shell::privacy::compute_stage0_geometry;
+
+    let mut snapshot = PrivacySnapshot::new(1);
+    // 1. Inactive: default 50x10 capsule
+    let inactive_geom = compute_stage0_geometry(&snapshot);
+    assert_eq!(inactive_geom.width, 50.0);
+    assert_eq!(inactive_geom.height, 10.0);
+    assert_eq!(inactive_geom.radius, 5.0);
+
+    // 2. Microphone active: expands to 88x18
+    snapshot.microphone.activity = Activity::Active;
+    let mic_geom = compute_stage0_geometry(&snapshot);
+    assert_eq!(mic_geom.width, 88.0);
+    assert_eq!(mic_geom.height, 18.0);
+    assert_eq!(mic_geom.radius, 9.0);
+
+    // 3. Multiple active (mic + camera): expands to 116x18
+    snapshot.camera.activity = Activity::Active;
+    let multi_geom = compute_stage0_geometry(&snapshot);
+    assert_eq!(multi_geom.width, 116.0);
+    assert_eq!(multi_geom.height, 18.0);
+    assert_eq!(multi_geom.radius, 9.0);
+
+    // 4. Return to inactive: restores 50x10
+    snapshot.microphone.activity = Activity::Inactive;
+    snapshot.camera.activity = Activity::Inactive;
+    let restored_geom = compute_stage0_geometry(&snapshot);
+    assert_eq!(restored_geom.width, 50.0);
+    assert_eq!(restored_geom.height, 10.0);
+    assert_eq!(restored_geom.radius, 5.0);
+}
+
+#[test]
+fn test_privacy_i18n_translation_keys_exist_for_id_and_en() {
+    use crate::i18n::t;
+
+    let keys = [
+        "privacy.title",
+        "privacy.subtitle",
+        "privacy.mic_in_use",
+        "privacy.cam_in_use",
+        "privacy.cam_detected",
+        "privacy.screen_active",
+        "privacy.share_active",
+        "privacy.record_active",
+        "privacy.no_activity",
+        "privacy.status_unknown",
+        "privacy.unavailable",
+        "privacy.limited",
+        "privacy.app_unknown",
+        "privacy.since_startup",
+        "privacy.open_settings",
+        "privacy.settings_title",
+        "privacy.settings_desc",
+        "privacy.enabled",
+        "privacy.enabled_desc",
+        "privacy.fullscreen",
+        "privacy.fullscreen_desc",
+        "privacy.app_names",
+        "privacy.app_names_desc",
+        "privacy.experimental_note",
+        "privacy.mic_note",
+        "privacy.coverage_footer",
+        "general.privacy",
+        "general.privacy.desc",
+        "general.privacy_open",
+    ];
+
+    for &key in &keys {
+        let id_val = t(key, "id");
+        let en_val = t(key, "en");
+        assert_ne!(id_val, key, "Missing Indonesian translation for key: {key}");
+        assert_ne!(en_val, key, "Missing English translation for key: {key}");
+        assert_ne!(id_val, en_val, "ID and EN translations should differ for key: {key}");
+    }
+}
+
+
