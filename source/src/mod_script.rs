@@ -6,6 +6,9 @@ use piccolo::{
     Table, UserData, Value,
 };
 
+#[cfg(test)]
+mod widget_tests;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LuaModOutput {
     pub cards: Vec<LuaCard>,
@@ -14,6 +17,9 @@ pub struct LuaModOutput {
     pub headline: Option<LuaHeadline>,
     pub ranked_left: Option<LuaRanked>,
     pub ranked_right: Option<LuaRanked>,
+    pub gauge: Option<LuaGauge>,
+    pub metrics: Option<LuaMetrics>,
+    pub history: Option<LuaHistory>,
     /// Every URL the script asked about with `system.http_get`.
     pub http_urls: Vec<String>,
     /// URLs that have no fresh cache entry yet; the shell turns these into background fetches.
@@ -21,6 +27,45 @@ pub struct LuaModOutput {
     pub toasts: Vec<String>,
     pub urls_to_open: Vec<String>,
     pub clipboard_copies: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LuaGauge {
+    pub id: String,
+    pub value: Option<f32>,
+    pub max: Option<f32>,
+    pub unit: String,
+    pub label: String,
+    pub target_label: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LuaMetricItem {
+    pub label: String,
+    pub value: String,
+    pub unit: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LuaMetrics {
+    pub items: Vec<LuaMetricItem>,
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LuaHistoryItem {
+    pub id: String,
+    pub label: String,
+    pub value: String,
+    pub meta: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LuaHistory {
+    pub title: String,
+    pub year: String,
+    pub unit: String,
+    pub items: Vec<LuaHistoryItem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +112,8 @@ pub struct LuaText {
     pub y: f32,
 }
 
+use std::path::PathBuf;
+
 #[derive(Clone, Debug, Default)]
 pub struct LuaModState {
     pub last_clicked_button: Option<String>,
@@ -74,6 +121,10 @@ pub struct LuaModState {
     pub http_allowed: bool,
     /// URL -> response body or error. The shell only passes entries that are still fresh.
     pub http_cache: BTreeMap<String, Result<String, String>>,
+    pub permissions: Vec<String>,
+    pub power_snapshot: Option<crate::system::PowerSnapshot>,
+    pub power_history: Vec<crate::mods::power_broker::MonthlyPowerHistory>,
+    pub mod_data_dir: Option<PathBuf>,
 }
 
 fn json_to_value<'gc>(ctx: piccolo::Context<'gc>, value: &serde_json::Value) -> Value<'gc> {
@@ -145,6 +196,30 @@ pub fn run_lua_mod_source_ext(
     http_allowed: bool,
     http_cache: &BTreeMap<String, Result<String, String>>,
 ) -> Result<LuaModOutput, String> {
+    run_lua_mod_source_capabilities(
+        script_bytes,
+        last_clicked_button,
+        config,
+        http_allowed,
+        http_cache,
+        &[],
+        None,
+        &[],
+        None,
+    )
+}
+
+pub fn run_lua_mod_source_capabilities(
+    script_bytes: &[u8],
+    last_clicked_button: Option<&str>,
+    config: Option<&serde_json::Value>,
+    http_allowed: bool,
+    http_cache: &BTreeMap<String, Result<String, String>>,
+    permissions: &[String],
+    power_snapshot: Option<&crate::system::PowerSnapshot>,
+    power_history: &[crate::mods::power_broker::MonthlyPowerHistory],
+    mod_data_dir: Option<&Path>,
+) -> Result<LuaModOutput, String> {
     let mut lua = Lua::core();
 
     let state = Arc::new(Mutex::new(LuaModState {
@@ -152,6 +227,10 @@ pub fn run_lua_mod_source_ext(
         output: LuaModOutput::default(),
         http_allowed,
         http_cache: http_cache.clone(),
+        permissions: permissions.to_vec(),
+        power_snapshot: power_snapshot.cloned(),
+        power_history: power_history.to_vec(),
+        mod_data_dir: mod_data_dir.map(|p| p.to_path_buf()),
     }));
 
     // Register UI & System sandbox APIs
@@ -287,6 +366,136 @@ pub fn run_lua_mod_source_ext(
         });
         ui_table.set(ctx, "ranked", cb_ranked)?;
 
+        // ui.gauge(table)
+        let cb_gauge = Callback::from_fn(&ctx, |ctx, _, stack| {
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    let arg = stack.get(0);
+                    let mut id = "gauge".to_string();
+                    let mut value = None;
+                    let mut max = None;
+                    let mut unit = "kWh".to_string();
+                    let mut label = "kWh · hari ini".to_string();
+                    let mut target_label = None;
+
+                    if let Value::Table(tbl) = arg {
+                        let id_val = tbl.get(ctx, "id");
+                        if !id_val.is_nil() { id = value_to_string(id_val); }
+                        let val_v = tbl.get(ctx, "value");
+                        if let Some(num) = val_v.to_number() { value = Some(num as f32); }
+                        let max_v = tbl.get(ctx, "max");
+                        if let Some(num) = max_v.to_number() { max = Some(num as f32); }
+                        let unit_v = tbl.get(ctx, "unit");
+                        if !unit_v.is_nil() { unit = value_to_string(unit_v); }
+                        let lbl_v = tbl.get(ctx, "label");
+                        if !lbl_v.is_nil() { label = value_to_string(lbl_v); }
+                        let tgt_v = tbl.get(ctx, "target_label");
+                        if !tgt_v.is_nil() { target_label = Some(value_to_string(tgt_v)); }
+                    }
+                    if let Ok(mut st) = arc_state.lock() {
+                        st.output.gauge = Some(LuaGauge { id, value, max, unit, label, target_label });
+                    }
+                }
+            }
+            Ok(CallbackReturn::Return)
+        });
+        ui_table.set(ctx, "gauge", cb_gauge)?;
+
+        // ui.metrics(table)
+        let cb_metrics = Callback::from_fn(&ctx, |ctx, _, stack| {
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    let arg = stack.get(0);
+                    let mut note = None;
+                    let mut items = Vec::new();
+
+                    if let Value::Table(tbl) = arg {
+                        let note_val = tbl.get(ctx, "note");
+                        if !note_val.is_nil() {
+                            note = Some(value_to_string(note_val));
+                        }
+                        let items_table = if let Value::Table(t) = tbl.get(ctx, "items") {
+                            Some(t)
+                        } else if tbl.length() > 0 {
+                            Some(tbl)
+                        } else {
+                            None
+                        };
+
+                        if let Some(items_tbl) = items_table {
+                            let len = items_tbl.length().clamp(0, 8);
+                            for i in 1..=len {
+                                if let Value::Table(item_tbl) = items_tbl.get(ctx, i) {
+                                    let label = value_to_string(item_tbl.get(ctx, "label"));
+                                    let value = value_to_string(item_tbl.get(ctx, "value"));
+                                    let unit_val = item_tbl.get(ctx, "unit");
+                                    let unit = if !unit_val.is_nil() { Some(value_to_string(unit_val)) } else { None };
+                                    items.push(LuaMetricItem { label, value, unit });
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(mut st) = arc_state.lock() {
+                        st.output.metrics = Some(LuaMetrics { items, note });
+                    }
+                }
+            }
+            Ok(CallbackReturn::Return)
+        });
+        ui_table.set(ctx, "metrics", cb_metrics)?;
+
+        // ui.history(table)
+        let cb_history = Callback::from_fn(&ctx, |ctx, _, stack| {
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    let arg = stack.get(0);
+                    let mut title = "Riwayat bulanan".to_string();
+                    let mut year = "2026".to_string();
+                    let mut unit = "kWh".to_string();
+                    let mut items = Vec::new();
+
+                    if let Value::Table(tbl) = arg {
+                        let t_val = tbl.get(ctx, "title");
+                        if !t_val.is_nil() { title = value_to_string(t_val); }
+                        let y_val = tbl.get(ctx, "year");
+                        if !y_val.is_nil() { year = value_to_string(y_val); }
+                        let u_val = tbl.get(ctx, "unit");
+                        if !u_val.is_nil() { unit = value_to_string(u_val); }
+
+                        let items_table = if let Value::Table(t) = tbl.get(ctx, "items") {
+                            Some(t)
+                        } else if tbl.length() > 0 {
+                            Some(tbl)
+                        } else {
+                            None
+                        };
+
+                        if let Some(items_tbl) = items_table {
+                            let len = items_tbl.length().clamp(0, 24);
+                            for i in 1..=len {
+                                if let Value::Table(item_tbl) = items_tbl.get(ctx, i) {
+                                    let id = value_to_string(item_tbl.get(ctx, "id"));
+                                    let label = value_to_string(item_tbl.get(ctx, "label"));
+                                    let value = value_to_string(item_tbl.get(ctx, "value"));
+                                    let meta_val = item_tbl.get(ctx, "meta");
+                                    let meta = if !meta_val.is_nil() { Some(value_to_string(meta_val)) } else { None };
+                                    items.push(LuaHistoryItem { id, label, value, meta });
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(mut st) = arc_state.lock() {
+                        st.output.history = Some(LuaHistory { title, year, unit, items });
+                    }
+                }
+            }
+            Ok(CallbackReturn::Return)
+        });
+        ui_table.set(ctx, "history", cb_history)?;
+
         ctx.set_global("ui", ui_table)?;
 
         // system table
@@ -391,7 +600,211 @@ pub fn run_lua_mod_source_ext(
         });
         sys_table.set(ctx, "http_get", cb_http_get)?;
 
+        // system.power_snapshot() -> table or nil (requires power.read)
+        let cb_power_snapshot = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let mut res = Value::Nil;
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if st.permissions.iter().any(|p| p == "power.read") {
+                            if let Some(ref snap) = st.power_snapshot {
+                                let tbl = Table::new(&ctx);
+                                let kind_str = match snap.source_kind {
+                                    crate::system::SourceKind::Measured => "measured",
+                                    crate::system::SourceKind::Estimated => "estimated",
+                                    crate::system::SourceKind::Derived => "derived",
+                                    crate::system::SourceKind::Unavailable => "unavailable",
+                                };
+                                let qual_str = match snap.quality {
+                                    crate::system::Quality::Valid => "valid",
+                                    crate::system::Quality::Stale => "stale",
+                                    crate::system::Quality::Partial => "partial",
+                                    crate::system::Quality::Disconnected => "disconnected",
+                                    crate::system::Quality::Error => "error",
+                                };
+                                let _ = tbl.set(ctx, "source_kind", Value::String(ctx.intern(kind_str.as_bytes())));
+                                let _ = tbl.set(ctx, "quality", Value::String(ctx.intern(qual_str.as_bytes())));
+                                if let Some(w) = snap.active_power_w {
+                                    let clean = (w as f64 * 1000.0).round() / 1000.0;
+                                    let _ = tbl.set(ctx, "active_power_w", Value::Number(clean));
+                                }
+                                if let Some(a) = snap.current_a {
+                                    let clean = (a as f64 * 1000.0).round() / 1000.0;
+                                    let _ = tbl.set(ctx, "current_a", Value::Number(clean));
+                                }
+                                if let Some(v) = snap.voltage_v {
+                                    let clean = (v as f64 * 1000.0).round() / 1000.0;
+                                    let _ = tbl.set(ctx, "voltage_v", Value::Number(clean));
+                                }
+                                if let Some(h) = snap.hourly_cost_idr {
+                                    let clean = (h as f64 * 1000.0).round() / 1000.0;
+                                    let _ = tbl.set(ctx, "hourly_cost_idr", Value::Number(clean));
+                                }
+                                if let Some(d) = snap.daily_cost_idr {
+                                    let clean = (d as f64 * 1000.0).round() / 1000.0;
+                                    let _ = tbl.set(ctx, "daily_cost_idr", Value::Number(clean));
+                                }
+                                if let Some(m) = snap.monthly_cost_idr {
+                                    let clean = (m as f64 * 1000.0).round() / 1000.0;
+                                    let _ = tbl.set(ctx, "monthly_cost_idr", Value::Number(clean));
+                                }
+                                let _ = tbl.set(ctx, "is_active", Value::Boolean(true));
+                                res = Value::Table(tbl);
+                            }
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(res);
+            Ok(CallbackReturn::Return)
+        });
+        sys_table.set(ctx, "power_snapshot", cb_power_snapshot)?;
+
+        // system.power_history(year) -> array table or nil (requires power.read)
+        let cb_power_history = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let mut res = Value::Nil;
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if st.permissions.iter().any(|p| p == "power.read") {
+                            let tbl = Table::new(&ctx);
+                            for (idx, hist) in st.power_history.iter().enumerate() {
+                                let item = Table::new(&ctx);
+                                let _ = item.set(ctx, "year", Value::Integer(hist.year as i64));
+                                let _ = item.set(ctx, "month", Value::Integer(hist.month as i64));
+                                let _ = item.set(ctx, "name", Value::String(ctx.intern(hist.name.as_bytes())));
+                                let _ = item.set(ctx, "total_kwh", Value::Number(hist.total_kwh as f64));
+                                let _ = item.set(ctx, "total_cost_idr", Value::Integer(hist.total_cost_idr as i64));
+                                let _ = item.set(ctx, "provenance", Value::String(ctx.intern(hist.provenance.as_bytes())));
+                                let _ = item.set(ctx, "days", Value::Integer(hist.days as i64));
+                                let _ = tbl.set(ctx, (idx + 1) as i64, Value::Table(item));
+                            }
+                            res = Value::Table(tbl);
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(res);
+            Ok(CallbackReturn::Return)
+        });
+        sys_table.set(ctx, "power_history", cb_power_history)?;
+
         ctx.set_global("system", sys_table)?;
+
+        // storage table
+        let storage_table = Table::new(&ctx);
+        let self_table = Table::new(&ctx);
+
+        let cb_storage_get = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let key = value_to_string(stack.get(0));
+            let mut val = Value::Nil;
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if st.permissions.iter().any(|p| p == "storage.self") {
+                            if let Some(ref dir) = st.mod_data_dir {
+                                let safe = if crate::mods::safe_mod_id(&key) { key } else { "val".to_string() };
+                                let file = dir.join(format!("{safe}.txt"));
+                                if let Ok(txt) = std::fs::read_to_string(&file) {
+                                    val = Value::String(ctx.intern(txt.as_bytes()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(val);
+            Ok(CallbackReturn::Return)
+        });
+        self_table.set(ctx, "get", cb_storage_get)?;
+
+        let cb_storage_set = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let key = value_to_string(stack.get(0));
+            let text = value_to_string(stack.get(1));
+            let mut ok = false;
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if st.permissions.iter().any(|p| p == "storage.self") {
+                            if let Some(ref dir) = st.mod_data_dir {
+                                if std::fs::create_dir_all(dir).is_ok() {
+                                    let safe = if crate::mods::safe_mod_id(&key) { key } else { "val".to_string() };
+                                    let file = dir.join(format!("{safe}.txt"));
+                                    ok = std::fs::write(&file, text.as_bytes()).is_ok();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(Value::Boolean(ok));
+            Ok(CallbackReturn::Return)
+        });
+        self_table.set(ctx, "set", cb_storage_set)?;
+
+        let cb_storage_get_json = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let key = value_to_string(stack.get(0));
+            let mut val = Value::Nil;
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if st.permissions.iter().any(|p| p == "storage.self") {
+                            if let Some(ref dir) = st.mod_data_dir {
+                                let safe = if crate::mods::safe_mod_id(&key) { key } else { "val".to_string() };
+                                let file = dir.join(format!("{safe}.json"));
+                                if let Ok(txt) = std::fs::read_to_string(&file) {
+                                    if let Ok(decoded) = serde_json::from_str::<serde_json::Value>(&txt) {
+                                        val = json_to_value(ctx, &decoded);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(val);
+            Ok(CallbackReturn::Return)
+        });
+        self_table.set(ctx, "get_json", cb_storage_get_json)?;
+
+        let cb_storage_set_json = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let key = value_to_string(stack.get(0));
+            let text = value_to_string(stack.get(1));
+            let mut ok = false;
+            let state_val = ctx.get_global("__mod_state");
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if st.permissions.iter().any(|p| p == "storage.self") {
+                            if let Some(ref dir) = st.mod_data_dir {
+                                if std::fs::create_dir_all(dir).is_ok() {
+                                    let safe = if crate::mods::safe_mod_id(&key) { key } else { "val".to_string() };
+                                    let file = dir.join(format!("{safe}.json"));
+                                    ok = std::fs::write(&file, text.as_bytes()).is_ok();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(Value::Boolean(ok));
+            Ok(CallbackReturn::Return)
+        });
+        self_table.set(ctx, "set_json", cb_storage_set_json)?;
+
+        storage_table.set(ctx, "self", self_table)?;
+        ctx.set_global("storage", storage_table)?;
 
         Ok(())
     }).map_err(|e| format!("Gagal menginisialisasi sandbox Lua: {e:?}"))?;

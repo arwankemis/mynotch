@@ -700,6 +700,29 @@ impl Painter {
         self.polyline(&points,rgb,4.,false);
         for &(cx,cy) in [points[0],points[n]].iter(){self.fill(cx-2.,cy-2.,4.,4.,2.,rgb);}
     }}
+    pub unsafe fn draw_gauge_arc(&self, cx: f32, cy: f32, r: f32, ratio: f32, track_rgb: u32, fill_rgb: u32, thickness: f32) { unsafe {
+        use std::f32::consts::PI;
+        let start_a = 135.0 * PI / 180.0;
+        let total_a = 270.0 * PI / 180.0;
+
+        let n = 48;
+        let track_points: Vec<_> = (0..=n).map(|i| {
+            let a = start_a + total_a * (i as f32 / n as f32);
+            (cx + a.cos() * r, cy + a.sin() * r)
+        }).collect();
+        self.polyline(&track_points, track_rgb, thickness, false);
+
+        let ratio = ratio.clamp(0.0, 1.0);
+        if ratio > 0.0 {
+            let progress_a = total_a * ratio;
+            let m = ((ratio * 48.0).ceil() as usize).max(2);
+            let prog_points: Vec<_> = (0..=m).map(|i| {
+                let a = start_a + progress_a * (i as f32 / m as f32);
+                (cx + a.cos() * r, cy + a.sin() * r)
+            }).collect();
+            self.polyline(&prog_points, fill_rgb, thickness + 1.0, false);
+        }
+    }}
     pub unsafe fn outline_icon(&self,name:&str,x:f32,y:f32,size:f32,rgb:u32){unsafe{
         let k=size/24.;let line=|ps:&[(f32,f32)]|{let ps:Vec<_>=ps.iter().map(|&(a,b)|(x+a*k,y+b*k)).collect();self.polyline(&ps,rgb,1.6*k,false);};
         let circle=|a:f32,b:f32,r:f32|self.circle_outline(x+a*k,y+b*k,r*k,rgb,1.6*k);

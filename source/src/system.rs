@@ -507,6 +507,173 @@ mod tests {
         assert!(temp_dir.exists());
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_power_snapshot_default_is_unavailable() {
+        let snapshot = PowerSnapshot::default();
+        assert_eq!(snapshot.source_kind, SourceKind::Unavailable);
+        assert!(snapshot.active_power_w.is_none());
+    }
+
+    #[test]
+    fn test_calculate_power_snapshot() {
+        let snap = calculate_power(0.5, 0.2);
+        assert_eq!(snap.source_kind, SourceKind::Estimated);
+        assert_eq!(snap.quality, Quality::Valid);
+        assert!(snap.active_power_w.is_some());
+        assert!(snap.current_a.is_none());
+        assert!(snap.voltage_v.is_none());
+        assert!(snap.cpu_name.is_none());
+        assert!(snap.gpu_name.is_none());
+        assert!(snap.cpu_watts.unwrap() > 15.0);
+        assert!(snap.gpu_watts.unwrap() > 10.0);
+        assert!(snap.total_ac_watts.unwrap() > snap.total_dc_watts.unwrap());
+        assert!(snap.hourly_cost_idr.unwrap() > 0.0);
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct CpuSampler {
+    prev_idle: u64,
+    prev_total: u64,
+    last_usage: f32,
+}
+
+impl CpuSampler {
+    pub fn sample(&mut self) -> f32 {
+        unsafe {
+            use windows::Win32::Foundation::FILETIME;
+            use windows::Win32::System::Threading::GetSystemTimes;
+
+            let mut idle = FILETIME::default();
+            let mut kernel = FILETIME::default();
+            let mut user = FILETIME::default();
+            if GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)).is_ok() {
+                let idle_val = ((idle.dwHighDateTime as u64) << 32) | (idle.dwLowDateTime as u64);
+                let kernel_val = ((kernel.dwHighDateTime as u64) << 32) | (kernel.dwLowDateTime as u64);
+                let user_val = ((user.dwHighDateTime as u64) << 32) | (user.dwLowDateTime as u64);
+                let total_val = kernel_val + user_val;
+
+                if self.prev_total > 0 && total_val > self.prev_total {
+                    let total_delta = total_val - self.prev_total;
+                    let idle_delta = idle_val.saturating_sub(self.prev_idle);
+                    if total_delta > 0 {
+                        let usage = 1.0 - (idle_delta as f32 / total_delta as f32);
+                        self.last_usage = usage.clamp(0.0, 1.0);
+                    }
+                }
+                self.prev_idle = idle_val;
+                self.prev_total = total_val;
+            }
+        }
+        self.last_usage
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceKind {
+    Measured,
+    Estimated,
+    Derived,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Quality {
+    Valid,
+    Stale,
+    Partial,
+    Disconnected,
+    Error,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PowerSample {
+    pub provider_id: String,
+    pub device_id: String,
+    pub sequence: u64,
+    pub timestamp_secs: i64,
+    pub monotonic_ms: u64,
+    pub source_kind: SourceKind,
+    pub quality: Quality,
+    pub active_power_w: Option<f32>,
+    pub current_a: Option<f32>,
+    pub voltage_v: Option<f32>,
+    pub cumulative_energy_kwh: Option<f64>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PowerSnapshot {
+    pub source_kind: SourceKind,
+    pub quality: Quality,
+    pub active_power_w: Option<f32>,
+    pub current_a: Option<f32>,
+    pub voltage_v: Option<f32>,
+    pub cpu_watts: Option<f32>,
+    pub gpu_watts: Option<f32>,
+    pub rest_watts: Option<f32>,
+    pub total_dc_watts: Option<f32>,
+    pub total_ac_watts: Option<f32>,
+    pub cpu_name: Option<String>,
+    pub gpu_name: Option<String>,
+    pub hourly_cost_idr: Option<f32>,
+    pub daily_cost_idr: Option<f32>,
+    pub monthly_cost_idr: Option<f32>,
+}
+
+impl Default for PowerSnapshot {
+    fn default() -> Self {
+        Self {
+            source_kind: SourceKind::Unavailable,
+            quality: Quality::Disconnected,
+            active_power_w: None,
+            current_a: None,
+            voltage_v: None,
+            cpu_watts: None,
+            gpu_watts: None,
+            rest_watts: None,
+            total_dc_watts: None,
+            total_ac_watts: None,
+            cpu_name: None,
+            gpu_name: None,
+            hourly_cost_idr: None,
+            daily_cost_idr: None,
+            monthly_cost_idr: None,
+        }
+    }
+}
+
+pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
+    let cpu_watts = (15.0 + cpu_usage * 65.0).clamp(10.0, 120.0);
+    let gpu_watts = (10.0 + gpu_usage * 150.0).clamp(5.0, 250.0);
+    let rest_watts = 25.0;
+    let total_dc = cpu_watts + gpu_watts + rest_watts;
+    let total_ac = total_dc / 0.90;
+    let tariff_per_kwh = 1444.70;
+    let hourly_cost = (total_ac / 1000.0) * tariff_per_kwh;
+    let daily_cost = hourly_cost * 24.0;
+    let monthly_cost = daily_cost * 30.0;
+
+    PowerSnapshot {
+        source_kind: SourceKind::Estimated,
+        quality: Quality::Valid,
+        active_power_w: Some(total_ac),
+        current_a: None,
+        voltage_v: None,
+        cpu_watts: Some(cpu_watts),
+        gpu_watts: Some(gpu_watts),
+        rest_watts: Some(rest_watts),
+        total_dc_watts: Some(total_dc),
+        total_ac_watts: Some(total_ac),
+        cpu_name: None,
+        gpu_name: None,
+        hourly_cost_idr: Some(hourly_cost),
+        daily_cost_idr: Some(daily_cost),
+        monthly_cost_idr: Some(monthly_cost),
+    }
 }
 
 
