@@ -56,8 +56,15 @@ pub struct Painter {
     /// and the opacity scene now wraps the morph cross-fade, so pushes nest up to four deep.
     layer_pool:Vec<Option<ID2D1Layer>>,
     pub is_warp:bool,
+    path_cache:std::cell::RefCell<Option<([f32;5],ID2D1PathGeometry)>>,
+    sheen:Option<ID2D1LinearGradientBrush>,
 }
-fn color(rgb:u32,alpha:f32)->D2D1_COLOR_F{D2D1_COLOR_F{r:((rgb>>16)&255)as f32/255.,g:((rgb>>8)&255)as f32/255.,b:(rgb&255)as f32/255.,a:alpha}}
+/// Light (Terang) palette switch. Every generic draw call goes through `color`, which applies the shared
+/// token map, so text, icons, buttons, sliders, cards, tabs, tooltips and toasts follow one palette.
+pub static LIGHT_UI:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+fn color(rgb:u32,alpha:f32)->D2D1_COLOR_F{raw_color(crate::glass::map_token(rgb,LIGHT_UI.load(std::sync::atomic::Ordering::Relaxed)),alpha)}
+/// Unmapped colour: material tint/outline/sheen already carry their own light/dark values.
+fn raw_color(rgb:u32,alpha:f32)->D2D1_COLOR_F{D2D1_COLOR_F{r:((rgb>>16)&255)as f32/255.,g:((rgb>>8)&255)as f32/255.,b:(rgb&255)as f32/255.,a:alpha}}
 fn lerp_color(rgb:u32,factor:f32,alpha:f32)->D2D1_COLOR_F{
     let f=factor.clamp(0.0,1.0);
     D2D1_COLOR_F{
@@ -111,7 +118,7 @@ impl Painter {
         let brush=context.CreateSolidColorBrush(&color(TEXT,1.),None)?;
         let factory:IDWriteFactory=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let is_warp=preferred==D3D_DRIVER_TYPE_WARP||first.is_err();
-        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp})
+        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),sheen:None})
     }}
     /// Binds the current back buffer as the draw target. The bitmap is rebuilt every frame on
     /// purpose: a cached D2D bitmap wrapping a swap chain buffer goes stale once that buffer
@@ -174,25 +181,27 @@ impl Painter {
         if !self.formats.contains_key(&key){if let Ok(format)=self.factory.CreateTextFormat(w!("Segoe UI"),None,DWRITE_FONT_WEIGHT_LIGHT,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,w!("id-ID")){self.formats.insert(key,format);}}
         if let Some(format)=self.formats.get(&key){let text:Vec<u16>=text.encode_utf16().collect();self.brush.SetColor(&color(rgb,1.));self.context.DrawText(&text,format,&rect(x,y,width,height),&self.brush,D2D1_DRAW_TEXT_OPTIONS_CLIP,DWRITE_MEASURING_MODE_NATURAL);}
     }}
-    /// Builds the unified symmetrical concave ear contour path geometry.
-    /// Concave Béziers transition smoothly from the top screen edge to the body walls.
-    pub unsafe fn notch_path(&self,width:f32,height:f32,ear:f32,radius:f32)->Result<ID2D1PathGeometry>{unsafe{
+    /// Builds the unified notch contour as Direct2D geometry from `glass::notch_contour`, the same
+    /// list the window-region polygon is flattened from. The last geometry is cached: at rest
+    /// (and for every repaint inside one morph frame) it is built exactly once.
+    pub unsafe fn contour_path(&self,width:f32,height:f32,ear:f32,radius:f32,round_top:bool)->Result<ID2D1PathGeometry>{unsafe{
+        let key=[width,height,ear,radius,if round_top{1.}else{0.}];
+        if let Some((k,g))=self.path_cache.borrow().as_ref(){if *k==key{return Ok(g.clone())}}
+        let contour=crate::glass::notch_contour(width,height,ear,radius,round_top);
         let path=self.d2d.CreatePathGeometry()?;
         let sink=path.Open()?;
-        sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
-        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
-        sink.AddLine(pt(0.,height-radius));
-        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
-        sink.AddLine(pt(width-radius,height));
-        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
-        sink.AddLine(pt(width,ear));
-        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
-        sink.AddLine(pt(-ear,0.));
+        sink.BeginFigure(pt(contour.start.0,contour.start.1),D2D1_FIGURE_BEGIN_FILLED);
+        for seg in &contour.segs{match *seg{
+            crate::glass::Seg::Line(p)=>sink.AddLine(pt(p.0,p.1)),
+            crate::glass::Seg::Bezier(a,b,c)=>sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(a.0,a.1),point2:pt(b.0,b.1),point3:pt(c.0,c.1)}),
+        }}
         sink.EndFigure(D2D1_FIGURE_END_CLOSED);
         sink.Close()?;
-        Ok(path.into())
+        let path:ID2D1PathGeometry=path.into();
+        *self.path_cache.borrow_mut()=Some((key,path.clone()));
+        Ok(path)
     }}
-
+    pub unsafe fn notch_path(&self,width:f32,height:f32,ear:f32,radius:f32)->Result<ID2D1PathGeometry>{unsafe{self.contour_path(width,height,ear,radius,false)}}
     /// Border stroke using the exact unified notch contour path geometry.
     #[allow(dead_code)]
     pub unsafe fn stroke_notch(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32,alpha:f32,thickness:f32){unsafe{
@@ -217,113 +226,43 @@ impl Painter {
             self.fill_alpha(0.,0.,width,height,radius,rgb,alpha);
         }
     }}
-    /// Material backdrop rendering hook. Supports `solid` (default fallback),
-    /// `lite`, and `adaptive`.
-    /// Falls back cleanly to solid OLED black / surface tint under WARP (software rendering),
-    /// Windows high contrast, or reduced transparency.
-    pub unsafe fn fill_notch_material(
-        &mut self,
-        width: f32,
-        height: f32,
-        ear: f32,
-        radius: f32,
-        material: &str,
-        stage: u8,
-        is_light: bool,
-        reduced_transparency: bool,
-        high_contrast: bool,
-        is_warp: bool,
-        body_bg: u32,
-    ) {
-        unsafe {
-            let mode = crate::spike::liquid_glass::MaterialMode::from_str(material);
-            let should_fallback_solid = !mode.is_glass()
-                || reduced_transparency
-                || high_contrast
-                || is_warp;
-
-            if should_fallback_solid {
-                self.fill_notch(width, height, ear, radius, body_bg);
-                return;
+    /// Liquid Glass body: tint + sheen clipped by the one contour (alpha mask), then the outline
+    /// stroked on that same geometry. The blur itself comes from DWM behind the window region
+    /// (see `glass::apply_backdrop`); nothing here samples or captures the desktop. Text and icons
+    /// are drawn afterwards in the shell, unscaled and unblurred.
+    pub unsafe fn fill_notch_glass(&mut self,width:f32,height:f32,ear:f32,radius:f32,round_top:bool,config:&crate::glass::LiquidGlassConfig)->bool{unsafe{
+        let Ok(path)=self.contour_path(width,height,ear,radius,round_top) else{return false};
+        let depth=self.layers as usize;
+        if depth>=self.layer_pool.len(){return false}
+        if self.layer_pool[depth].is_none(){self.layer_pool[depth]=self.context.CreateLayer(None).ok();}
+        let Some(layer)=self.layer_pool[depth].clone() else{return false};
+        let params=D2D1_LAYER_PARAMETERS1{
+            contentBounds:rect(-ear-4.,-4.,width+2.*ear+8.,height+8.),
+            geometricMask:std::mem::ManuallyDrop::new(Some(path.clone().into())),
+            maskAntialiasMode:D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            maskTransform:windows_numerics::Matrix3x2{M11:1.,M12:0.,M21:0.,M22:1.,M31:0.,M32:0.},
+            opacity:1.,opacityBrush:std::mem::ManuallyDrop::new(None),layerOptions:D2D1_LAYER_OPTIONS1_NONE,
+        };
+        self.context.PushLayer(&params,&layer);
+        self.brush.SetColor(&raw_color(config.tint_rgb,config.tint_alpha));
+        self.context.FillGeometry(&path,&self.brush,None);
+        if config.sheen>0.{
+            if self.sheen.is_none(){
+                let stops=[D2D1_GRADIENT_STOP{position:0.,color:raw_color(0xffffff,1.)},D2D1_GRADIENT_STOP{position:1.,color:raw_color(0xffffff,0.)}];
+                let rt:Result<ID2D1RenderTarget>=self.context.cast();
+                self.sheen=rt.and_then(|rt|rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP).and_then(|s|rt.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{startPoint:pt(0.,0.),endPoint:pt(0.,1.)},None,&s))).ok();
             }
-
-            let config = crate::spike::liquid_glass::LiquidGlassConfig::for_stage(mode, stage, is_light);
-            if let Ok(path) = self.notch_path(width, height, ear, radius) {
-                let depth = self.layers as usize;
-                if depth < self.layer_pool.len() {
-                    if self.layer_pool[depth].is_none() {
-                        self.layer_pool[depth] = self.context.CreateLayer(None).ok();
-                    }
-                    if let Some(layer) = &self.layer_pool[depth] {
-                        let layer_params = D2D1_LAYER_PARAMETERS1 {
-                            contentBounds: rect(-ear - 4.0, -4.0, width + 2.0 * ear + 8.0, height + 8.0),
-                            geometricMask: std::mem::ManuallyDrop::new(Some(path.clone().into())),
-                            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                            maskTransform: windows_numerics::Matrix3x2 {
-                                M11: 1.0, M12: 0.0, M21: 0.0, M22: 1.0, M31: 0.0, M32: 0.0,
-                            },
-                            opacity: 1.0,
-                            opacityBrush: std::mem::ManuallyDrop::new(None),
-                            layerOptions: D2D1_LAYER_OPTIONS1_NONE,
-                        };
-
-                        self.context.PushLayer(&layer_params, layer);
-
-                        // Backdrop tint fill
-                        self.brush.SetColor(&color(config.tint_rgb, config.tint_alpha));
-                        self.context.FillGeometry(&path, &self.brush, None);
-
-                        // Specular top highlight if active
-                        if config.specular_opacity > 0.0 {
-                            self.brush.SetColor(&color(0xffffff, config.specular_opacity * 0.4));
-                            self.context.FillRectangle(&rect(-ear, 0.0, width + 2.0 * ear, 1.5), &self.brush);
-                        }
-
-                        self.context.PopLayer();
-
-                        // Outline stroke on exact same unified contour
-                        self.brush.SetColor(&color(config.outline_rgb, config.outline_alpha));
-                        self.context.DrawGeometry(&path, &self.brush, config.outline_width, None);
-                        return;
-                    }
-                }
+            if let Some(b)=&self.sheen{
+                b.SetStartPoint(pt(width*0.5,0.));b.SetEndPoint(pt(width*0.5,(height*0.55).max(8.)));
+                b.SetOpacity(if config.is_light{config.sheen*0.9}else{config.sheen});
+                self.context.FillGeometry(&path,b,None);
             }
-
-            // Fallback if layer creation fails
-            self.fill_notch(width, height, ear, radius, body_bg);
         }
-    }
-    pub unsafe fn fill_notch_with_settings(
-        &mut self,
-        width: f32,
-        height: f32,
-        ear: f32,
-        radius: f32,
-        settings: &crate::core::Settings,
-        stage: u8,
-        is_light: bool,
-        body_bg: u32,
-    ) {
-        unsafe {
-            let reduced = is_reduced_transparency();
-            let hc = is_high_contrast();
-            let warp = self.is_warp || settings.software_renderer;
-            self.fill_notch_material(
-                width,
-                height,
-                ear,
-                radius,
-                &settings.theme_material,
-                stage,
-                is_light,
-                reduced,
-                hc,
-                warp,
-                body_bg,
-            );
-        }
-    }
-    pub unsafe fn fill_notch_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,top_rgb:u32,bottom_rgb:u32,top_alpha:f32,bottom_alpha:f32){unsafe{
+        self.context.PopLayer();
+        self.brush.SetColor(&raw_color(config.outline_rgb,config.outline_alpha));
+        self.context.DrawGeometry(&path,&self.brush,config.outline_width,None);
+        true
+    }}    pub unsafe fn fill_notch_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,top_rgb:u32,bottom_rgb:u32,top_alpha:f32,bottom_alpha:f32){unsafe{
         if let Ok(path)=self.notch_path(width,height,ear,radius){
             let stops=[
                 D2D1_GRADIENT_STOP{position:0.0,color:color(top_rgb,top_alpha)},
@@ -942,32 +881,5 @@ mod tests {
     fn test_system_fallbacks_safe_detection() {
         let _ = is_high_contrast();
         let _ = is_reduced_transparency();
-    }
-
-    #[test]
-    fn test_material_mode_fallback_conditions() {
-        use crate::spike::liquid_glass::MaterialMode;
-        // Verify fallback conditions:
-        let test_fallback = |mode_str: &str, reduced: bool, hc: bool, warp: bool| -> bool {
-            let mode = MaterialMode::from_str(mode_str);
-            !mode.is_glass() || reduced || hc || warp
-        };
-
-        // Solid always falls back to solid
-        assert!(test_fallback("solid", false, false, false));
-
-        // Glass with optimal conditions stays glass
-        assert!(!test_fallback("lite", false, false, false));
-        assert!(!test_fallback("adaptive", false, false, false));
-
-        // Reduced transparency falls back to solid
-        assert!(test_fallback("adaptive", true, false, false));
-        assert!(test_fallback("lite", true, false, false));
-
-        // High contrast falls back to solid
-        assert!(test_fallback("adaptive", false, true, false));
-
-        // WARP (software rendering) falls back to solid
-        assert!(test_fallback("adaptive", false, false, true));
     }
 }
