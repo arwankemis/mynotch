@@ -11,6 +11,7 @@
 //! the shell drops this painter; the next frame rebuilds the whole stack from scratch.
 
 use std::collections::BTreeMap;
+mod host;
 use windows::core::{w, Interface, Result};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::*;
@@ -40,9 +41,8 @@ pub struct Painter {
     _device:ID3D11Device,
     _immediate:ID3D11DeviceContext,
     swap_chain:IDXGISwapChain3,
-    _composition:IDCompositionDevice,
-    _comp_target:IDCompositionTarget,
-    _visual:IDCompositionVisual,
+    _legacy_composition:Option<(IDCompositionDevice,IDCompositionTarget,IDCompositionVisual)>,
+    host:Option<host::HostComposition>,
     context:ID2D1DeviceContext,
     artwork:Option<ID2D1Bitmap1>,artwork_key:u64,
     factory:IDWriteFactory,
@@ -105,12 +105,16 @@ impl Painter {
             AlphaMode:DXGI_ALPHA_MODE_PREMULTIPLIED,Flags:0,
         };
         let swap_chain:IDXGISwapChain3=factory.CreateSwapChainForComposition(&device,&description,None)?.cast()?;
-        let composition:IDCompositionDevice=DCompositionCreateDevice(&dxgi_device)?;
-        let comp_target=composition.CreateTargetForHwnd(hwnd,true)?;
-        let visual=composition.CreateVisual()?;
-        visual.SetContent(&swap_chain)?;
-        comp_target.SetRoot(&visual)?;
-        composition.Commit()?;
+        let host=match host::HostComposition::new(hwnd,&swap_chain,width,height){Ok(h)=>Some(h),Err(e)=>{eprintln!("Host backdrop unavailable; Solid fallback: {e}");None}};
+        let legacy=if host.is_none(){
+            let composition:IDCompositionDevice=DCompositionCreateDevice(&dxgi_device)?;
+            let comp_target=composition.CreateTargetForHwnd(hwnd,true)?;
+            let visual=composition.CreateVisual()?;
+            visual.SetContent(&swap_chain)?;
+            comp_target.SetRoot(&visual)?;
+            composition.Commit()?;
+            Some((composition,comp_target,visual))
+        }else{None};
         let d2d:ID2D1Factory1=D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,None)?;
         let d2d_device=d2d.CreateDevice(&dxgi_device)?;
         let context=d2d_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
@@ -118,7 +122,7 @@ impl Painter {
         let brush=context.CreateSolidColorBrush(&color(TEXT,1.),None)?;
         let factory:IDWriteFactory=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let is_warp=preferred==D3D_DRIVER_TYPE_WARP||first.is_err();
-        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_composition:composition,_comp_target:comp_target,_visual:visual,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),sheen:None})
+        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_legacy_composition:legacy,host,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),sheen:None})
     }}
     /// Binds the current back buffer as the draw target. The bitmap is rebuilt every frame on
     /// purpose: a cached D2D bitmap wrapping a swap chain buffer goes stale once that buffer
@@ -144,6 +148,18 @@ impl Painter {
         self.context.SetTarget(None);
         let _=self.swap_chain.ResizeBuffers(0,width.max(1),height.max(1),DXGI_FORMAT_B8G8R8A8_UNORM,DXGI_SWAP_CHAIN_FLAG(0));
         self.context.SetDpi(dpi,dpi);
+        if let Some(host)=&mut self.host{let _=host.resize(width,height);}
+    }}
+    pub fn host_backdrop_supported(&self)->bool{self.host.is_some()}
+    pub unsafe fn sync_backdrop(&mut self,key:[f32;8],enabled:bool)->Result<()>{unsafe{
+        let [w,h,ear,radius,round,ox,oy,scale]=key;
+        if !enabled {if let Some(host)=&self.host{host.visible(false)?;}return Ok(())}
+        if self.host.as_ref().is_some_and(|h|!h.needs_contour(key)){return self.host.as_ref().unwrap().visible(true)}
+        let path=self.contour_path(w,h,ear,radius,round>0.)?;
+        let matrix=windows_numerics::Matrix3x2{M11:scale,M12:0.,M21:0.,M22:scale,M31:ox*scale,M32:oy*scale};
+        let geometry=self.d2d.CreateTransformedGeometry(&path,&matrix)?;
+        if let Some(host)=&mut self.host{host.contour(geometry.cast()?,key,true)?;}
+        Ok(())
     }}
     /// Clears to transparent: the capsule silhouette is drawn by the shell, not clipped by a
     /// region, so everything outside it stays see-through.
@@ -228,7 +244,7 @@ impl Painter {
     }}
     /// Liquid Glass body: tint + sheen clipped by the one contour (alpha mask), then the outline
     /// stroked on that same geometry. The blur itself comes from DWM behind the window region
-    /// (see `glass::apply_backdrop`); nothing here samples or captures the desktop. Text and icons
+    /// (see `render::host::HostComposition`); nothing here samples or captures the desktop. Text and icons
     /// are drawn afterwards in the shell, unscaled and unblurred.
     pub unsafe fn fill_notch_glass(&mut self,width:f32,height:f32,ear:f32,radius:f32,round_top:bool,config:&crate::glass::LiquidGlassConfig)->bool{unsafe{
         let Ok(path)=self.contour_path(width,height,ear,radius,round_top) else{return false};

@@ -18,8 +18,7 @@ pub fn is_allowed_download_host(host: &str) -> bool {
         || lower == "objects.githubusercontent.com"
         || lower == "raw.githubusercontent.com"
         || lower == "github-releases.githubusercontent.com"
-        || lower.ends_with(".github.com")
-        || lower.ends_with(".githubusercontent.com")
+        || lower == "release-assets.githubusercontent.com"
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +75,11 @@ pub fn download_to_file<F>(
 where
     F: FnMut(u64, Option<u64>),
 {
+    // Discovery has not yet supplied an authenticated release manifest. Never let
+    // a missing digest silently turn a program update into an unchecked install.
+    let expected_sha256 = expected_sha256
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or("Pembaruan otomatis belum tersedia: paket belum memiliki SHA-256 yang valid. Aplikasi lama tetap digunakan.")?;
     if let Some(parent) = part_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Gagal membuat direktori download: {e}"))?;
     }
@@ -123,7 +127,8 @@ where
     };
 
     // Verify SHA-256 if expected
-    if let Some(expected) = expected_sha256 {
+    {
+        let expected = expected_sha256;
         let actual_hash = super::crypto::hash_file_hex(part_path)
             .map_err(|e| format!("Gagal memverifikasi hash berkas unduhan: {e}"))?;
         if !actual_hash.eq_ignore_ascii_case(expected.trim()) {
@@ -382,6 +387,20 @@ mod tests {
         assert!(!is_allowed_download_host("evil.com"));
         assert!(!is_allowed_download_host("github.com.evil.com"));
         assert!(!is_allowed_download_host("notgithub.com"));
+        assert!(!is_allowed_download_host("arbitrary.githubusercontent.com"));
+        assert!(!is_allowed_download_host("arbitrary.github.com"));
+    }
+
+    #[test]
+    fn missing_or_malformed_digest_rejected_before_any_io() {
+        let dir = std::env::temp_dir().join(format!("mynotch-no-io-{}", std::process::id()));
+        assert!(!dir.exists());
+        for digest in [None, Some(""), Some("sha256:abc"), Some("not-a-hash")] {
+            let result = download_to_file("invalid-url", &dir.join("part"), &dir.join("final"),
+                digest, &Cancellation::default(), |_, _| panic!("must not download"));
+            assert!(result.unwrap_err().contains("SHA-256"));
+            assert!(!dir.exists(), "reject before creating staging files");
+        }
     }
 
     #[test]

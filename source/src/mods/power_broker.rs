@@ -102,10 +102,8 @@ pub fn load_monthly_history(root: &Path, year: i32) -> Vec<MonthlyPowerHistory> 
 pub fn save_monthly_history(root: &Path, history: &MonthlyPowerHistory) -> Result<(), String> {
     let year_dir = get_history_dir(root).join(history.year.to_string());
     std::fs::create_dir_all(&year_dir).map_err(|e| e.to_string())?;
-    let file_path = year_dir.join(format!("{:02}.json", history.month));
-    let json = serde_json::to_string_pretty(history).map_err(|e| e.to_string())?;
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
-    Ok(())
+    let mut store = crate::core::Store::new(year_dir)?;
+    store.save(&format!("{:02}.json", history.month), history)
 }
 
 /// Idempotent migration from legacy State fields into MonthlyPowerHistory
@@ -136,7 +134,17 @@ pub fn migrate_legacy_power_data(root: &Path, state: &mut crate::core::State) ->
             days: state.power_days_active.len().max(1) as u32,
             daily_buckets: Vec::new(),
         };
-        let _ = save_monthly_history(root, &history);
+        if save_monthly_history(root, &history).is_err() {
+            return false; // Leave the only recoverable copy untouched.
+        }
+    }
+
+    if state.monthly_kwh > 0.0 {
+        let verified = std::fs::read(&file_path).ok()
+            .and_then(|bytes| serde_json::from_slice::<MonthlyPowerHistory>(&bytes).ok())
+            .is_some_and(|h| h.year == year && h.month == month
+                && h.total_kwh >= state.monthly_kwh && h.total_cost_idr >= state.monthly_cost_idr);
+        if !verified { return false; }
     }
 
     state.monthly_kwh = 0.0;

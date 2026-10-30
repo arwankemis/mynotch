@@ -78,7 +78,7 @@ impl Shell {
             reduced_transparency: self.glass.reduced,
             high_contrast: self.glass.high_contrast,
             software: self.glass.warp || self.settings.software_renderer,
-            backdrop_unavailable: preview_without_region || self.glass.failed.get() || !glass::backdrop_supported(),
+            backdrop_unavailable: preview_without_region || self.glass.failed.get(),
         }
     }
 
@@ -107,6 +107,7 @@ impl Shell {
 
     /// (width, height, ear, radius, round_top, capsule origin) of the contour being drawn *now*.
     pub(super) fn contour_params(&self) -> (f32, f32, f32, f32, bool, (f32, f32)) {
+        if let Some(c)=self.frame_contour{return(c.width,c.height,c.ear,c.radius,c.round_top,c.origin_dip)}
         let (w, h, r) = self.geometry();
         let attached = !self.settings.bottom && self.settings.edge_gap == 0;
         let ear = if attached {
@@ -148,20 +149,10 @@ impl Shell {
         if want == have {
             return;
         }
-        if want == Backdrop::Off {
-            glass::apply_backdrop(self.hwnd, Backdrop::Off);
-            self.glass.backdrop.set(Backdrop::Off);
-            self.glass.region.set(None);
-            self.update_window_region(); // back to the legacy envelope region
-        } else if glass::apply_backdrop(self.hwnd, want) {
-            self.glass.backdrop.set(want);
-            self.glass.region.set(None);
-            self.apply_glass_region();
-        } else {
-            // The OS refused: record it so the next decision lands on Solid.
-            self.glass.failed.set(true);
-            glass::apply_backdrop(self.hwnd, Backdrop::Off);
-        }
+        // Host backdrop is clipped on the compositor visual, not the HWND.
+        self.glass.backdrop.set(want);
+        self.glass.region.set(None);
+        self.update_window_region();
         if let Some(b) = &self.glass.bench {
             b.borrow_mut().note(&format!("backdrop {:?} -> {:?}", have, self.glass.backdrop.get()));
         }

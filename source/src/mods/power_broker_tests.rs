@@ -1,6 +1,23 @@
 use super::power_broker::*;
 
 #[test]
+fn migration_keeps_legacy_when_history_cannot_be_written() {
+    let root = std::env::temp_dir().join(format!("mynotch-migration-failure-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("mod-data"), b"block directory creation").unwrap();
+    let mut state = crate::core::State::default();
+    state.power_month = "2026-09".into();
+    state.monthly_kwh = 42.5;
+    state.monthly_cost_idr = 61400;
+    assert!(!migrate_legacy_power_data(&root, &mut state));
+    assert_eq!(state.monthly_kwh, 42.5);
+    assert_eq!(state.monthly_cost_idr, 61400);
+    assert_eq!(state.power_month, "2026-09");
+    std::fs::remove_file(root.join("mod-data")).unwrap();
+    std::fs::remove_dir(root).unwrap();
+}
+
+#[test]
 fn test_energy_integration_100w_one_hour_equals_0_1_kwh() {
     let mut integrator = EnergyIntegrator::new();
     integrator.max_gap_seconds = 4000.0;

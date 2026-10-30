@@ -1,12 +1,22 @@
 //! Liquid Glass material: pure decision/token/contour logic plus the native DWM backdrop hook.
 //!
-//! Real blur is produced by DWM (`SetWindowCompositionAttribute`), not by capturing the desktop:
-//! DWM blurs whatever is behind the window *inside the window region*. The region is therefore
-//! the blur mask, and it is built from the very same contour description (`notch_contour`)
+//! Native blur comes from a clipped HostBackdropBrush visual, never from desktop capture:
+//! The composition geometric clip bounds the actual backdrop. The HWND region is only
+//! the input region, built from the very same contour description (`notch_contour`)
 //! that the Direct2D path, the outline and the alpha mask use. Everything in the top half of
 //! this file is pure and unit-tested; the bottom half is the thin Win32 layer.
 
-use std::ffi::c_void;
+
+
+/// One immutable sample shared by backdrop, material, outline and input mask for a paint.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameContour {
+    pub width:f32,pub height:f32,pub ear:f32,pub radius:f32,
+    pub round_top:bool,pub origin_dip:(f32,f32),pub scale:f32,
+}
+impl FrameContour {
+    pub fn key(self)->[f32;8]{[self.width,self.height,self.ear,self.radius,if self.round_top{1.}else{0.},self.origin_dip.0,self.origin_dip.1,self.scale]}
+}
 
 // ---------------------------------------------------------------------------------------------
 // Settings vocabulary
@@ -236,7 +246,9 @@ impl LiquidGlassConfig {
                     mode,
                     stage,
                     is_light,
-                    backdrop: Backdrop::Acrylic,
+                    // Use blur without the OS acrylic noise sheet. Tint and sheen
+                    // are owned by our contour-masked material, not a second backdrop.
+                    backdrop: Backdrop::Blur,
                     tint_rgb,
                     tint_alpha,
                     outline_rgb: if is_light { 0xffffff } else { 0x5a667a },
@@ -296,12 +308,6 @@ impl LiquidGlassConfig {
         }
         self
     }
-}
-
-/// True when the OS exposes the composition-attribute entry point DWM backdrops go through.
-pub fn backdrop_supported() -> bool {
-    static OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *OK.get_or_init(|| set_wca().is_some())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -454,47 +460,6 @@ pub struct RegionKey {
 // Win32: DWM backdrop (SetWindowCompositionAttribute) and region from polygon
 // ---------------------------------------------------------------------------------------------
 
-#[repr(C)]
-struct AccentPolicy {
-    state: u32,
-    flags: u32,
-    gradient: u32,
-    animation: u32,
-}
-#[repr(C)]
-struct WinCompAttrData {
-    attrib: u32,
-    data: *mut c_void,
-    size: usize,
-}
-
-type SetWcaFn = unsafe extern "system" fn(windows::Win32::Foundation::HWND, *mut WinCompAttrData) -> i32;
-
-fn set_wca() -> Option<SetWcaFn> {
-    use windows::core::{s, w};
-    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-    unsafe {
-        let user32 = LoadLibraryW(w!("user32.dll")).ok()?;
-        let p = GetProcAddress(user32, s!("SetWindowCompositionAttribute"))?;
-        Some(std::mem::transmute::<unsafe extern "system" fn() -> isize, SetWcaFn>(p))
-    }
-}
-
-/// Applies (or removes) the DWM backdrop for the window region. `tint_abgr` is only used by the
-/// OS as a base colour; mynotch draws its own tint in Direct2D, so it passes a near-transparent
-/// value. Returns false if the OS entry point is missing or refuses.
-pub fn apply_backdrop(hwnd: windows::Win32::Foundation::HWND, backdrop: Backdrop) -> bool {
-    let Some(f) = set_wca() else { return false };
-    let (state, flags, gradient) = match backdrop {
-        Backdrop::Off => (0u32, 0u32, 0u32),
-        Backdrop::Blur => (3, 0, 0x00000000),
-        Backdrop::Acrylic => (4, 0, 0x01000000),
-    };
-    let mut policy = AccentPolicy { state, flags, gradient, animation: 0 };
-    let mut data = WinCompAttrData { attrib: 19, data: (&mut policy as *mut AccentPolicy).cast(), size: std::mem::size_of::<AccentPolicy>() };
-    unsafe { f(hwnd, &mut data) != 0 }
-}
-
 /// Sets the window region to the polygon. Ownership of the HRGN passes to the system on success.
 pub fn set_region_polygon(hwnd: windows::Win32::Foundation::HWND, poly: &[(i32, i32)]) -> bool {
     use windows::Win32::Foundation::POINT;
@@ -582,7 +547,7 @@ mod tests {
     fn adaptive_gets_more_transparent_with_stage_and_lite_is_denser() {
         let a: Vec<_> = (0..=2).map(|s| LiquidGlassConfig::for_stage(MaterialMode::Adaptive, s, false)).collect();
         assert!(a[0].tint_alpha > a[1].tint_alpha && a[1].tint_alpha > a[2].tint_alpha);
-        assert!(a.iter().all(|c| c.backdrop == Backdrop::Acrylic));
+        assert!(a.iter().all(|c| c.backdrop == Backdrop::Blur));
         let l = LiquidGlassConfig::for_stage(MaterialMode::Lite, 2, false);
         assert_eq!(l.backdrop, Backdrop::Blur);
         assert!(l.tint_alpha > a[2].tint_alpha, "Lite must be a stronger tint than Adaptive stage 2");
