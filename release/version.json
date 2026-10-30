@@ -1,0 +1,8 @@
+{
+  "product": "mynotch",
+  "display_version": "0.0.1.4-alpha.1",
+  "version_components": [0, 0, 1, 4],
+  "prerelease": { "label": "alpha", "sequence": 1 },
+  "release_sequence": 10401,
+  "channel": "preview"
+}
