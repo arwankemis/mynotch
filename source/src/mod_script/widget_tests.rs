@@ -102,3 +102,10 @@ fn test_lua_capability_broker_enforces_permissions() {
 
     assert_eq!(output_allowed.texts[0].text, "estimated:141.6");
 }
+#[test]
+fn official_daya_package_keeps_missing_measurements_unavailable_and_shows_hardware(){
+    let mut snapshot=crate::system::PowerSnapshot::default();snapshot.cpu_name=Some("Test CPU".into());snapshot.gpu_name=Some("Test GPU".into());
+    let output=super::run_lua_mod_source_capabilities(include_bytes!("../../assets/mods/daya/main.lua"),None,None,false,&std::collections::BTreeMap::new(),&["power.read".into()],Some(&snapshot),&[],None).unwrap();
+    assert!(output.gauge.unwrap().value.is_none());
+    let metrics=output.metrics.unwrap();assert_eq!(metrics.items[0].label,"Test CPU");assert_eq!(metrics.items[1].label,"Test GPU");assert_eq!(metrics.items[0].value,"—");
+}

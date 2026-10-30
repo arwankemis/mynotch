@@ -6,6 +6,8 @@
 //! that the Direct2D path, the outline and the alpha mask use. Everything in the top half of
 //! this file is pure and unit-tested; the bottom half is the thin Win32 layer.
 
+pub mod hover;
+
 
 
 /// One immutable sample shared by backdrop, material, outline and input mask for a paint.
@@ -304,7 +306,8 @@ impl LiquidGlassConfig {
     /// Dense pages (Settings, Reminder) need more body behind small text.
     pub fn dense(mut self) -> Self {
         if self.mode.is_glass() {
-            self.tint_alpha = (self.tint_alpha + 0.2).min(0.94);
+            self.tint_alpha = self.tint_alpha.max(if self.is_light{0.88}else{0.90}).min(0.94);
+            self.sheen=self.sheen.min(0.045);
         }
         self
     }

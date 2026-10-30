@@ -168,7 +168,7 @@ pub fn adjust_master_volume(delta: f32) -> Option<(f32, bool)> {
             }
         };
         let new_level = (level + delta).clamp(0.0, 1.0);
-        let _ = volume.SetMasterVolumeLevelScalar(new_level, std::ptr::null());
+        volume.SetMasterVolumeLevelScalar(new_level, std::ptr::null()).ok()?;
         let mut mute = volume.GetMute().map(|m| m.as_bool()).unwrap_or(false);
         if mute && delta > 0.0 {
             let _ = volume.SetMute(false, std::ptr::null());
@@ -607,6 +607,8 @@ pub struct PowerSample {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PowerSnapshot {
+    #[serde(default)] pub provider_note:Option<String>,
+    #[serde(default)] pub today_kwh:Option<f32>,
     pub source_kind: SourceKind,
     pub quality: Quality,
     pub active_power_w: Option<f32>,
@@ -627,6 +629,7 @@ pub struct PowerSnapshot {
 impl Default for PowerSnapshot {
     fn default() -> Self {
         Self {
+            provider_note:None,today_kwh:None,
             source_kind: SourceKind::Unavailable,
             quality: Quality::Disconnected,
             active_power_w: None,
@@ -658,6 +661,7 @@ pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
     let monthly_cost = daily_cost * 30.0;
 
     PowerSnapshot {
+        provider_note:Some("Estimasi lama, bukan sensor perangkat".into()),today_kwh:None,
         source_kind: SourceKind::Estimated,
         quality: Quality::Valid,
         active_power_w: Some(total_ac),
@@ -677,3 +681,4 @@ pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
 }
 
 
+pub mod power_sensor;

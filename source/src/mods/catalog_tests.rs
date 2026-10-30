@@ -3,6 +3,25 @@ use super::catalog::*;
 use crate::core::Settings;
 
 #[test]
+fn package_file_paths_cannot_overwrite_files_outside_package(){
+    let root=std::env::temp_dir().join(format!("mynotch-package-path-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let mut s=Settings::default();let pm=PackageManager::new(&root);
+    assert!(pm.install_package(&mut s,&sample_mod_package(),&[("../../state.json",b"overwrite")]).is_err());
+    assert!(!root.join("state.json").exists());assert!(!s.is_mod_installed("daya"));if root.exists(){std::fs::remove_dir_all(root).unwrap();}
+}
+
+#[test]
+fn package_uninstall_removes_tab_registration_without_deleting_observed_history(){
+    let root=std::env::temp_dir().join(format!("mynotch-package-tab-cleanup-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let pm=PackageManager::new(&root);let mut s=Settings::default();let pkg=sample_mod_package();
+    pm.install_package(&mut s,&pkg,&[("main.lua",b"-- bundled package")]).unwrap();assert!(s.enabled("Daya"));
+    std::fs::create_dir_all(root.join("mod-data/daya")).unwrap();std::fs::write(root.join("mod-data/daya/history.json"),b"preserve").unwrap();
+    pm.uninstall_package(&mut s,"daya",true).unwrap();
+    assert!(!s.mod_tabs.iter().any(|t|t=="Daya"));assert!(!s.modules.contains_key("Daya"));assert!(!s.active_tab_order().iter().any(|t|t=="Daya"));
+    assert_eq!(std::fs::read(root.join("mod-data/daya/history.json")).unwrap(),b"preserve");std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn builtin_catalog_matches_install_tab_toggle_and_uninstall_after_restart() {
     for (id,tab) in [("sticky_notes","Catatan"),("weather","Cuaca")] {
         let root=std::env::temp_dir().join(format!("mynotch-catalog-roundtrip-{id}-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
@@ -122,6 +141,8 @@ fn test_package_lifecycle_distinguishes_installed_active_and_tab() {
     std::fs::write(mod_data_dir.join("history.json"), b"{}").unwrap();
 
     manager.uninstall_package(&mut settings, "daya", true).unwrap();
+    assert!(!settings.mod_tabs.iter().any(|tab|tab=="Daya"));
+    assert!(!settings.enabled("Daya"));
     assert!(!manager.is_installed(&settings, "daya"));
     assert!(!manager.is_active(&settings, "daya"));
     assert!(mod_data_dir.join("history.json").exists(), "User data must be retained by default!");

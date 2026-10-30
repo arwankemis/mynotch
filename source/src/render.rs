@@ -58,6 +58,7 @@ pub struct Painter {
     pub is_warp:bool,
     path_cache:std::cell::RefCell<Option<([f32;5],ID2D1PathGeometry)>>,
     sheen:Option<ID2D1LinearGradientBrush>,
+    hover_sheen:Option<ID2D1RadialGradientBrush>,
 }
 /// Light (Terang) palette switch. Every generic draw call goes through `color`, which applies the shared
 /// token map, so text, icons, buttons, sliders, cards, tabs, tooltips and toasts follow one palette.
@@ -122,7 +123,7 @@ impl Painter {
         let brush=context.CreateSolidColorBrush(&color(TEXT,1.),None)?;
         let factory:IDWriteFactory=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let is_warp=preferred==D3D_DRIVER_TYPE_WARP||first.is_err();
-        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_legacy_composition:legacy,host,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),sheen:None})
+        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_legacy_composition:legacy,host,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),sheen:None,hover_sheen:None})
     }}
     /// Binds the current back buffer as the draw target. The bitmap is rebuilt every frame on
     /// purpose: a cached D2D bitmap wrapping a swap chain buffer goes stale once that buffer
@@ -246,7 +247,7 @@ impl Painter {
     /// stroked on that same geometry. The blur itself comes from DWM behind the window region
     /// (see `render::host::HostComposition`); nothing here samples or captures the desktop. Text and icons
     /// are drawn afterwards in the shell, unscaled and unblurred.
-    pub unsafe fn fill_notch_glass(&mut self,width:f32,height:f32,ear:f32,radius:f32,round_top:bool,config:&crate::glass::LiquidGlassConfig)->bool{unsafe{
+    pub unsafe fn fill_notch_glass(&mut self,width:f32,height:f32,ear:f32,radius:f32,round_top:bool,config:&crate::glass::LiquidGlassConfig,hover:(f32,f32,f32))->bool{unsafe{
         let Ok(path)=self.contour_path(width,height,ear,radius,round_top) else{return false};
         let depth=self.layers as usize;
         if depth>=self.layer_pool.len(){return false}
@@ -272,6 +273,19 @@ impl Painter {
                 b.SetStartPoint(pt(width*0.5,0.));b.SetEndPoint(pt(width*0.5,(height*0.55).max(8.)));
                 b.SetOpacity(if config.is_light{config.sheen*0.9}else{config.sheen});
                 self.context.FillGeometry(&path,b,None);
+            }
+        }
+        if hover.2>0.001{
+            if self.hover_sheen.is_none(){
+                let stops=[D2D1_GRADIENT_STOP{position:0.,color:raw_color(0xffffff,1.)},D2D1_GRADIENT_STOP{position:1.,color:raw_color(0xffffff,0.)}];
+                if let Ok(rt)=self.context.cast::<ID2D1RenderTarget>(){if let Ok(stops)=rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP){
+                    self.hover_sheen=rt.CreateRadialGradientBrush(&D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES{center:pt(0.,0.),gradientOriginOffset:pt(0.,0.),radiusX:1.,radiusY:1.},None,&stops).ok();
+                }}
+            }
+            if let Some(brush)=&self.hover_sheen{
+                brush.SetCenter(pt(width*hover.0,height*hover.1));brush.SetRadiusX((width*0.50).max(20.));brush.SetRadiusY((height*0.85).max(20.));
+                let strength=if config.tint_alpha>=0.85{0.045}else if config.mode==crate::glass::MaterialMode::Lite{0.07}else{0.12};
+                brush.SetOpacity(strength*hover.2);self.context.FillGeometry(&path,brush,None);
             }
         }
         self.context.PopLayer();

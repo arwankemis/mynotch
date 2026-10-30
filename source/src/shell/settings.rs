@@ -1,6 +1,6 @@
 use super::*;
 use crate::i18n::t;
-const FG:u32=0xf3f3f5;const MUTED:u32=0x92929d;const ACCENT:u32=0x69d2e5;
+const FG:u32=0xf3f3f5;const MUTED:u32=0xb2bac8;const ACCENT:u32=0x69d2e5;
 #[derive(Clone)]pub(super) struct SettingsPopup{pub key:&'static str,pub x:f32,pub y:f32,pub width:f32,pub cursor:usize}
 #[allow(dead_code)]
 pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{
@@ -14,6 +14,18 @@ pub(super) fn prayer_lead_summary_i18n(city:&str,lead:u32,lang:&str)->String{
     }
 }
 impl Shell{
+    fn settings_content_bottom(&self)->f32{match self.settings_cat{
+        0=>if self.settings_subpage_privacy{400.}else{370.},
+        1=>414.,2=>116.+self.settings.settings_tab_order().len()as f32*36.,
+        3=>300.,4=>354.,5=>420.,_=>self.height-20.
+    }}
+    pub(super) fn scroll_settings(&mut self,delta:f32){
+        if self.settings_cat==5{self.scroll_catalog(delta.signum()as i32);return}
+        let cat=self.settings_cat.min(6);
+        let l=super::settings_layout::SettingsLayout::compute(self.width,self.height.min(360.),self.settings_content_bottom(),self.settings_scroll[cat]+delta);
+        self.settings_scroll[cat]=l.scroll_y;self.settings_popup=None;self.focused=None;self.invalidate();
+    }
+
     fn categories(&self) -> [(&'static str, &'static str, &'static str); 7] {
         let lang = self.settings.language.clone();
         [
@@ -26,14 +38,14 @@ impl Shell{
             (t("cat.update", &lang), "download", t("cat.update.desc", &lang)),
         ]
     }
-    fn st_hit(&mut self,x:f32,y:f32,w:f32,h:f32,action:Action,enabled:bool){if self.hit_enabled&&enabled{self.hits.push(Hit{rect:render::rect(x,y,w,h),action});}}
-    unsafe fn st_button(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,w:f32,action:Action,enabled:bool){unsafe{
+    pub(super) fn st_hit(&mut self,x:f32,y:f32,w:f32,h:f32,action:Action,enabled:bool){if self.hit_enabled&&enabled{self.hits.push(Hit{rect:render::rect(x,y,w,h),action});}}
+    pub(super) unsafe fn st_button(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,w:f32,action:Action,enabled:bool){unsafe{
         let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=y&&b<=y+30.);
         if !enabled{p.push_alpha(0.3);}p.fill(x,y,w,30.,7.,if hover{0x292930}else{0x1c1c23});p.text_centered(label,x,y,w,30.,11.,FG,1.,false);
         if self.focused.as_ref()==Some(&action){p.stroke(x-1.,y-1.,w+2.,32.,8.,ACCENT,1.);}
         if !enabled{p.pop_alpha();}self.st_hit(x,y,w,30.,action,enabled);
     }}
-    unsafe fn st_toggle(&mut self,p:&mut Painter,x:f32,y:f32,on:bool,action:Action,enabled:bool){unsafe{
+    pub(super) unsafe fn st_toggle(&mut self,p:&mut Painter,x:f32,y:f32,on:bool,action:Action,enabled:bool){unsafe{
         let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x-6.&&a<=x+36.&&b>=y-7.&&b<=y+24.);
         if !enabled{p.push_alpha(0.3);}p.fill(x,y,30.,17.,8.5,if on{ACCENT}else if hover{0x454550}else{0x35353d});p.fill(x+if on{15.}else{2.},y+2.,13.,13.,6.5,if on{0x101015}else{0xaaaab3});if !enabled{p.pop_alpha();}
         if self.focused.as_ref()==Some(&action){p.stroke(x-4.,y-5.,38.,27.,10.,ACCENT,1.);}
@@ -44,14 +56,14 @@ impl Shell{
         p.text(title,196.,y+3.,210.,20.,12.,FG,false);p.text_ellipsis(description,196.,y+24.,210.,16.,10.,MUTED,false);
         p.fill(196.,y+47.,346.,1.,0.,0x222229);
     }}
-    unsafe fn st_row_compact(&self,p:&mut Painter,y:f32,title:&str,description:&str){unsafe{
-        p.text(title,196.,y+2.,210.,18.,12.,FG,false);p.text_ellipsis(description,196.,y+21.,210.,15.,10.,MUTED,false);
+    pub(super) unsafe fn st_row_compact(&self,p:&mut Painter,y:f32,title:&str,description:&str){unsafe{
+        p.text(title,196.,y+2.,210.,18.,12.,FG,false);p.text_ellipsis(description,196.,y+21.,210.,16.,11.,MUTED,false);
         p.fill(196.,y+41.,346.,1.,0.,0x222229);
     }}
     unsafe fn st_select(&mut self,p:&mut Painter,key:&'static str,value:&str,x:f32,y:f32,w:f32,enabled:bool){unsafe{
         let hover=enabled&&self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=y&&b<=y+30.);
         if !enabled{p.push_alpha(0.3);}p.fill(x,y,w,30.,7.,if hover{0x22222a}else{0x18181e});p.stroke(x,y,w,30.,7.,if hover{0x454552}else{0x303039},1.);p.text_ellipsis(value,x+8.,y+7.,w-29.,18.,11.,0xdddde5,false);p.outline_icon("down",x+w-20.,y+8.,13.,0xaaaab4);
-        if self.focused.as_ref()==Some(&Action::SettingsMenu(key,x,y,w)){p.stroke(x-1.,y-1.,w+2.,32.,8.,ACCENT,1.);}
+        if settings_menu_has_focus(self.focused.as_ref(),key,x,y,w){p.stroke(x-1.,y-1.,w+2.,32.,8.,ACCENT,1.);}
         if !enabled{p.pop_alpha();}self.st_hit(x,y,w,30.,Action::SettingsMenu(key,x,y,w),enabled);
     }}
     pub(super) fn draw_settings(&mut self,p:&mut Painter){unsafe{
@@ -75,16 +87,46 @@ impl Shell{
             self.st_hit(18., y, 142., 34., Action::SettingsCategory(i), true);
         }
         let category = self.settings_cat.min(6);
-        p.text(cats[category].0, 196., 66., 346., 25., 17., FG, false);
-        p.text(cats[category].2, 196., 92., 346., 16., 10.5, MUTED, false);
+        if !(category == 0 && self.settings_subpage_privacy) {
+            p.text(cats[category].0, 196., 66., 346., 25., 17., FG, false);
+            p.text(cats[category].2, 196., 92., 346., 16., 10.5, MUTED, false);
+        }
+        if category==5{self.draw_catalog(p);return;}
+        let layout=super::settings_layout::SettingsLayout::compute(self.width,self.height.min(360.),self.settings_content_bottom(),self.settings_scroll[category]);
+        self.settings_scroll[category]=layout.scroll_y;
+        let scroll=layout.scroll_y;
+        let first_hit=self.hits.len();let original_pointer=self.pointer;
+        {
+            let v=layout.viewport;p.clip(v.left,v.top,v.right-v.left,v.bottom-v.top);
+            p.translate_relative(0.,-scroll);self.pointer=original_pointer.map(|(x,y)|(x,y+scroll));
+        }
         match category {
-            0 => self.settings_general(p),
+            0 => {
+                if self.settings_subpage_privacy {
+                    self.draw_settings_privacy(p);
+                } else {
+                    self.settings_general(p);
+                }
+            }
             1 => self.settings_appearance(p),
             2 => self.settings_tabs(p),
             3 => self.settings_audio(p),
             4 => self.settings_reminders(p),
             5 => self.settings_mods(p),
             _ => self.settings_update(p),
+        }
+        {
+            p.translate_relative(0.,scroll);p.unclip();self.pointer=original_pointer;
+            let pending=self.hits.split_off(first_hit);
+            for mut hit in pending{if let Some(r)=layout.visible_hit(hit.rect){hit.rect=r;
+                if let Action::SettingsMenu(key,x,y,w)=hit.action{hit.action=Action::SettingsMenu(key,x,y-scroll,w);}
+                self.hits.push(hit);
+            }}
+            if layout.max_scroll_y>0.{
+                let v=layout.viewport;let track=v.bottom-v.top;let thumb=(track*track/(track+layout.max_scroll_y)).max(24.);
+                p.fill(548.,v.top,3.,track,1.5,0x303039);
+                p.fill(548.,v.top+(track-thumb)*scroll/layout.max_scroll_y,3.,thumb,1.5,0x808895);
+            }
         }
         if let Some(popup)=self.settings_popup.clone(){self.draw_settings_popup(p,&popup);}
     }}
@@ -93,16 +135,18 @@ impl Shell{
         let lang = self.settings.language.clone();
         self.st_row_compact(p,116.,t("general.language",&lang),t("general.language.desc",&lang));
         self.st_select(p,"language",crate::i18n::language_name(&lang),418.,122.,124.,true);
-        self.st_row_compact(p,162.,t("general.fullscreen",&lang),t("general.fullscreen.desc",&lang));
-        self.st_toggle(p,512.,173.,self.settings.hide_fullscreen,Action::Toggle("fullscreen"),true);
-        self.st_row_compact(p,208.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
-        self.st_toggle(p,512.,219.,self.settings.minimal,Action::Minimal,true);
-        self.st_row_compact(p,254.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
+        self.st_row_compact(p,158.,t("general.fullscreen",&lang),t("general.fullscreen.desc",&lang));
+        self.st_toggle(p,512.,169.,self.settings.hide_fullscreen,Action::Toggle("fullscreen"),true);
+        self.st_row_compact(p,200.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
+        self.st_toggle(p,512.,211.,self.settings.minimal,Action::Minimal,true);
+        self.st_row_compact(p,242.,t("general.startup",&lang),t("general.startup.desc",&lang));
+        self.st_toggle(p,512.,253.,self.settings.run_at_startup,Action::Toggle("startup"),true);
+        self.st_row_compact(p,284.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
         let current=crate::i18n::tab_name(&self.settings.default_tab, &lang).to_string();
         let has_tabs = !self.settings.active_tab_order().is_empty();
-        self.st_select(p,"default_tab",&current,418.,260.,124.,has_tabs);
-        self.st_row_compact(p,300.,t("general.startup",&lang),t("general.startup.desc",&lang));
-        self.st_toggle(p,512.,311.,self.settings.run_at_startup,Action::Toggle("startup"),true);
+        self.st_select(p,"default_tab",&current,418.,290.,124.,has_tabs);
+        self.st_row_compact(p,326.,t("general.privacy",&lang),t("general.privacy.desc",&lang));
+        self.st_button(p,t("general.privacy_open",&lang),448.,330.,94.,Action::OpenPrivacySettings,true);
     }}
     fn settings_appearance(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
@@ -116,16 +160,29 @@ impl Shell{
             if self.focused.as_ref()==Some(&action){p.stroke(x-1.,123.,62.,32.,8.,ACCENT,1.);}
             self.st_hit(x,124.,60.,30.,action,true);
         }
-        self.st_row_compact(p,162.,t("appearance.scale",&lang),t("appearance.scale.desc",&lang));
-        self.st_select(p,"scale",&format!("{:.0}%",self.settings.scale*100.),418.,170.,124.,true);
-        self.st_row_compact(p,208.,t("appearance.gap",&lang),t("appearance.gap.desc",&lang));
-        self.st_select(p,"gap",&format!("{} px",self.settings.edge_gap),418.,216.,124.,true);
-        self.st_row_compact(p,254.,t("appearance.opacity",&lang),t("appearance.opacity.desc",&lang));
-        self.st_select(p,"opacity",&format!("{}%",(self.settings.opacity as f32/255.*100.).round()as u32),418.,262.,124.,true);
-        let low_ram_title = if lang == "en" { "Low RAM Mode (WARP)" } else { "Mode Hemat RAM (WARP)" };
-        let low_ram_desc = if lang == "en" { "Render via CPU to save RAM (~20MB). Restart app." } else { "Render via CPU hemat RAM (~20MB). Muat ulang." };
-        self.st_row_compact(p, 300., low_ram_title, low_ram_desc);
-        self.st_toggle(p, 512., 311., self.settings.software_renderer, Action::Toggle("software_renderer"), true);
+        self.st_row_compact(p,158.,t("appearance.scale",&lang),t("appearance.scale.desc",&lang));
+        self.st_select(p,"scale",&format!("{:.0}%",self.settings.scale*100.),418.,164.,124.,true);
+        self.st_row_compact(p,200.,t("appearance.gap",&lang),t("appearance.gap.desc",&lang));
+        self.st_select(p,"gap",&format!("{} px",self.settings.edge_gap),418.,206.,124.,true);
+        self.st_row_compact(p,242.,t("appearance.opacity",&lang),t("appearance.opacity.desc",&lang));
+        self.st_select(p,"opacity",&format!("{}%",(self.settings.opacity as f32/255.*100.).round()as u32),418.,248.,124.,true);
+        // Material + Gelap/Terang share one row: the page is already at its 6-row limit.
+        let fallback=match self.glass_fallback(){
+            crate::glass::Fallback::ReducedTransparency=>Some(t("material.fallback.reduced",&lang)),
+            crate::glass::Fallback::HighContrast=>Some(t("material.fallback.contrast",&lang)),
+            crate::glass::Fallback::Software=>Some(t("material.fallback.software",&lang)),
+            crate::glass::Fallback::NoBackdrop=>Some(t("material.fallback.unavailable",&lang)),
+            _=>None,
+        };
+        self.st_row_compact(p,284.,t("appearance.material",&lang),fallback.unwrap_or(t("appearance.material.desc",&lang)));
+        let mode=crate::glass::MaterialMode::from_str(&self.settings.theme_material);
+        let material_label=match mode{crate::glass::MaterialMode::Solid=>t("material.solid",&lang),crate::glass::MaterialMode::Lite=>t("material.lite",&lang),crate::glass::MaterialMode::Adaptive=>t("material.adaptive",&lang)};
+        self.st_select(p,"material",material_label,418.,290.,124.,true);
+        let color_label=if crate::glass::is_light_mode(&self.settings.theme_color){t("color.light",&lang)}else{t("color.dark",&lang)};
+        self.st_row_compact(p,326.,if lang=="en"{"Colour scheme"}else{"Warna tema"},if lang=="en"{"Text, icons and controls"}else{"Teks, ikon, dan kontrol"});
+        self.st_select(p,"theme_color",color_label,418.,332.,124.,true);
+        self.st_row_compact(p,368.,if lang=="en"{"Software renderer (WARP)"}else{"Renderer software (WARP)"},if lang=="en"{"CPU rendering. Restart required."}else{"Render melalui CPU. Perlu mulai ulang."});
+        self.st_toggle(p,512.,379.,self.settings.software_renderer,Action::Toggle("software_renderer"),true);
     }}
     fn settings_tabs(&mut self,p:&mut Painter){unsafe{
         let order=self.settings.settings_tab_order();
@@ -173,109 +230,7 @@ impl Shell{
         let row_h=if enabled{53.}else{45.};
         for (i,(name,icon,summary,on)) in rows.iter().enumerate(){let y=top+i as f32*row_h;p.outline_icon(icon,196.,y+10.,18.,0xa8a8b2);p.text(name,224.,y+1.,164.,22.,12.,FG,false);p.text_ellipsis(summary,224.,y+23.,198.,17.,10.,MUTED,false);p.text(if *on{t("reminders.active",&lang)}else{t("reminders.inactive",&lang)},423.,y+11.,42.,16.,10.,if *on{ACCENT}else{MUTED},false);self.st_button(p,t("reminders.configure",&lang),474.,y+4.,68.,Action::SettingsOpenTab("Reminder".into(),i),enabled);if i<3{p.fill(196.,y+row_h-1.,346.,1.,0.,0x222229);}}
     }}
-    fn settings_mods(&mut self, p: &mut Painter) { unsafe {
-        let lang = self.settings.language.clone();
-        let mods = self.mods();
-
-        self.st_button(p, t("mods.import_btn", &lang), 196., 110., 150., Action::PickAndInstallMod, true);
-        self.st_button(p, t("mods.folder_btn", &lang), 356., 110., 130., Action::OpenModsFolder, true);
-        let refresh_hover = self.pointer.is_some_and(|(a, b)| (498.0..=530.0).contains(&a) && (110.0..=140.0).contains(&b));
-        p.fill(498., 110., 32., 30., 7., if refresh_hover { 0x292930 } else { 0x1c1c23 });
-        p.outline_icon("reset", 506., 117., 16., if refresh_hover { ACCENT } else { MUTED });
-        self.st_hit(498., 110., 32., 30., Action::RefreshMods, true);
-
-        let list_x = 196.;
-        let list_w = 140.;
-        let list_top = 146.;
-        let list_bottom = self.height - 22.;
-        let row_h = 42.;
-        let visible = self.visible_mod_rows();
-        if self.mods_selected.as_ref().is_none_or(|id| !mods.iter().any(|m| &m.id == id)) {
-            self.mods_selected = mods.first().map(|m| m.id.clone());
-            self.mods_scroll = 0;
-        }
-        self.mods_scroll = crate::core::clamp_list_scroll(self.mods_scroll, mods.len(), visible);
-
-        if mods.is_empty() {
-            p.text_ellipsis(t("mods.empty", &lang), list_x, list_top + 8., list_w, 18., 10., MUTED, false);
-        }
-        for (i, m) in mods.iter().enumerate().skip(self.mods_scroll).take(visible) {
-            let y = list_top + (i - self.mods_scroll) as f32 * row_h;
-            let selected = self.mods_selected.as_ref() == Some(&m.id);
-            let hover = self.pointer.is_some_and(|(a, b)| a >= list_x && a <= list_x + list_w && b >= y && b <= y + row_h - 2.);
-            if selected || hover {
-                p.fill(list_x, y, list_w, row_h - 2., 7., if selected { 0x1c1d22 } else { 0x131318 });
-            }
-            if selected { p.fill(list_x, y + 6., 2., row_h - 14., 1., ACCENT); }
-            p.outline_icon(&m.icon, list_x + 9., y + 13., 15., if selected { 0xefeff3 } else { 0x8c8c98 });
-            if self.settings.installed_mods.contains(&m.id) {
-                p.fill(list_x + list_w - 12., y + 9., 6., 6., 3., 0x6ee7b7);
-            }
-            let name = if m.id == "weather" { t("mod.weather.name", &lang) } else { &m.name };
-            p.text_ellipsis(name, list_x + 30., y + 5., list_w - 38., 16., 10.5, if selected { FG } else { MUTED }, selected);
-            let meta = format!("{} · v{}", self.mod_type_label(&m.mod_type), m.version);
-            p.text_ellipsis(&meta, list_x + 30., y + 22., list_w - 38., 12., 8.5, MUTED, false);
-            self.st_hit(list_x, y, list_w, row_h - 2., Action::SelectMod(m.id.clone()), true);
-        }
-        if mods.len() > visible {
-            let track_h = list_bottom - list_top;
-            let thumb_h = (track_h * visible as f32 / mods.len() as f32).max(20.);
-            let max_scroll = (mods.len() - visible) as f32;
-            let thumb_y = list_top + (track_h - thumb_h) * (self.mods_scroll as f32 / max_scroll.max(1.));
-            p.fill(list_x + list_w + 2., list_top, 3., track_h, 1.5, 0x26262c);
-            p.fill(list_x + list_w + 2., thumb_y, 3., thumb_h, 1.5, 0x5a5a66);
-        }
-
-        let detail_x = 348.;
-        let detail_w = self.width - 18. - detail_x;
-        let detail_h = list_bottom - list_top;
-        p.fill(detail_x, list_top, detail_w, detail_h, 8., 0x141419);
-        p.stroke(detail_x, list_top, detail_w, detail_h, 8., 0x2b2b36, 1.);
-        let Some(m) = mods.iter().find(|m| self.mods_selected.as_ref() == Some(&m.id)) else { return };
-        p.outline_icon(&m.icon, detail_x + 12., list_top + 12., 20., 0x6ee7b7);
-        let custom = m.mod_type != crate::mods::ModType::Builtin;
-        let meta = if custom {
-            format!("{} · v{} · {} {}", self.mod_type_label(&m.mod_type), m.version, t("mods.by", &lang), m.author)
-        } else {
-            format!("{} · v{}", self.mod_type_label(&m.mod_type), m.version)
-        };
-        p.text_ellipsis(&meta, detail_x + 40., list_top + 27., detail_w - 52., 13., 9., MUTED, false);
-        if custom {
-            let row_y = list_top + 44.;
-            let tab_on = self.settings.enabled(&m.tab_name);
-            let net_on = self.settings.network_mods.iter().any(|id| id == &m.id);
-            p.text(t("mods.tab_toggle", &lang), detail_x + 12., row_y + 3., 26., 12., 8., if tab_on { ACCENT } else { MUTED }, false);
-            self.st_toggle(p, detail_x + 40., row_y, tab_on, Action::ToggleModTab(m.tab_name.clone()), true);
-            p.text(t("mods.net_toggle", &lang), detail_x + 96., row_y + 3., 26., 12., 8., if net_on { ACCENT } else { MUTED }, false);
-            self.st_toggle(p, detail_x + 124., row_y, net_on, Action::ToggleModNetwork(m.id.clone()), true);
-        } else {
-            p.text_ellipsis(&format!("{} {}", t("mods.by", &lang), m.author), detail_x + 12., list_top + 44., detail_w - 24., 13., 9., 0x777781, false);
-        }
-        let description = if m.id == "weather" { t("mod.weather.description", &lang) } else { &m.description };
-        let desc_y = if custom { list_top + 66. } else { list_top + 60. };
-        for (i, line) in wrap_lines(p, description, detail_w - 24., 9.5, 4).iter().enumerate() {
-            p.text(line, detail_x + 12., desc_y + i as f32 * 13., detail_w - 24., 13., 9.5, MUTED, false);
-        }
-
-        let installed = self.settings.installed_mods.contains(&m.id);
-        let btn_w = detail_w - 24.;
-        let primary_y = list_top + detail_h - 68.;
-        let secondary_y = list_top + detail_h - 34.;
-        let id = m.id.clone();
-        if m.mod_type == crate::mods::ModType::Builtin {
-            let tab = m.tab_name.clone();
-            self.st_button(p, t("mods.open_btn", &lang), detail_x + 12., primary_y, btn_w, Action::SettingsOpenTab(tab.clone(), 0), self.settings.enabled(&tab));
-            if installed {
-                self.st_button(p, t("mods.uninstall_btn", &lang), detail_x + 12., secondary_y, btn_w, Action::UninstallMod(id), true);
-            } else {
-                self.st_button(p, t("mods.install_btn", &lang), detail_x + 12., secondary_y, btn_w, Action::InstallMod(id), true);
-            }
-        } else {
-            self.st_button(p, t("mods.open_btn", &lang), detail_x + 12., primary_y, btn_w, Action::OpenMod(id.clone()), true);
-            self.st_button(p, t("mods.delete_btn", &lang), detail_x + 12., secondary_y, btn_w, Action::DeleteCustomMod(id), true);
-        }
-    }}
-
+    fn settings_mods(&mut self,p:&mut Painter){self.draw_catalog(p);}
     fn mod_type_label(&self, kind: &crate::mods::ModType) -> String {
         let lang = &self.settings.language;
         match kind {
@@ -285,23 +240,31 @@ impl Shell{
         }
     }
 
-    fn visible_mod_rows(&self) -> usize {
-        ((self.height - 22. - 146.) / 42.).floor().max(1.) as usize
-    }
+    fn visible_mod_rows(&self) -> usize {super::catalog_ui::CatalogLayout::new(self.width,self.height.min(360.)).rows()}
 
     pub(super) fn scroll_mods(&mut self, delta: i32) {
-        let total = self.mods().len();
+        let total = crate::mods::catalog::get_catalog(&self.store.root,&self.settings).filter(self.mods_kind,self.mods_filter,"").len();
         let visible = self.visible_mod_rows();
         let next = (self.mods_scroll as i32 + delta).max(0) as usize;
         self.mods_scroll = crate::core::clamp_list_scroll(next, total, visible);
         self.invalidate();
+    }
+    pub(super) fn scroll_catalog(&mut self,delta:i32){
+        if self.mods_detail_open{
+            let l=super::catalog_ui::CatalogLayout::new(self.width,self.height.min(360.));
+            let installed=self.mods_selected.as_ref().is_some_and(|id|crate::mods::package::PackageManager::new(&self.store.root).is_installed(&self.settings,id));
+            let max=((if installed{400.}else{260.})-l.detail.bottom).max(0.);self.mods_detail_scroll=(self.mods_detail_scroll+delta as f32*42.).clamp(0.,max);self.focused=None;self.invalidate();
+        }else{self.scroll_mods(delta);}
     }
     fn settings_options(&self,key:&str)->Vec<(u32,String)>{match key{
         "language"=>crate::i18n::LANGUAGES.iter().enumerate().map(|(i,(_,name))|(i as u32,name.to_string())).collect(),
         "default_tab"=>self.settings.active_tab_order().iter().enumerate().map(|(i,tab)|(i as u32, crate::i18n::tab_name(tab, &self.settings.language).to_string())).collect(),
         "scale"=>[80,100,110,125,135].iter().map(|&v|(v,format!("{v}%"))).collect(),
         "gap"=>[0,4,8,16,24].iter().map(|&v|(v,format!("{v} px"))).collect(),
-        "opacity"=>[100,98,90,80,70].iter().map(|&v|(v,format!("{v}%"))).collect(),_=>vec![]
+        "opacity"=>[100,98,90,80,70].iter().map(|&v|(v,format!("{v}%"))).collect(),
+        "material"=>{let l=&self.settings.language;vec![(0,t("material.solid",l).to_string()),(1,t("material.lite",l).to_string()),(2,t("material.adaptive",l).to_string())]},
+        "theme_color"=>{let l=&self.settings.language;vec![(0,t("color.dark",l).to_string()),(1,t("color.light",l).to_string())]},
+        _=>vec![]
     }}
     pub(super) fn open_settings_menu(&mut self,key:&'static str,x:f32,y:f32,width:f32){
         if self.settings_popup.as_ref().is_some_and(|p|p.key==key){self.settings_popup=None;return}
@@ -311,6 +274,8 @@ impl Shell{
             "scale"=>(self.settings.scale*100.).round()as u32,
             "gap"=>self.settings.edge_gap as u32,
             "opacity"=>(self.settings.opacity as f32/255.*100.).round()as u32,
+            "material"=>crate::glass::MaterialMode::from_str(&self.settings.theme_material).index(),
+            "theme_color"=>crate::glass::is_light_mode(&self.settings.theme_color) as u32,
             _=>0
         };
         let options=self.settings_options(key);if options.is_empty(){return}
@@ -324,17 +289,20 @@ impl Shell{
             "scale"=>{self.settings.scale=value as f32/100.;self.layout();self.make_inputs();},
             "gap"=>{self.settings.edge_gap=value as i32;self.layout();},
             "opacity"=>self.settings.opacity=((value as f32/100.)*255.).round().clamp(MIN_OPACITY as f32,255.)as u8,
+            "material"=>{self.settings.theme_material=crate::glass::MaterialMode::from_index(value).as_str().into();self.save();self.glass_settings_changed();},
+            "theme_color"=>{self.settings.theme_color=if value==1{"light"}else{"dark"}.into();self.save();self.glass_settings_changed();},
             _=>{}
         }
     }
     pub(super) fn handle_settings_key(&mut self,key:u16)->bool{
         if !self.settings_open{return false}
+        if key==0x1b&&self.settings_cat==5&&self.mods_detail_open{self.mods_detail_open=false;self.focused=None;self.invalidate();return true}
         if let Some(popup)=self.settings_popup.as_ref(){let end=self.settings_options(popup.key).len().saturating_sub(1);let popup=self.settings_popup.as_mut().unwrap();match key{
             0x26=>popup.cursor=popup.cursor.saturating_sub(1),0x28=>popup.cursor=(popup.cursor+1).min(end),0x24=>popup.cursor=0,0x23=>popup.cursor=end,
             0x0d|0x20=>{let key=popup.key;let i=popup.cursor;if let Some((value,_))=self.settings_options(key).get(i){self.action(Action::SettingsValue(key,*value));}},0x1b=>self.settings_popup=None,0x09=>{self.settings_popup=None;self.invalidate();return false},_=>return false}
             self.invalidate();return true
         }
-        match key{0x1b=>{self.action(Action::Back);true},0x20=>{if let Some(action)=self.focused.clone(){self.action(action);}true},0x26|0x28|0x24|0x23 if self.focused.as_ref().is_none_or(|a|matches!(a,Action::SettingsCategory(..)))=>{let cat=match key{0x24=>0,0x23=>6,0x26=>self.settings_cat.saturating_sub(1),_=>(self.settings_cat+1).min(6)};self.action(Action::SettingsCategory(cat));true},_=>false}
+        match key{0x21=>{self.scroll_settings(-168.);true},0x22=>{self.scroll_settings(168.);true},0x1b=>{self.action(Action::Back);true},0x20=>{if let Some(action)=self.focused.clone(){self.action(action);}true},0x26|0x28|0x24|0x23 if self.focused.as_ref().is_none_or(|a|matches!(a,Action::SettingsCategory(..)))=>{let cat=match key{0x24=>0,0x23=>6,0x26=>self.settings_cat.saturating_sub(1),_=>(self.settings_cat+1).min(6)};self.action(Action::SettingsCategory(cat));true},_=>false}
     }
     fn draw_settings_popup(&mut self,p:&mut Painter,popup:&SettingsPopup){unsafe{
         let options=self.settings_options(popup.key);let h=options.len()as f32*26.+8.;let top=if popup.y+34.+h<=self.height-12.{popup.y+34.}else{(popup.y-h-4.).max(56.)};let x=popup.x;let w=popup.width;
@@ -344,10 +312,10 @@ impl Shell{
 
     fn settings_update(&mut self, p: &mut Painter) { unsafe {
         let lang = self.settings.language.clone();
-        let version_str = format!("v{} alpha", super::APP_VERSION);
+        let version_str = format!("v{}", super::app_version());
 
         // Row 1: Current Version
-        self.st_row_compact(p, 116., t("update.current", &lang), t("update.current_desc", &lang));
+        p.text(t("update.current", &lang),196.,116.,196.,20.,12.,FG,false);
         let btn_label = match &self.update_status {
             super::UpdateStatus::Checking => t("update.checking", &lang),
             super::UpdateStatus::UpToDate(_) => t("update.check_again", &lang),
@@ -356,7 +324,7 @@ impl Shell{
         };
         let is_checking = matches!(self.update_status, super::UpdateStatus::Checking);
         self.st_button(p, btn_label, 400., 120., 142., Action::CheckUpdate, !is_checking);
-        p.text(&version_str, 320., 126., 74., 20., 11.5, 0x38bdf8, true);
+        p.text_ellipsis(&version_str,196.,142.,196.,18.,11.5,0x38bdf8,true);
 
         // Row 2: Status Card (168..248, h = 80)
         let card_x = 196.;
@@ -385,16 +353,60 @@ impl Shell{
                 let sub = format!("{} {} · {}", t("update.checked_at", &lang), time, t("update.up_to_date_sub", &lang));
                 p.text(&sub, card_x + 44., card_y + 38., card_w - 56., 30., 10.0, 0xa7f3d0, false);
             },
-            super::UpdateStatus::Available(rel) => {
+            super::UpdateStatus::Available(update) => {
                 p.fill_alpha(card_x, card_y, card_w, card_h + 12., 8., 0x0284c7, 0.16);
                 p.stroke(card_x, card_y, card_w, card_h + 12., 8., 0x38bdf8, 1.2);
-                let title = format!("{} ({})", t("update.available", &lang), rel.tag_name);
+                let title = format!("{} ({})", t("update.available", &lang), update.version);
                 p.text(&title, card_x + 14., card_y + 10., card_w - 28., 20., 12.5, 0x38bdf8, true);
-                let rel_desc = rel.name.as_deref().unwrap_or("Portable Windows Release");
+                let rel_desc = &update.display_name;
                 p.text_ellipsis(rel_desc, card_x + 14., card_y + 32., card_w - 28., 16., 10.5, 0xe0f2fe, false);
 
-                self.st_button(p, t("update.download_zip", &lang), card_x + 14., card_y + 54., 150., Action::DownloadUpdate, true);
+                self.st_button(p, t("update.perbarui", &lang), card_x + 14., card_y + 54., 150., Action::DownloadUpdate, true);
                 self.st_button(p, t("update.release_notes", &lang), card_x + 172., card_y + 54., 160., Action::OpenReleaseNotes, true);
+            },
+            super::UpdateStatus::Downloading { percent, .. } => {
+                p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
+                let label = format!("{} ({}%)", t("update.downloading", &lang), percent);
+                p.text(&label, card_x + 14., card_y + 16., card_w - 28., 20., 12.0, 0x38bdf8, true);
+
+                let bar_w = card_w - 28.;
+                let fill_w = bar_w * (*percent as f32 / 100.0).clamp(0.0, 1.0);
+                p.fill_alpha(card_x + 14., card_y + 44., bar_w, 6., 3., 0xffffff, 0.1);
+                if fill_w > 0.0 {
+                    p.fill_alpha(card_x + 14., card_y + 44., fill_w, 6., 3., 0x38bdf8, 0.9);
+                }
+            },
+            super::UpdateStatus::Verifying => {
+                p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
+                p.text(t("update.verifying", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x38bdf8, true);
+            },
+            super::UpdateStatus::Staging => {
+                p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
+                p.text(t("update.staging", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x38bdf8, true);
+            },
+            super::UpdateStatus::AwaitingRestart { version, .. } => {
+                p.fill_alpha(card_x, card_y, card_w, card_h + 12., 8., 0x10b981, 0.14);
+                p.stroke(card_x, card_y, card_w, card_h + 12., 8., 0x34d399, 1.2);
+                let title = format!("{} ({})", t("update.ready", &lang), version);
+                p.text(&title, card_x + 14., card_y + 10., card_w - 28., 20., 12.0, 0x34d399, true);
+                p.text(t("update.restart_desc", &lang), card_x + 14., card_y + 32., card_w - 28., 16., 10.5, 0xa7f3d0, false);
+
+                self.st_button(p, t("update.restart_now", &lang), card_x + 14., card_y + 54., 150., Action::RestartNow, true);
+                self.st_button(p, t("update.restart_later", &lang), card_x + 172., card_y + 54., 160., Action::RestartLater, true);
+            },
+            super::UpdateStatus::Applying => {
+                p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
+                p.text(t("update.restarting", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x38bdf8, true);
+            },
+            super::UpdateStatus::SuccessToast(version) => {
+                p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x10b981, 0.10);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0x10b981, 0.6);
+                let msg = format!("{} {}", t("update.updated_to", &lang), version);
+                p.text(&msg, card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x34d399, true);
             },
             super::UpdateStatus::Error(e) => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0xef4444, 0.10);
@@ -405,7 +417,7 @@ impl Shell{
         }
 
         // Row 3: Official GitHub Repository
-        let row3_y = if matches!(self.update_status, super::UpdateStatus::Available(_)) { 276. } else { 264. };
+        let row3_y = if matches!(self.update_status, super::UpdateStatus::Available(_) | super::UpdateStatus::AwaitingRestart { .. }) { 276. } else { 264. };
         self.st_row_compact(p, row3_y, t("update.repo", &lang), t("update.repo_desc", &lang));
         self.st_button(p, t("update.open_repo", &lang), 418., row3_y + 6., 124., Action::OpenRepoUrl, true);
     }}
@@ -419,7 +431,7 @@ pub(super) fn tab_option_index(order: &[String], tab: &str) -> u32 {
 }
 
 /// Greedy word wrap for the mod detail panel. `Painter::measure_text` needs `&mut`.
-fn wrap_lines(p: &mut Painter, text: &str, width: f32, font: f32, max_lines: usize) -> Vec<String> { unsafe {
+pub(super) fn wrap_lines(p: &mut Painter, text: &str, width: f32, font: f32, max_lines: usize) -> Vec<String> { unsafe {
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
     for word in text.split_whitespace() {
@@ -449,4 +461,17 @@ mod tests {
         assert_eq!(tab_option_index(&order, "Cuaca"), 5);
         assert_eq!(tab_option_index(&order, "Hilang"), 0);
     }
+}
+
+fn settings_menu_has_focus(focused:Option<&Action>,key:&'static str,_x:f32,_y:f32,_w:f32)->bool{
+    matches!(focused,Some(Action::SettingsMenu(focused_key,..)) if *focused_key==key)
+}
+#[cfg(test)] mod recovery_tests{
+    use super::*;
+    #[test] fn settings_dropdown_focus_survives_scroll(){
+        let focused=Action::SettingsMenu("material",418.,216.,124.);
+        assert!(settings_menu_has_focus(Some(&focused),"material",418.,290.,124.));
+        assert!(!settings_menu_has_focus(Some(&focused),"theme_color",418.,332.,124.));
+    }
+
 }

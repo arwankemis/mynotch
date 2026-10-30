@@ -26,7 +26,8 @@ impl Shell {
         if !self.settings.enabled("Cuaca"){return}
         let lang=self.settings.language.clone();let t=|key|i18n::t(key,&lang);
         let (mid,bottom)=self.weather.as_ref().map(|w|weather::sky(w.weather_code,w.is_day)).unwrap_or(weather::Sky::Cloud).colors();
-        p.weather_background(self.width,self.height,mid,bottom);
+        // Glass already owns the single material/contour; never cover it with a second skin.
+        if self.glass_config(self.height).is_none(){p.weather_background(self.width,self.height,mid,bottom);}
         if self.weather_custom_open {self.draw_weather_custom_modal(p);return}
         let city=if self.settings.weather_city.is_empty(){"Jakarta"}else{&self.settings.weather_city};
         p.outline_icon("navigation",18.,57.,10.,0xe8f0f7);

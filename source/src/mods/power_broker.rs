@@ -1,6 +1,34 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Observed component energy is kept apart from legacy estimated monthly data.
+#[derive(Default,Serialize,Deserialize)]
+pub struct ObservedEnergy{pub days:std::collections::BTreeMap<String,f32>,#[serde(skip)]blocked:bool}
+impl ObservedEnergy{
+    pub fn load(root:&Path)->Self{
+        match std::fs::read(root.join("mod-data/daya/observed-energy.json")){
+            Ok(bytes) if bytes.len()<=4*1024*1024=>serde_json::from_slice(&bytes).unwrap_or_else(|_|Self{blocked:true,..Default::default()}),
+            Err(e)if e.kind()==std::io::ErrorKind::NotFound=>Self::default(),
+            _=>Self{blocked:true,..Default::default()},
+        }
+    }
+    pub fn add(&mut self,date:&str,delta:f32){if delta.is_finite()&&delta>0.{*self.days.entry(date.into()).or_default()+=delta;}}
+    pub fn flush(&self,root:&Path)->Result<(),String>{
+        if self.blocked{return Err("Riwayat energi tidak dapat dibaca; berkas asli dipertahankan".into())}
+        crate::core::Store::new(root.join("mod-data/daya"))?.save("observed-energy.json",self)
+    }
+    pub fn history(&self,year:i32)->Vec<MonthlyPowerHistory>{
+        use chrono::Datelike;
+        let mut months=std::collections::BTreeMap::<u32,MonthlyPowerHistory>::new();
+        for (date,kwh) in &self.days{
+            let Ok(day)=chrono::NaiveDate::parse_from_str(date,"%Y-%m-%d") else{continue};if day.year()!=year||!kwh.is_finite()||*kwh<0.{continue}
+            let h=months.entry(day.month()).or_insert_with(||MonthlyPowerHistory{year,month:day.month(),name:format!("Sensor · {:02}/{year}",day.month()),total_kwh:0.,total_cost_idr:0,provenance:"sensor_component_subtotal".into(),days:0,daily_buckets:vec![]});
+            h.total_kwh+=kwh;h.days+=1;
+        }
+        months.into_values().rev().collect()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DailyPowerBucket {
     pub date: String,

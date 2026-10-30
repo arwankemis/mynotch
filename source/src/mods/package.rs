@@ -50,6 +50,10 @@ impl<'a> PackageManager<'a> {
         if !crate::mods::safe_mod_id(&manifest.id) {
             return Err("ID paket tidak valid".into());
         }
+        for (rel,_) in files{
+            let path=std::path::Path::new(rel);
+            if rel.is_empty()||rel.contains(':')||rel.contains('\0')||path.is_absolute()||!path.components().all(|part|matches!(part,std::path::Component::Normal(_))){return Err("Jalur berkas paket tidak valid".into())}
+        }
         let target_dir = self.root.join("mods").join(&manifest.id);
         std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
 
@@ -98,20 +102,14 @@ impl<'a> PackageManager<'a> {
     }
 
     pub fn uninstall_package(&self, settings: &mut Settings, id: &str, keep_data: bool) -> Result<(), String> {
-        settings.installed_mods.retain(|m| m != id);
-        settings.disabled_mods.retain(|m| m != id);
-        
-        let target_dir = self.root.join("mods").join(id);
-        if target_dir.exists() {
-            let _ = std::fs::remove_dir_all(&target_dir);
-        }
-
-        if !keep_data {
-            let data_dir = self.root.join("mod-data").join(id);
-            if data_dir.exists() {
-                let _ = std::fs::remove_dir_all(&data_dir);
-            }
-        }
+        if !super::safe_mod_id(id){return Err("ID paket tidak valid".into())}
+        let target_dir=self.root.join("mods").join(id);
+        let tab=std::fs::read(target_dir.join("mod.json")).ok().and_then(|b|serde_json::from_slice::<ModManifest>(&b).ok()).map(|m|m.tab_name)
+            .or_else(||if id=="daya"{Some("Daya".into())}else{None});
+        if target_dir.exists(){std::fs::remove_dir_all(&target_dir).map_err(|e|format!("Paket belum dapat dilepas: {e}"))?;}
+        if !keep_data{let data=self.root.join("mod-data").join(id);if data.exists(){std::fs::remove_dir_all(data).map_err(|e|e.to_string())?;}}
+        settings.installed_mods.retain(|m|m!=id);settings.disabled_mods.retain(|m|m!=id);settings.network_mods.retain(|m|m!=id);settings.permissions.remove(id);
+        if let Some(tab)=tab{settings.mod_tabs.retain(|t|t!=&tab);settings.modules.remove(&tab);settings.tab_order.retain(|t|t!=&tab);if settings.default_tab==tab{settings.default_tab=settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());}}
 
         Ok(())
     }

@@ -21,7 +21,7 @@
   ],
   "tab_name": "Daya",
   "default_tab_enabled": true,
-  "description": "Monitor konsumsi energi PC (kWh), daya aktif, dan akumulasi biaya listrik PLN",
+  "description": "Sensor daya CPU/GPU dan energi komponen teramati. Pengukuran listrik seluruh PC membutuhkan power meter.",
   "author": "mynotch",
   "icon": "zap"
 }

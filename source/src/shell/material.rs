@@ -33,6 +33,9 @@ impl Bench {
 }
 
 pub(super) struct GlassRt {
+    pub hover:glass::hover::PointerSheen,
+    pub hover_tick:Instant,
+    pub hover_animating:bool,
     pub reduced: bool,
     pub high_contrast: bool,
     pub warp: bool,
@@ -56,6 +59,7 @@ impl GlassRt {
         });
         let bench = args.iter().find_map(|a| a.strip_prefix("--bench-log=")).and_then(Bench::open).map(RefCell::new);
         Self {
+            hover:Default::default(),hover_tick:Instant::now(),hover_animating:false,
             reduced: render::is_reduced_transparency(),
             high_contrast: render::is_high_contrast(),
             warp: false,
@@ -70,6 +74,20 @@ impl GlassRt {
 }
 
 impl Shell {
+    pub(super) fn update_glass_hover(&mut self,point:Option<(f32,f32)>){
+        let enabled=(self.expanded||self.hover_stage>=2)&&self.glass_config(self.height).is_some();
+        let point=point.filter(|(x,y)|enabled&&*x>=0.&&*x<=self.width&&*y>=0.&&*y<=self.height).map(|(x,y)|(x/self.width.max(1.),y/self.height.max(1.)));
+        self.glass.hover.target(point,self.settings.motion_reduced||!enabled);
+        unsafe{if self.glass.hover.step(0.){
+            if !self.glass.hover_animating{self.glass.hover_tick=Instant::now();self.glass.hover_animating=SetTimer(Some(self.hwnd),16,16,None)!=0;}
+        }else{let _=KillTimer(Some(self.hwnd),16);self.glass.hover_animating=false;}}
+    }
+    pub(super) fn step_glass_hover(&mut self){
+        let now=Instant::now();let dt=now.duration_since(self.glass.hover_tick).as_secs_f32();self.glass.hover_tick=now;
+        if (self.hover_stage<2&&!self.expanded)||self.glass_config(self.height).is_none(){self.glass.hover.target(None,true);}
+        if !self.glass.hover.step(dt){unsafe{let _=KillTimer(Some(self.hwnd),16);}self.glass.hover_animating=false;}
+        self.invalidate();
+    }
     pub(super) fn glass_env(&self) -> GlassEnv {
         // Preview windows skip the region entirely unless --edge-check is passed, and without a
         // region DWM would blur the whole canvas rectangle: never allow glass there.
@@ -97,7 +115,7 @@ impl Shell {
             return None;
         }
         let cfg = LiquidGlassConfig::for_height(mode, height, self.ui_light());
-        Some(if self.settings_open || self.tab == "Reminder" && self.hover_stage >= 2 { cfg.dense() } else { cfg })
+        Some(if self.settings_open || matches!(self.tab.as_str(),"Reminder"|"Kalender"|"Cuaca"|"Daya") && self.hover_stage >= 2 { cfg.dense() } else { cfg })
     }
 
     pub(super) fn refresh_glass_env(&mut self) {

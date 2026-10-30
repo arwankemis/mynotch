@@ -1,6 +1,21 @@
 use super::power_broker::*;
 
 #[test]
+fn observed_component_energy_persists_separately_from_legacy_data(){
+    let root=std::env::temp_dir().join(format!("mynotch-observed-energy-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let mut e=ObservedEnergy::load(&root);e.add("2026-10-30",0.1);e.add("2026-10-30",0.05);e.add("2026-10-31",f32::NAN);e.flush(&root).unwrap();
+    let loaded=ObservedEnergy::load(&root);assert!((loaded.days["2026-10-30"]-0.15).abs()<0.00001);
+    let h=loaded.history(2026);assert_eq!(h[0].provenance,"sensor_component_subtotal");assert!(loaded.history(2027).is_empty());
+    assert!(!root.join("mod-data/daya/history").exists());std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn corrupted_component_history_is_never_overwritten(){
+    let root=std::env::temp_dir().join(format!("mynotch-corrupt-energy-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(root.join("mod-data/daya")).unwrap();let path=root.join("mod-data/daya/observed-energy.json");std::fs::write(&path,b"corrupted original").unwrap();
+    let mut e=ObservedEnergy::load(&root);e.add("2026-10-30",0.1);assert!(e.flush(&root).is_err());assert_eq!(std::fs::read(path).unwrap(),b"corrupted original");std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn migration_keeps_legacy_when_history_cannot_be_written() {
     let root = std::env::temp_dir().join(format!("mynotch-migration-failure-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();

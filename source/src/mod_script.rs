@@ -649,6 +649,9 @@ pub fn run_lua_mod_source_capabilities(
                                     let clean = (m as f64 * 1000.0).round() / 1000.0;
                                     let _ = tbl.set(ctx, "monthly_cost_idr", Value::Number(clean));
                                 }
+                                for (key,value) in [("cpu_name",snap.cpu_name.as_deref()),("gpu_name",snap.gpu_name.as_deref()),("provider_note",snap.provider_note.as_deref())]{if let Some(v)=value{let _=tbl.set(ctx,key,Value::String(ctx.intern(v.as_bytes())));}}
+                                for (key,value) in [("cpu_watts",snap.cpu_watts),("gpu_watts",snap.gpu_watts),("today_kwh",snap.today_kwh)]{if let Some(v)=value{let _=tbl.set(ctx,key,Value::Number(v as f64));}}
+                                let _=tbl.set(ctx,"current_year",Value::Integer(chrono::Datelike::year(&chrono::Local::now())as i64));
                                 let _ = tbl.set(ctx, "is_active", Value::Boolean(true));
                                 res = Value::Table(tbl);
                             }
