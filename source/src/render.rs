@@ -172,92 +172,76 @@ impl Painter {
         if !self.formats.contains_key(&key){if let Ok(format)=self.factory.CreateTextFormat(w!("Segoe UI"),None,DWRITE_FONT_WEIGHT_LIGHT,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,size,w!("id-ID")){self.formats.insert(key,format);}}
         if let Some(format)=self.formats.get(&key){let text:Vec<u16>=text.encode_utf16().collect();self.brush.SetColor(&color(rgb,1.));self.context.DrawText(&text,format,&rect(x,y,width,height),&self.brush,D2D1_DRAW_TEXT_OPTIONS_CLIP,DWRITE_MEASURING_MODE_NATURAL);}
     }}
+    /// Builds the unified symmetrical concave ear contour path geometry.
+    /// Concave Béziers transition smoothly from the top screen edge to the body walls.
+    pub unsafe fn notch_path(&self,width:f32,height:f32,ear:f32,radius:f32)->Result<ID2D1PathGeometry>{unsafe{
+        let path=self.d2d.CreatePathGeometry()?;
+        let sink=path.Open()?;
+        sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
+        sink.AddLine(pt(0.,height-radius));
+        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
+        sink.AddLine(pt(width-radius,height));
+        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
+        sink.AddLine(pt(width,ear));
+        sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
+        sink.AddLine(pt(-ear,0.));
+        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink.Close()?;
+        Ok(path.into())
+    }}
+
+    /// Border stroke using the exact unified notch contour path geometry.
+    #[allow(dead_code)]
+    pub unsafe fn stroke_notch(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32,alpha:f32,thickness:f32){unsafe{
+        if let Ok(path)=self.notch_path(width,height,ear,radius){
+            self.brush.SetColor(&color(rgb,alpha));
+            self.context.DrawGeometry(&path,&self.brush,thickness,None);
+        }
+    }}
+
     /// Smooth physical notch contour with vector concave ear fillets and rounded bottom corners.
     pub unsafe fn fill_notch(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32){unsafe{
         self.fill_notch_alpha(width,height,ear,radius,rgb,1.);
     }}
     pub unsafe fn fill_notch_alpha(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32,alpha:f32){unsafe{
         let mut drawn=false;
-        if let Ok(path)=self.d2d.CreatePathGeometry(){
-            let closed=if let Ok(sink)=path.Open(){
-                sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
-                sink.AddLine(pt(0.,height-radius));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
-                sink.AddLine(pt(width-radius,height));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
-                sink.AddLine(pt(width,ear));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
-                sink.AddLine(pt(-ear,0.));
-                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-                sink.Close().is_ok()
-            }else{false};
-            if closed{
-                self.brush.SetColor(&color(rgb,alpha));
-                self.context.FillGeometry(&path,&self.brush,None);
-                drawn=true;
-            }
+        if let Ok(path)=self.notch_path(width,height,ear,radius){
+            self.brush.SetColor(&color(rgb,alpha));
+            self.context.FillGeometry(&path,&self.brush,None);
+            drawn=true;
         }
         if !drawn{
             self.fill_alpha(0.,0.,width,height,radius,rgb,alpha);
         }
     }}
     pub unsafe fn fill_notch_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,top_rgb:u32,bottom_rgb:u32,top_alpha:f32,bottom_alpha:f32){unsafe{
-        if let Ok(path)=self.d2d.CreatePathGeometry(){
-            let closed=if let Ok(sink)=path.Open(){
-                sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
-                sink.AddLine(pt(0.,height-radius));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
-                sink.AddLine(pt(width-radius,height));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
-                sink.AddLine(pt(width,ear));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
-                sink.AddLine(pt(-ear,0.));
-                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-                sink.Close().is_ok()
-            }else{false};
-            if closed{
-                let stops=[
-                    D2D1_GRADIENT_STOP{position:0.0,color:color(top_rgb,top_alpha)},
-                    D2D1_GRADIENT_STOP{position:0.55,color:color(bottom_rgb,bottom_alpha*0.35)},
-                    D2D1_GRADIENT_STOP{position:1.0,color:color(bottom_rgb,bottom_alpha)},
-                ];
-                let rt:Result<ID2D1RenderTarget>=self.context.cast();
-                if let Ok(rt)=rt{
-                    if let Ok(collection)=rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP){
-                        if let Ok(brush)=rt.CreateLinearGradientBrush(
-                            &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{
-                                startPoint:windows_numerics::Vector2{X:width*0.5,Y:0.},
-                                endPoint:windows_numerics::Vector2{X:width*0.5,Y:height},
-                            },
-                            None,
-                            &collection,
-                        ){
-                            self.context.FillGeometry(&path,&brush,None);
-                        }
+        if let Ok(path)=self.notch_path(width,height,ear,radius){
+            let stops=[
+                D2D1_GRADIENT_STOP{position:0.0,color:color(top_rgb,top_alpha)},
+                D2D1_GRADIENT_STOP{position:0.55,color:color(bottom_rgb,bottom_alpha*0.35)},
+                D2D1_GRADIENT_STOP{position:1.0,color:color(bottom_rgb,bottom_alpha)},
+            ];
+            let rt:Result<ID2D1RenderTarget>=self.context.cast();
+            if let Ok(rt)=rt{
+                if let Ok(collection)=rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP){
+                    if let Ok(brush)=rt.CreateLinearGradientBrush(
+                        &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{
+                            startPoint:windows_numerics::Vector2{X:width*0.5,Y:0.},
+                            endPoint:windows_numerics::Vector2{X:width*0.5,Y:height},
+                        },
+                        None,
+                        &collection,
+                    ){
+                        self.context.FillGeometry(&path,&brush,None);
                     }
                 }
             }
         }
     }}
     #[allow(dead_code)] pub unsafe fn fill_notch_radial_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,cx:f32,cy:f32,rx:f32,ry:f32,rgb:u32,inner_alpha:f32,outer_alpha:f32){unsafe{
-        if let Ok(path)=self.d2d.CreatePathGeometry(){
-            let closed=if let Ok(sink)=path.Open(){
-                sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
-                sink.AddLine(pt(0.,height-radius));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
-                sink.AddLine(pt(width-radius,height));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
-                sink.AddLine(pt(width,ear));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
-                sink.AddLine(pt(-ear,0.));
-                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-                sink.Close().is_ok()
-            }else{false};
-            if closed{
-                let stops=[
+        if let Ok(path)=self.notch_path(width,height,ear,radius){
+            let stops=[
                     D2D1_GRADIENT_STOP{position:0.0,color:color(rgb,inner_alpha)},
                     D2D1_GRADIENT_STOP{position:0.55,color:color(rgb,inner_alpha*0.4)},
                     D2D1_GRADIENT_STOP{position:1.0,color:color(rgb,outer_alpha)},
@@ -279,7 +263,6 @@ impl Painter {
                         }
                     }
                 }
-            }
         }
     }}
     pub unsafe fn draw_triangle(&self,p1:(f32,f32),p2:(f32,f32),p3:(f32,f32),rgb:u32){unsafe{
@@ -465,26 +448,12 @@ impl Painter {
         }
     }}
     pub unsafe fn fill_notch_half_gradient(&self,width:f32,height:f32,ear:f32,radius:f32,accent:u32,strength:f32){unsafe{
-        if let Ok(path)=self.d2d.CreatePathGeometry(){
-            let closed=if let Ok(sink)=path.Open(){
-                sink.BeginFigure(pt(-ear,0.),D2D1_FIGURE_BEGIN_FILLED);
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(-ear*0.5,0.),point2:pt(0.,ear*0.5),point3:pt(0.,ear)});
-                sink.AddLine(pt(0.,height-radius));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(0.,height-radius*0.45),point2:pt(radius*0.45,height),point3:pt(radius,height)});
-                sink.AddLine(pt(width-radius,height));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width-radius*0.45,height),point2:pt(width,height-radius*0.45),point3:pt(width,height-radius)});
-                sink.AddLine(pt(width,ear));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(width,ear*0.5),point2:pt(width+ear*0.5,0.),point3:pt(width+ear,0.)});
-                sink.AddLine(pt(-ear,0.));
-                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-                sink.Close().is_ok()
-            }else{false};
-            if closed{
-                // First fill base geometry with 100% solid OLED black to guarantee no transparent gaps!
-                self.brush.SetColor(&color(0x000000,1.0));
-                self.context.FillGeometry(&path,&self.brush,None);
+        if let Ok(path)=self.notch_path(width,height,ear,radius){
+            // First fill base geometry with 100% solid OLED black to guarantee no transparent gaps!
+            self.brush.SetColor(&color(0x000000,1.0));
+            self.context.FillGeometry(&path,&self.brush,None);
 
-                // 7-step cubic feather: top 60% solid OLED black, smooth imperceptible departure into soft ambient glow
+            // 7-step cubic feather: top 60% solid OLED black, smooth imperceptible departure into soft ambient glow
                 let stops=[
                     D2D1_GRADIENT_STOP{position:0.00,color:color(0x000000,1.0)},
                     D2D1_GRADIENT_STOP{position:0.60,color:color(0x000000,1.0)},
@@ -509,7 +478,6 @@ impl Painter {
                         }
                     }
                 }
-            }
         }
     }}
     pub unsafe fn stroke(&self,x:f32,y:f32,width:f32,height:f32,radius:f32,rgb:u32,thickness:f32){unsafe{
