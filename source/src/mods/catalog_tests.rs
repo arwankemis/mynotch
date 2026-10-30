@@ -2,6 +2,65 @@ use super::package::*;
 use super::catalog::*;
 use crate::core::Settings;
 
+#[test]
+fn builtin_catalog_matches_install_tab_toggle_and_uninstall_after_restart() {
+    for (id,tab) in [("sticky_notes","Catatan"),("weather","Cuaca")] {
+        let root=std::env::temp_dir().join(format!("mynotch-catalog-roundtrip-{id}-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        let pm=PackageManager::new(&root);let mut settings=Settings::default();
+        assert!(!pm.is_installed(&settings,id),"Available builtin {id} must not pretend to be installed");
+        crate::mods::install_mod(&root,&mut settings,id).unwrap();
+        let slot=settings.tab_order.iter().position(|s|s==tab).unwrap();
+        assert!(pm.is_installed(&settings,id));assert!(pm.is_tab_enabled(&settings,tab));
+        settings.set_mod_tab(tab,false);
+        assert!(!settings.active_tab_order().iter().any(|s|s==tab));
+        assert!(!pm.is_tab_enabled(&settings,tab));
+        let mut settings:Settings=serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();settings.normalize();
+        assert!(!pm.is_tab_enabled(&settings,tab));
+        settings.set_mod_tab(tab,true);assert!(settings.active_tab_order().iter().any(|s|s==tab));
+        assert!(!settings.mod_tabs.iter().any(|s|s==tab),"Builtin tabs must retain native registration");
+        std::fs::write(root.join("state.json"),b"user notes and preferences must survive").unwrap();
+        crate::mods::uninstall_mod(&root,&mut settings,id).unwrap();settings.normalize();
+        assert!(!pm.is_installed(&settings,id));
+        assert!(!get_catalog(&root,&settings).filter(PackageKind::Mod,CatalogFilter::Installed,"").iter().any(|e|e.manifest.id==id));
+        assert!(!settings.active_tab_order().iter().any(|s|s==tab));
+        assert_eq!(std::fs::read(root.join("state.json")).unwrap(),b"user notes and preferences must survive");
+        crate::mods::install_mod(&root,&mut settings,id).unwrap();
+        assert!(pm.is_installed(&settings,id));assert!(settings.enabled(tab));
+        assert_eq!(settings.tab_order.iter().position(|s|s==tab),Some(slot));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn registered_community_tab_off_is_reported_off_in_catalog() {
+    let mut settings=Settings::default();settings.set_mod_tab("Market Widget",true);
+    settings.set_mod_tab("Market Widget",false);
+    assert!(!PackageManager::new(std::path::Path::new("unused-test-root")).is_tab_enabled(&settings,"Market Widget"));
+}
+
+#[test]
+fn builtin_active_switch_suspends_tab_without_losing_tab_preference() {
+    for (id,tab) in [("sticky_notes","Catatan"),("weather","Cuaca")] {
+        let mut settings=Settings::default();settings.installed_mods.push(id.into());settings.modules.insert(tab.into(),true);
+        settings.disabled_mods.push(id.into());
+        assert!(!settings.enabled(tab));
+        assert_eq!(settings.modules.get(tab),Some(&true));
+        settings.disabled_mods.clear();assert!(settings.enabled(tab));
+    }
+}
+
+#[test]
+fn failed_builtin_uninstall_does_not_claim_success_or_remove_registration() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let root=std::env::temp_dir().join(format!("mynotch-uninstall-locked-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let mut settings=Settings::default();crate::mods::install_mod(&root,&mut settings,"weather").unwrap();
+    let locked=std::fs::OpenOptions::new().read(true).share_mode(0).open(root.join("mods/weather.mod.json")).unwrap();
+    assert!(crate::mods::uninstall_mod(&root,&mut settings,"weather").is_err());
+    assert!(settings.is_mod_installed("weather"));assert!(settings.enabled("Cuaca"));
+    drop(locked);std::fs::remove_dir_all(root).unwrap();
+}
+
 fn sample_mod_package() -> crate::mods::ModManifest {
     crate::mods::ModManifest {
         schema: 2,
