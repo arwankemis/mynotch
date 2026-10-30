@@ -224,7 +224,7 @@ impl Shell {
                 (
                     "mic",
                     COLOR_MIC,
-                    t("cat.audio", &lang),
+                    t("privacy.mic_title", &lang),
                     &self.privacy_snapshot.microphone,
                     t("privacy.mic_in_use", &lang),
                     t("privacy.mic_note", &lang),
@@ -233,7 +233,7 @@ impl Shell {
                 (
                     "camera",
                     COLOR_CAMERA,
-                    "Webcam",
+                    t("privacy.camera_title", &lang),
                     &self.privacy_snapshot.camera,
                     t("privacy.cam_detected", &lang),
                     t("privacy.experimental_note", &lang),
@@ -242,7 +242,7 @@ impl Shell {
                 (
                     "screen_share",
                     COLOR_SHARE,
-                    t("privacy.share_active", &lang),
+                    t("privacy.share_title", &lang),
                     &self.privacy_snapshot.screen_share,
                     t("privacy.share_active", &lang),
                     t("privacy.unavailable", &lang),
@@ -251,7 +251,7 @@ impl Shell {
                 (
                     "record",
                     COLOR_RECORD,
-                    t("privacy.record_active", &lang),
+                    t("privacy.record_title", &lang),
                     &self.privacy_snapshot.screen_recording,
                     t("privacy.record_active", &lang),
                     t("privacy.unavailable", &lang),

@@ -260,6 +260,10 @@ fn test_privacy_i18n_translation_keys_exist_for_id_and_en() {
     let keys = [
         "privacy.title",
         "privacy.subtitle",
+        "privacy.mic_title",
+        "privacy.camera_title",
+        "privacy.share_title",
+        "privacy.record_title",
         "privacy.mic_in_use",
         "privacy.cam_in_use",
         "privacy.cam_detected",
