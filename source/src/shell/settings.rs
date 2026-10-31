@@ -8,9 +8,9 @@ pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{
 }
 pub(super) fn prayer_lead_summary_i18n(city:&str,lead:u32,lang:&str)->String{
     if lang == "en" {
-        if lead==0{format!("{city} Â· On time")}else{format!("{city} Â· {lead} min before")}
+        if lead==0{format!("{city} · On time")}else{format!("{city} · {lead} min before")}
     } else {
-        if lead==0{format!("{city} Â· Tepat waktu")}else{format!("{city} Â· {lead} menit sebelumnya")}
+        if lead==0{format!("{city} · Tepat waktu")}else{format!("{city} · {lead} menit sebelumnya")}
     }
 }
 impl Shell{
@@ -222,8 +222,8 @@ impl Shell{
         if !enabled{p.text(t("reminders.disabled",&lang),196.,116.,210.,18.,11.,MUTED,false);self.st_button(p,t("reminders.enable",&lang),448.,112.,94.,Action::ToggleModule("Reminder".into()),true);}
         let top=if enabled{116.}else{153.};
         let rows=[
-            (t("reminders.focus",&lang),"timer",if lang == "en" { format!("{} min Â· break {} min",self.settings.focus_minutes,self.settings.break_minutes) } else { format!("{} menit Â· istirahat {} menit",self.settings.focus_minutes,self.settings.break_minutes) },self.settings.focus_enabled),
-            (t("reminders.hydrate",&lang),"droplet",if lang == "en" { format!("{} ml Â· every {} min",self.settings.water_target,self.settings.water_interval) } else { format!("{} ml Â· setiap {} menit",self.settings.water_target,self.settings.water_interval) },self.settings.water_reminder),
+            (t("reminders.focus",&lang),"timer",if lang == "en" { format!("{} min · break {} min",self.settings.focus_minutes,self.settings.break_minutes) } else { format!("{} menit · istirahat {} menit",self.settings.focus_minutes,self.settings.break_minutes) },self.settings.focus_enabled),
+            (t("reminders.hydrate",&lang),"droplet",if lang == "en" { format!("{} ml · every {} min",self.settings.water_target,self.settings.water_interval) } else { format!("{} ml · setiap {} menit",self.settings.water_target,self.settings.water_interval) },self.settings.water_reminder),
             (t("reminders.stretch",&lang),"person",if lang == "en" { format!("Break every {} min",self.settings.move_interval) } else { format!("Jeda setiap {} menit",self.settings.move_interval) },self.settings.move_reminder),
             (t("reminders.prayer",&lang),"moon",prayer_lead_summary_i18n(&self.settings.prayer_city,self.settings.prayer_lead,&lang),self.settings.prayer_enabled)
         ];
@@ -351,7 +351,7 @@ impl Shell{
                 p.stroke(card_x, card_y, card_w, card_h, 8., 0x10b981, 0.6);
                 p.outline_icon("check", card_x + 14., card_y + 16., 20., 0x34d399);
                 p.text(t("update.up_to_date", &lang), card_x + 44., card_y + 16., card_w - 56., 20., 12.0, 0x34d399, true);
-                let sub = format!("{} {} Â· {}", t("update.checked_at", &lang), time, t("update.up_to_date_sub", &lang));
+                let sub = format!("{} {} · {}", t("update.checked_at", &lang), time, t("update.up_to_date_sub", &lang));
                 p.text(&sub, card_x + 44., card_y + 38., card_w - 56., 30., 10.0, 0xa7f3d0, false);
             },
             super::UpdateStatus::Available(update) => {

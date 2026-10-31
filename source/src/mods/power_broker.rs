@@ -22,7 +22,7 @@ impl ObservedEnergy{
         let mut months=std::collections::BTreeMap::<u32,MonthlyPowerHistory>::new();
         for (date,kwh) in &self.days{
             let Ok(day)=chrono::NaiveDate::parse_from_str(date,"%Y-%m-%d") else{continue};if day.year()!=year||!kwh.is_finite()||*kwh<0.{continue}
-            let h=months.entry(day.month()).or_insert_with(||MonthlyPowerHistory{year,month:day.month(),name:format!("Sensor Â· {:02}/{year}",day.month()),total_kwh:0.,total_cost_idr:0,provenance:"sensor_component_subtotal".into(),days:0,daily_buckets:vec![]});
+            let h=months.entry(day.month()).or_insert_with(||MonthlyPowerHistory{year,month:day.month(),name:format!("Sensor · {:02}/{year}",day.month()),total_kwh:0.,total_cost_idr:0,provenance:"sensor_component_subtotal".into(),days:0,daily_buckets:vec![]});
             h.total_kwh+=kwh;h.days+=1;
         }
         months.into_values().rev().collect()
