@@ -109,3 +109,12 @@ fn official_daya_package_keeps_missing_measurements_unavailable_and_shows_hardwa
     assert!(output.gauge.unwrap().value.is_none());
     let metrics=output.metrics.unwrap();assert_eq!(metrics.items[0].label,"Test CPU");assert_eq!(metrics.items[1].label,"Test GPU");assert_eq!(metrics.items[0].value,"—");
 }
+
+#[test]
+fn daya_dashboard_separates_legacy_estimates_and_formats_sensor_values(){
+    let mut snapshot=crate::system::PowerSnapshot::default();snapshot.gpu_watts=Some(51.2345);snapshot.active_power_w=Some(51.2345);snapshot.provider_note=Some("GPU ready, CPU needs setup".into());
+    let h=|provenance:&str,kwh|crate::mods::power_broker::MonthlyPowerHistory{year:2026,month:10,name:"October".into(),total_kwh:kwh,total_cost_idr:0,provenance:provenance.into(),days:1,daily_buckets:vec![]};
+    let out=super::run_lua_mod_source_capabilities(include_bytes!("../../assets/mods/daya/main.lua"),None,None,false,&std::collections::BTreeMap::new(),&["power.read".into()],Some(&snapshot),&[h("legacy_estimated_monthly",0.429789),h("sensor_component_subtotal",0.123456)],None).unwrap();
+    let history=out.history.unwrap();assert_eq!(history.items.len(),1);assert_eq!(history.items[0].value,"0.123 kWh");
+    let m=out.metrics.unwrap();assert_eq!(m.items[1].value,"51.2 W");assert_eq!(m.note.as_deref(),Some("GPU ready, CPU needs setup"));
+}

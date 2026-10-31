@@ -7,13 +7,34 @@ use super::crypto::hash_file_hex;
 
 pub const MAX_TOTAL_EXTRACTED_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
 pub const MAX_SINGLE_FILE_BYTES: u64 = 128 * 1024 * 1024;    // 128 MiB
-pub const MAX_ARCHIVE_FILES: usize = 256;
+pub const MAX_ARCHIVE_FILES: usize = 1024;
 
 const RESERVED_DEVICE_NAMES: &[&str] = &[
     "CON", "PRN", "AUX", "NUL",
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
+
+#[cfg(test)]mod provider_payload_test{
+    use super::*;
+    #[test]
+    #[ignore="requires an actual built ZIP in MYNOTCH_PACKAGE_ZIP"]
+    fn actual_packaged_sensor_runtime_extracts_as_managed_update_files(){
+        let archive=std::env::var("MYNOTCH_PACKAGE_ZIP").expect("Set MYNOTCH_PACKAGE_ZIP");
+        let dir=std::env::temp_dir().join(format!("mynotch-real-sensor-package-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let files=extract_zip_file_safely(Path::new(&archive),&dir).unwrap();
+        for required in ["mynotch.exe","power-provider/mynotch-power.exe","power-provider/LibreHardwareMonitorLib.dll","power-provider/coreclr.dll","power-provider/driver/PawnIO_setup.exe","power-provider/source/Program.cs","power-provider/notices/DotNet-Runtime-LICENSE.txt","power-provider/notices/Mono.Posix-NOTICES.txt"]{assert!(dir.join(required).is_file(),"{required}");}
+        assert_eq!(hash_file_hex(&dir.join("power-provider/driver/PawnIO_setup.exe")).unwrap(),"a3a46226c5e2824f4cdd42be0eecbabfc672c86f7889710f5ab1e6ad385b47a0");
+        assert!(!dir.join("data").exists());assert!(!dir.join("preview-data").exists());
+        println!("Verified {} managed update files in {}",files.len(),archive);std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]fn updater_accepts_self_contained_sensor_runtime_file_count(){
+        let mut bytes=Cursor::new(Vec::new());
+        {let mut zip=zip::ZipWriter::new(&mut bytes);for i in 0..600{zip.start_file(format!("power-provider/runtime-{i}.dll"),zip::write::SimpleFileOptions::default()).unwrap();zip.write_all(b"runtime").unwrap();}zip.finish().unwrap();}
+        let dir=std::env::temp_dir().join(format!("mynotch-provider-runtime-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let result=extract_zip_data_safely(bytes.get_ref(),&dir);let _=std::fs::remove_dir_all(&dir);assert_eq!(result.unwrap().len(),600);
+    }
+}
 
 pub fn validate_entry_name(name: &str) -> Result<PathBuf, String> {
     if name.is_empty() {

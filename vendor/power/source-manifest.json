@@ -1,0 +1,54 @@
+[
+  {
+    "file": "sources/librehardwaremonitorlib-0.9.6-source.zip",
+    "url": "https://codeload.github.com/LibreHardwareMonitor/LibreHardwareMonitor/zip/3d331e3370efb858411f19511373eff65a218701",
+    "sha256": "5a83ee3f504a85efb6afee4112447e60caca1b7ec2e2d71f4651570b8b9b4230",
+    "source_commit": "3d331e3370efb858411f19511373eff65a218701",
+    "license": "MPL-2.0"
+  },
+  {
+    "file": "sources/blacksharp.core-1.0.7-source.zip",
+    "url": "https://codeload.github.com/Blacktempel/BlackSharp/zip/c70b735c6cec123ee8a046ac4a0bc6c606f52cf0",
+    "sha256": "ab50d38c8cfec1cc041d924730bc417b6d9c81b5b0ff542572a03ad9163cdc1e",
+    "source_commit": "c70b735c6cec123ee8a046ac4a0bc6c606f52cf0",
+    "license": "MPL-2.0"
+  },
+  {
+    "file": "sources/diskinfotoolkit-1.1.2-source.zip",
+    "url": "https://codeload.github.com/Blacktempel/DiskInfoToolkit/zip/25319eae5781e75bcf141e844ceab2afe94d40ea",
+    "sha256": "2df4f067370fc3bb338ce60bdee12879c67ee5377d72e6cc8d79167001039102",
+    "source_commit": "25319eae5781e75bcf141e844ceab2afe94d40ea",
+    "license": "MPL-2.0"
+  },
+  {
+    "file": "sources/ramspdtoolkit-ndd-1.4.2-source.zip",
+    "url": "https://codeload.github.com/Blacktempel/RAMSPDToolkit/zip/3b47b960e0830fef344624ad5e389675d5f0a1ce",
+    "sha256": "a1a0b3c3e94fea2d88a70abb74a08776a7602866b1e2d6ea6c3ab262dda925ba",
+    "source_commit": "3b47b960e0830fef344624ad5e389675d5f0a1ce",
+    "license": "MPL-2.0"
+  },
+  {
+    "file": "sources/PawnIO-2.1.0-source.zip",
+    "url": "https://github.com/namazso/PawnIO/tree/e1043d7750f501b6b0d3ac0a71bd5b9406cd17b6",
+    "sha256": "f87c6bfeb26b1fbaaaa3c33c7480cca02463102dc499648408839f34e50256d7",
+    "source_commit": "e1043d7750f501b6b0d3ac0a71bd5b9406cd17b6",
+    "license": "GPL-2.0-or-later with upstream exception",
+    "submodules": "e64e4c37b2d8ba0d8ee57205faf8183aee12c438 PawnPP (e64e4c3)"
+  },
+  {
+    "file": "sources/PawnIO.Modules-0.2.2-source.zip",
+    "url": "https://github.com/namazso/PawnIO.Modules/tree/e12a858d952461ee2e919897cacbff7f905fe370",
+    "sha256": "a42f1831afa5c4605d2106435fc84b5b7e247334bc4a1eac882aed0da830fefe",
+    "source_commit": "e12a858d952461ee2e919897cacbff7f905fe370",
+    "license": "LGPL-2.1-or-later",
+    "submodules": ""
+  },
+  {
+    "file": "PawnIO_setup.exe",
+    "url": "https://raw.githubusercontent.com/LibreHardwareMonitor/LibreHardwareMonitor/v0.9.6/LibreHardwareMonitor/Resources/PawnIO_setup.exe",
+    "sha256": "a3a46226c5e2824f4cdd42be0eecbabfc672c86f7889710f5ab1e6ad385b47a0",
+    "version": "2.1.0.0",
+    "license": "GPL-2.0-or-later with upstream exception",
+    "authenticode_signer": "namazso"
+  }
+]

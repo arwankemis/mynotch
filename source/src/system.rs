@@ -607,6 +607,7 @@ pub struct PowerSample {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PowerSnapshot {
+    #[serde(default)] pub cpu_setup_required:bool,
     #[serde(default)] pub provider_note:Option<String>,
     #[serde(default)] pub today_kwh:Option<f32>,
     pub source_kind: SourceKind,
@@ -629,7 +630,7 @@ pub struct PowerSnapshot {
 impl Default for PowerSnapshot {
     fn default() -> Self {
         Self {
-            provider_note:None,today_kwh:None,
+            cpu_setup_required:false,provider_note:None,today_kwh:None,
             source_kind: SourceKind::Unavailable,
             quality: Quality::Disconnected,
             active_power_w: None,
@@ -661,7 +662,7 @@ pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
     let monthly_cost = daily_cost * 30.0;
 
     PowerSnapshot {
-        provider_note:Some("Estimasi lama, bukan sensor perangkat".into()),today_kwh:None,
+        cpu_setup_required:false,provider_note:Some("Estimasi lama, bukan sensor perangkat".into()),today_kwh:None,
         source_kind: SourceKind::Estimated,
         quality: Quality::Valid,
         active_power_w: Some(total_ac),

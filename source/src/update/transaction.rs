@@ -23,6 +23,19 @@ pub struct ManagedFile {
     pub original_sha256: Option<String>,
 }
 
+#[cfg(test)]mod provider_lock_test{
+    use super::*;use std::os::windows::fs::OpenOptionsExt;
+    #[test]fn swap_waits_for_a_stopping_sensor_provider_to_release_its_dll(){
+        let root=std::env::temp_dir().join(format!("mynotch-provider-lock-{}",SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let live=root.join("live");let stage=root.join("stage");fs::create_dir_all(live.join("power-provider")).unwrap();fs::create_dir_all(stage.join("power-provider")).unwrap();
+        let rel=PathBuf::from("power-provider/sensor.dll");fs::write(live.join(&rel),b"old").unwrap();fs::write(stage.join(&rel),b"new").unwrap();
+        let lock=fs::OpenOptions::new().read(true).share_mode(0).open(live.join(&rel)).unwrap();
+        let release=std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_millis(200));drop(lock);});
+        let mut journal=TransactionJournal::new("provider-lock".into(),live.clone(),stage,root.join("backup"),live.join("mynotch.exe"),0,vec![ManagedFile{relative_path:rel.clone(),stage_sha256:None,original_sha256:None}],"test".into(),"public".into());
+        let result=execute_swap(&mut journal,&root.join("tx"));release.join().unwrap();assert!(result.is_ok(),"{result:?}");assert_eq!(fs::read(live.join(&rel)).unwrap(),b"new");fs::remove_dir_all(root).unwrap();
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionReceipt {
     pub version: String,
@@ -190,7 +203,12 @@ pub fn execute_swap(
         }
 
         // Copy from staging to destination (replaces destination)
-        fs::copy(&staged_path, &live_path).map_err(|e| {
+        let mut attempts=0;
+        let copied=loop{match fs::copy(&staged_path,&live_path){
+            Err(e) if matches!(e.raw_os_error(),Some(32|33))&&attempts<30=>{attempts+=1;std::thread::sleep(std::time::Duration::from_millis(100));},
+            result=>break result,
+        }};
+        copied.map_err(|e| {
             format!(
                 "Gagal menyalin berkas baru '{:?}' ke live target '{:?}': {e}",
                 staged_path, live_path

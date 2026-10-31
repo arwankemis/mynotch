@@ -6,7 +6,7 @@
   "package_kind": "mod",
   "mod_type": "lua",
   "entry": "main.lua",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "min_host_api": 2,
   "profiles": [
     "public",

@@ -3,34 +3,41 @@ use super::{PowerSnapshot,SourceKind,Quality};
 use std::{sync::{Arc,Mutex,mpsc},thread,time::{Duration,Instant}};
 use windows::{core::{BSTR,PCWSTR,Result},Win32::System::{Com::*,Wmi::*,Variant::VARIANT}};
 
-enum Control{Active(bool),Stop}
+mod bundled;
+enum Control{Active(bool),Setup,Stop}
 fn fresh_snapshot(mut snapshot:PowerSnapshot,age:Duration)->PowerSnapshot{
-    if age>Duration::from_secs(6){snapshot.active_power_w=None;snapshot.cpu_watts=None;snapshot.gpu_watts=None;snapshot.total_dc_watts=None;snapshot.source_kind=SourceKind::Unavailable;snapshot.quality=Quality::Stale;snapshot.provider_note=Some("Sensor belum memberikan data baru; pencatatan energi dijeda.".into());}snapshot
+    if age>Duration::from_secs(6){snapshot.cpu_setup_required=false;snapshot.active_power_w=None;snapshot.cpu_watts=None;snapshot.gpu_watts=None;snapshot.total_dc_watts=None;snapshot.source_kind=SourceKind::Unavailable;snapshot.quality=Quality::Stale;snapshot.provider_note=Some("Sensor belum memberikan data baru; pencatatan energi dijeda.".into());}snapshot
 }
-pub struct PowerSensors{state:Arc<Mutex<(PowerSnapshot,Instant)>>,stop:mpsc::Sender<Control>,active:std::sync::atomic::AtomicBool}
+pub struct PowerSensors{state:Arc<Mutex<(PowerSnapshot,Instant)>>,stop:mpsc::Sender<Control>,stopped:mpsc::Receiver<()>,active:std::sync::atomic::AtomicBool}
 impl PowerSensors{
     pub fn start()->Self{
         let state=Arc::new(Mutex::new((PowerSnapshot{provider_note:Some("Mendeteksi perangkat dan sensor daya…".into()),..Default::default()},Instant::now())));
-        let shared=state.clone();let(stop,rx)=mpsc::channel();
+        let shared=state.clone();let(stop,rx)=mpsc::channel();let(stopped_tx,stopped)=mpsc::channel();
         let _=thread::Builder::new().name("notch-power-sensors".into()).spawn(move||unsafe{
-            if CoInitializeEx(None,COINIT_MULTITHREADED).is_err(){return}
-            struct Apartment;impl Drop for Apartment{fn drop(&mut self){unsafe{CoUninitialize()}}}let _apartment=Apartment;
-            let locator:Result<IWbemLocator>=CoCreateInstance(&WbemLocator,None,CLSCTX_INPROC_SERVER);
-            let Ok(locator)=locator else{return};
-            let system=connect(&locator,r"ROOT\CIMV2").ok();
+            struct Finished(mpsc::Sender<()>);impl Drop for Finished{fn drop(&mut self){let _=self.0.send(());}}let _finished=Finished(stopped_tx);
+            let helper_path=std::env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("power-provider/mynotch-power.exe")));
+            let has_helper=helper_path.as_ref().is_some_and(|p|p.is_file());
+            let com_ready=!has_helper&&CoInitializeEx(None,COINIT_MULTITHREADED).is_ok();
+            struct Apartment(bool);impl Drop for Apartment{fn drop(&mut self){if self.0{unsafe{CoUninitialize()}}}}let _apartment=Apartment(com_ready);
+            let locator:Option<IWbemLocator>=if com_ready{CoCreateInstance(&WbemLocator,None,CLSCTX_INPROC_SERVER).ok()}else{None};
+            let system=locator.as_ref().and_then(|l|connect(l,r"ROOT\CIMV2").ok());
             let cpu=system.as_ref().and_then(|s|names(s,"Win32_Processor").into_iter().next());
             let gpu=system.as_ref().and_then(|s|names(s,"Win32_VideoController").into_iter().find(|n|!n.contains("Microsoft Basic")));
             let mut provider:Option<(String,IWbemServices)>=None;let mut retries=0;
+            let mut helper:Option<bundled::Session>=None;let mut helper_frame:Option<(bundled::Frame,Instant)>=None;
             let mut active=true;
             loop{
-                if !active{match rx.recv(){Ok(Control::Active(v))=>{active=v;continue},_=>break}}
+                if !active{helper=None;helper_frame=None;retries=0;match rx.recv(){Ok(Control::Active(v))=>{active=v;continue},Ok(Control::Setup)=>continue,_=>break}}
                 let acquired=Instant::now();
-                if provider.is_none()&&retries%15==0{for ns in [r"ROOT\LibreHardwareMonitor",r"ROOT\OpenHardwareMonitor"]{
-                    if let Ok(service)=connect(&locator,ns){provider=Some((ns.into(),service));break}
+                if helper.is_none()&&retries%15==0{if let Some(path)=helper_path.as_ref().filter(|p|p.is_file()){helper=bundled::Session::start(path).ok();}}
+                if let Some(session)=helper.as_mut(){if let Some(frame)=session.latest(){helper_frame=Some(frame);}if session.exited(){helper=None;}}
+                if helper.is_none()&&provider.is_none()&&retries%15==0{for ns in [r"ROOT\LibreHardwareMonitor",r"ROOT\OpenHardwareMonitor"]{
+                    if let Some(locator)=&locator{if let Ok(service)=connect(locator,ns){provider=Some((ns.into(),service));break}}
                 }}
                 retries+=1;
-                let mut snapshot=PowerSnapshot{cpu_name:cpu.clone(),gpu_name:gpu.clone(),provider_note:Some("Sensor daya belum tersedia. Jalankan provider LibreHardwareMonitor/OpenHardwareMonitor dengan WMI aktif.".into()),..Default::default()};
-                if let Some((name,service))=&provider{
+                let mut snapshot=PowerSnapshot{cpu_name:cpu.clone(),gpu_name:gpu.clone(),provider_note:Some(if has_helper{"Pembaca sensor bawaan belum memberikan data baru; mencoba menghubungkan kembali."}else{"Pembaca sensor bawaan tidak ditemukan; fallback sensor WMI belum tersedia."}.into()),..Default::default()};
+                if let Some((frame,_))=helper_frame.as_ref().filter(|(_,at)|at.elapsed()<=Duration::from_secs(6)){frame.apply(&mut snapshot);}
+                else if let Some((name,service))=&provider{
                     let mut readings=Vec::new();
                     if let Ok(objects)=query(service,"SELECT Name,Identifier,Parent,Value FROM Sensor WHERE SensorType='Power'"){
                         for o in objects{
@@ -40,20 +47,21 @@ impl PowerSensors{
                     }else{snapshot.provider_note=Some("Provider sensor tidak merespons; tidak ada pengukuran daya baru.".into());provider=None;}
                 }
                 if let Ok(mut state)=shared.lock(){*state=(snapshot,acquired);}
-                match rx.recv_timeout(Duration::from_secs(2)){Ok(Control::Active(v))=>active=v,Ok(Control::Stop)|Err(mpsc::RecvTimeoutError::Disconnected)=>break,Err(mpsc::RecvTimeoutError::Timeout)=>{}}
+                match rx.recv_timeout(Duration::from_secs(2)){Ok(Control::Active(v))=>active=v,Ok(Control::Setup)=>{if let Some(session)=helper.as_mut(){session.request_admin();}},Ok(Control::Stop)|Err(mpsc::RecvTimeoutError::Disconnected)=>break,Err(mpsc::RecvTimeoutError::Timeout)=>{}}
             }
         });
-        Self{state,stop,active:std::sync::atomic::AtomicBool::new(true)}
+        Self{state,stop,stopped,active:std::sync::atomic::AtomicBool::new(true)}
     }
+    pub fn request_admin(&self){let _=self.stop.send(Control::Setup);}
     pub fn set_active(&self,enabled:bool){
         if self.active.swap(enabled,std::sync::atomic::Ordering::AcqRel)!=enabled{
-            if enabled{if let Ok(mut s)=self.state.lock(){let s=&mut s.0;s.active_power_w=None;s.cpu_watts=None;s.gpu_watts=None;s.quality=Quality::Stale;s.provider_note=Some("Memperbarui sensor…".into());}}
+            if enabled{if let Ok(mut s)=self.state.lock(){let s=&mut s.0;s.cpu_setup_required=false;s.active_power_w=None;s.cpu_watts=None;s.gpu_watts=None;s.quality=Quality::Stale;s.provider_note=Some("Memperbarui sensor…".into());}}
             let _=self.stop.send(Control::Active(enabled));
         }
     }
     pub fn snapshot(&self)->PowerSnapshot{self.state.lock().map(|s|fresh_snapshot(s.0.clone(),s.1.elapsed())).unwrap_or_default()}
 }
-impl Drop for PowerSensors{fn drop(&mut self){let _=self.stop.send(Control::Stop);}}
+impl Drop for PowerSensors{fn drop(&mut self){let _=self.stop.send(Control::Stop);let _=self.stopped.recv_timeout(Duration::from_secs(3));}}
 
 unsafe fn connect(locator:&IWbemLocator,namespace:&str)->Result<IWbemServices>{unsafe{
     let empty=BSTR::new();let service=locator.ConnectServer(&BSTR::from(namespace),&empty,&empty,&empty,128,&empty,None)?;

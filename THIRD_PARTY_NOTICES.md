@@ -38,3 +38,10 @@ libunwind.dll is bundled from the Rust/LLVM GNU Windows toolchain used for this 
 ## Online data
 
 Lyrics are requested from LRCLIB (https://lrclib.net/). Prayer schedules are requested from myQuran (https://api.myquran.com/doc), whose documentation attributes the schedule data to Kemenag Bimas Islam. The app does not claim ownership of lyrics or external schedule data.
+
+
+## Optional bundled power sensor reader
+
+The Public and Personal distributions include `power-provider/`, used only while Mod Daya is active. It contains self-contained .NET 10.0.12, LibreHardwareMonitorLib 0.9.6 (MPL-2.0), its transitive libraries, and the official signed PawnIO 2.1.0 setup. PawnIO.Modules uses LGPL terms; the driver uses GPL terms with its upstream exception. Full notices and exact corresponding source archives are distributed in `power-provider/notices/` and `power-provider/sources/`; pinned versions, source commits and SHA-256 values are in `power-provider/source-manifest.json`. The mynotch helper's complete source/project/lock file is in `power-provider/source/`.
+
+Driver setup is optional and user initiated through Daya's CPU sensor setup button. It is never silently installed. The main mynotch UI is not elevated and no Windows protection settings are changed. See the bundled provider README for supported platforms, per-session CPU permission and measured-component limitations.
