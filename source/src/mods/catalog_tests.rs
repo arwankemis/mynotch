@@ -3,6 +3,29 @@ use super::catalog::*;
 use crate::core::Settings;
 
 #[test]
+fn legacy_daya_marker_is_not_a_runnable_installed_package(){
+    let root=std::env::temp_dir().join(format!("mynotch-legacy-daya-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(root.join("mods")).unwrap();std::fs::write(root.join("mods/daya.mod.json"),b"{}").unwrap();
+    let mut s=Settings::default();s.installed_mods.push("daya".into());
+    assert!(!PackageManager::new(&root).is_installed(&s,"daya"));
+    let c=get_catalog(&root,&s);assert!(!c.entries.iter().find(|e|e.manifest.id=="daya").unwrap().is_active);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn disabled_daya_uninstall_cannot_resurrect_from_flat_legacy_marker(){
+    let root=std::env::temp_dir().join(format!("mynotch-uninstall-legacy-daya-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let pm=PackageManager::new(&root);let mut s=Settings::default();
+    pm.install_package(&mut s,&sample_mod_package(),&[("main.lua",b"-- package")]).unwrap();
+    std::fs::write(root.join("mods/daya.mod.json"),b"{}").unwrap();pm.disable_package(&mut s,"daya");
+    std::fs::create_dir_all(root.join("mod-data/daya")).unwrap();std::fs::write(root.join("mod-data/daya/history.json"),b"keep").unwrap();
+    pm.uninstall_package(&mut s,"daya",true).unwrap();
+    assert!(!root.join("mods/daya.mod.json").exists());assert!(!pm.is_installed(&s,"daya"));assert!(!pm.is_active(&s,"daya"));
+    assert_eq!(std::fs::read(root.join("mod-data/daya/history.json")).unwrap(),b"keep");
+    pm.uninstall_package(&mut s,"daya",true).unwrap();assert!(!pm.is_active(&s,"daya"));std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn package_file_paths_cannot_overwrite_files_outside_package(){
     let root=std::env::temp_dir().join(format!("mynotch-package-path-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     let mut s=Settings::default();let pm=PackageManager::new(&root);

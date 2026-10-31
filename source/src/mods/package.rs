@@ -32,6 +32,7 @@ impl<'a> PackageManager<'a> {
 
     pub fn is_installed(&self, settings: &Settings, id: &str) -> bool {
         if !super::safe_mod_id(id){return false}
+        if id=="daya"{return self.root.join("mods/daya/mod.json").is_file()||self.root.join("mods/daya/manifest.json").is_file()}
         settings.installed_mods.iter().any(|m| m == id)
             || self.root.join("mods").join(format!("{id}.mod.json")).is_file()
             || self.root.join("mods").join(id).join("mod.json").is_file()
@@ -106,6 +107,8 @@ impl<'a> PackageManager<'a> {
         let target_dir=self.root.join("mods").join(id);
         let tab=std::fs::read(target_dir.join("mod.json")).ok().and_then(|b|serde_json::from_slice::<ModManifest>(&b).ok()).map(|m|m.tab_name)
             .or_else(||if id=="daya"{Some("Daya".into())}else{None});
+        let legacy=self.root.join("mods").join(format!("{id}.mod.json"));
+        if legacy.exists(){std::fs::remove_file(&legacy).map_err(|e|format!("Penanda paket lama belum dapat dilepas: {e}"))?;}
         if target_dir.exists(){std::fs::remove_dir_all(&target_dir).map_err(|e|format!("Paket belum dapat dilepas: {e}"))?;}
         if !keep_data{let data=self.root.join("mod-data").join(id);if data.exists(){std::fs::remove_dir_all(data).map_err(|e|e.to_string())?;}}
         settings.installed_mods.retain(|m|m!=id);settings.disabled_mods.retain(|m|m!=id);settings.network_mods.retain(|m|m!=id);settings.permissions.remove(id);
