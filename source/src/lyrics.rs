@@ -4,9 +4,14 @@ use windows::core::{w, s};
 use windows::Win32::Foundation::FreeLibrary;
 use windows::Win32::System::LibraryLoader::{LoadLibraryW, GetProcAddress};
 
-type FnOpen = unsafe extern "C" fn(*const u16, i32, i32, *const u16, i32, *mut [i32; 8], *mut i32) -> *mut std::ffi::c_void;
+/// UParseError layout (icu.h): line + offset + 16 UChar pre/post context = 72 bytes.
+/// The old `[i32; 8]` buffer was only 32 bytes; a parse failure would have written past it.
+#[repr(C)]
+struct UParseError { line: i32, offset: i32, pre_context: [u16; 16], post_context: [u16; 16] }
+type FnOpen = unsafe extern "C" fn(*const u16, i32, i32, *const u16, i32, *mut UParseError, *mut i32) -> *mut std::ffi::c_void;
 type FnClose = unsafe extern "C" fn(*mut std::ffi::c_void);
 type FnTrans = unsafe extern "C" fn(*const std::ffi::c_void, *mut u16, *mut i32, i32, i32, *mut i32, *mut i32);
+type FnGetVersion = unsafe extern "C" fn(*mut u8);
 
 struct IcuTrans {
     trans: *mut std::ffi::c_void,
@@ -38,10 +43,11 @@ fn with_icu<F: FnOnce(&IcuTrans) -> R, R>(f: F) -> Option<R> {
 fn init_icu() -> Option<IcuTrans> {
     unsafe {
         let h_icu = LoadLibraryW(w!("icu.dll")).ok()?;
-        let (Some(p_open), Some(p_close), Some(p_trans)) = (
+        let (Some(p_open), Some(p_close), Some(p_trans), Some(p_version)) = (
             GetProcAddress(h_icu, s!("utrans_openU")),
             GetProcAddress(h_icu, s!("utrans_close")),
             GetProcAddress(h_icu, s!("utrans_transUChars")),
+            GetProcAddress(h_icu, s!("u_getVersion")),
         ) else {
             let _ = FreeLibrary(h_icu);
             return None;
@@ -50,9 +56,20 @@ fn init_icu() -> Option<IcuTrans> {
         let fn_open: FnOpen = std::mem::transmute(p_open);
         let fn_close: FnClose = std::mem::transmute(p_close);
         let fn_trans: FnTrans = std::mem::transmute(p_trans);
+        let fn_version: FnGetVersion = std::mem::transmute(p_version);
+
+        // Version gate: refuse a DLL that is not really ICU (or is too old for the
+        // transliterator ABI assumed here). Floor 50 (2013) is far below any
+        // Windows-shipped icu.dll; it guards against stub exports, not features.
+        let mut version = [0u8; 4];
+        fn_version(version.as_mut_ptr());
+        if version[0] < 50 {
+            let _ = FreeLibrary(h_icu);
+            return None;
+        }
 
         let id: Vec<u16> = "Any-Latin; Latin-ASCII".encode_utf16().collect();
-        let mut parse_err = [0i32; 8];
+        let mut parse_err = UParseError { line: 0, offset: 0, pre_context: [0; 16], post_context: [0; 16] };
         let mut status = 0i32;
         let trans = fn_open(id.as_ptr(), id.len() as i32, 0, std::ptr::null(), 0, &mut parse_err, &mut status);
         if trans.is_null() || status > 0 {

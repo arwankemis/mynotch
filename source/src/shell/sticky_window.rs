@@ -139,6 +139,28 @@ unsafe extern "system" fn sticky_wndproc(
     }
 }
 
+/// Clamps a pop-out rectangle inside the work area of the monitor nearest the cursor,
+/// so a note popped out near a screen edge (or on a small monitor) cannot land
+/// partially or fully off-screen. Coordinates are physical pixels, the same space the
+/// window itself is created in, so no extra DPI scaling is needed here.
+fn clamp_to_work_area(x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
+    unsafe {
+        let mut cursor = POINT::default();
+        let _ = GetCursorPos(&mut cursor);
+        let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO::default();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            let work = info.rcWork;
+            let clamped_x = x.clamp(work.left, (work.right - w).max(work.left));
+            let clamped_y = y.clamp(work.top, (work.bottom - h).max(work.top));
+            (clamped_x, clamped_y)
+        } else {
+            (x, y)
+        }
+    }
+}
+
 pub fn spawn_floating_sticky_note(note_id: u64, title: &str, content: &str, color_idx: u8, shell: HWND) {
     unsafe {
         let instance = match GetModuleHandleW(None) {
@@ -173,6 +195,7 @@ pub fn spawn_floating_sticky_note(note_id: u64, title: &str, content: &str, colo
         let _ = GetCursorPos(&mut cursor);
         let x = if cursor.x > 100 { cursor.x - 120 } else { 100 };
         let y = if cursor.y > 100 { cursor.y + 20 } else { 100 };
+        let (x, y) = clamp_to_work_area(x, y, 280, 240);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,

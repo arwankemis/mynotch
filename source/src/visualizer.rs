@@ -59,11 +59,18 @@ impl Visualizer {
     pub fn is_running(&self) -> bool {
         !self.cancelled.load(Ordering::Acquire) && self.worker.as_ref().is_some_and(|w| !w.is_finished())
     }
-    /// Bounded wait: an unresponsive audio driver must not hold up the native UI indefinitely.
-    pub fn stop(&mut self) {
+    /// Bounded wait: an unresponsive audio driver must not hold up the native UI
+    /// indefinitely. Returns true when the worker was joined cleanly, false when it was
+    /// still running after a 2 s grace period and had to be detached; Drop ignores it.
+    pub fn stop(&mut self) -> bool {
         self.cancelled.store(true, Ordering::Release);
-        let _ = self.done.recv_timeout(Duration::from_millis(200));
-        if let Some(worker) = self.worker.take() { if worker.is_finished() { let _ = worker.join(); } }
+        let _ = self.done.recv_timeout(Duration::from_secs(2));
+        match self.worker.take() {
+            None => true,
+            Some(worker) => {
+                if worker.is_finished() { let _ = worker.join(); true } else { false }
+            }
+        }
     }
 }
 impl Drop for Visualizer { fn drop(&mut self) { self.stop(); } }

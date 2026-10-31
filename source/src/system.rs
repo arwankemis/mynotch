@@ -51,55 +51,70 @@ pub struct TwsInfo {
     pub battery: Option<u8>,
 }
 
+/// RAII wrapper for one WinRT apartment init. Only an S_OK init is torn down here:
+/// RAII wrapper for WinRT apartment init.
+struct WinRtApartment { initialized: bool }
+impl WinRtApartment {
+    fn new() -> Self {
+        use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+        let hr = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+        Self { initialized: hr.is_ok() }
+    }
+}
+impl Drop for WinRtApartment {
+    fn drop(&mut self) {
+        if self.initialized {
+            use windows::Win32::System::WinRT::RoUninitialize;
+            unsafe { RoUninitialize(); }
+        }
+    }
+}
+
 /// Connected Bluetooth audio device (TWS earbuds, headset, speaker).
 /// Blocking: call from a worker thread, not the paint/timer thread.
 pub fn get_tws_status() -> Result<Option<TwsInfo>, String> {
     use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice};
     use windows::Devices::Enumeration::DeviceInformation;
-    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
     use windows::core::HSTRING;
 
-    unsafe {
-        // A fresh worker has no apartment; S_FALSE / RPC_E_CHANGED_MODE just means it already has one.
-        let _ = RoInitialize(RO_INIT_MULTITHREADED);
-        let selector = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(
-            BluetoothConnectionStatus::Connected,
-        )
-        .map_err(|e| e.to_string())?;
-        let requested: windows_collections::IIterable<HSTRING> = vec![
-            HSTRING::from("System.Devices.Aep.IsConnected"),
-            HSTRING::from("System.Devices.Aep.Bluetooth.Cod.Services.Audio"),
-            HSTRING::from("System.Devices.Aep.Bluetooth.Cod.Major"),
-            HSTRING::from("System.Devices.BatteryLife"),
-        ]
-        .into();
-        let devices =
-            DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&selector, &requested)
-                .map_err(|e| e.to_string())?
-                .join()
-                .map_err(|e| e.to_string())?;
-        // The selector also matches paired-but-disconnected devices, so check the live state.
-        for index in 0..devices.Size().map_err(|e| e.to_string())? {
-            let Ok(info) = devices.GetAt(index) else { continue };
-            let Ok(props) = info.Properties() else { continue };
-            if property(&props, "System.Devices.Aep.IsConnected", |v| v.GetBoolean()) != Some(true) {
-                continue;
-            }
-            let audio = property(&props, "System.Devices.Aep.Bluetooth.Cod.Services.Audio", |v| v.GetBoolean());
-            let major = property(&props, "System.Devices.Aep.Bluetooth.Cod.Major", |v| v.GetUInt16());
-            if !is_audio_device(audio, major) {
-                continue;
-            }
-            let name = info.Name().map(|n| n.to_string()).unwrap_or_default();
-            let battery = property(&props, "System.Devices.BatteryLife", |v| v.GetUInt8())
-                .or_else(|| property(&props, "System.Devices.BatteryLife", |v| v.GetInt32()).map(|v| v.clamp(0, 100) as u8));
-            return Ok(Some(TwsInfo {
-                name: if name.is_empty() { "Bluetooth audio".into() } else { name },
-                battery,
-            }));
+    let _apartment = WinRtApartment::new();
+    let selector = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(
+        BluetoothConnectionStatus::Connected,
+    )
+    .map_err(|e| e.to_string())?;
+    let requested: windows_collections::IIterable<HSTRING> = vec![
+        HSTRING::from("System.Devices.Aep.IsConnected"),
+        HSTRING::from("System.Devices.Aep.Bluetooth.Cod.Services.Audio"),
+        HSTRING::from("System.Devices.Aep.Bluetooth.Cod.Major"),
+        HSTRING::from("System.Devices.BatteryLife"),
+    ]
+    .into();
+    let devices =
+        DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&selector, &requested)
+            .map_err(|e| e.to_string())?
+            .join()
+            .map_err(|e| e.to_string())?;
+    // The selector also matches paired-but-disconnected devices, so check the live state.
+    for index in 0..devices.Size().map_err(|e| e.to_string())? {
+        let Ok(info) = devices.GetAt(index) else { continue };
+        let Ok(props) = info.Properties() else { continue };
+        if property(&props, "System.Devices.Aep.IsConnected", |v| v.GetBoolean()) != Some(true) {
+            continue;
         }
-        Ok(None)
+        let audio = property(&props, "System.Devices.Aep.Bluetooth.Cod.Services.Audio", |v| v.GetBoolean());
+        let major = property(&props, "System.Devices.Aep.Bluetooth.Cod.Major", |v| v.GetUInt16());
+        if !is_audio_device(audio, major) {
+            continue;
+        }
+        let name = info.Name().map(|n| n.to_string()).unwrap_or_default();
+        let battery = property(&props, "System.Devices.BatteryLife", |v| v.GetUInt8())
+            .or_else(|| property(&props, "System.Devices.BatteryLife", |v| v.GetInt32()).map(|v| v.clamp(0, 100) as u8));
+        return Ok(Some(TwsInfo {
+            name: if name.is_empty() { "Bluetooth audio".into() } else { name },
+            battery,
+        }));
     }
+    Ok(None)
 }
 
 fn is_audio_device(services_audio: Option<bool>, cod_major: Option<u16>) -> bool {
@@ -232,9 +247,20 @@ fn find_volume_osd() -> Option<HWND> {
         loop {
             let Ok(outer) = FindWindowExW(None, after, w!("NativeHWNDHost"), PCWSTR::null()) else { break };
             after = Some(outer);
-            if FindWindowExW(Some(outer), None, w!("DirectUIHWND"), PCWSTR::null()).is_ok() {
-                return Some(outer);
+            if FindWindowExW(Some(outer), None, w!("DirectUIHWND"), PCWSTR::null()).is_err() {
+                continue;
             }
+            // Same pill bounds as the Windows 11 path: a full-screen NativeHWNDHost
+            // (another shell surface) must never be minimized as if it were the OSD.
+            let mut rect = RECT::default();
+            if GetWindowRect(outer, &mut rect).is_err() {
+                continue;
+            }
+            let (osd_w, osd_h) = (rect.right - rect.left, rect.bottom - rect.top);
+            if osd_w <= 0 || osd_h <= 0 || osd_w > 1000 || osd_h > 400 {
+                continue;
+            }
+            return Some(outer);
         }
         None
     }
@@ -249,6 +275,22 @@ fn trigger_volume_osd() {
         std::thread::sleep(std::time::Duration::from_millis(80));
         keybd_event(0xAD, 0, Default::default(), 0);
         keybd_event(0xAD, 0, KEYEVENTF_KEYUP, 0);
+    }
+}
+
+/// Worker half of the first-time OSD hide: create the host, wait for it to appear, then
+/// minimize it. Never called on the UI thread: the two mute taps plus the settle sleep
+/// cost ~330 ms, which used to freeze every frame and delay startup.
+fn trigger_and_hide_osd_async() {
+    trigger_volume_osd();
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    if let Some(found) = find_volume_osd() {
+        OSD_HWND.store(found.0 as isize, Ordering::Relaxed);
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
+            let _ = ShowWindow(found, SW_MINIMIZE);
+        }
+        OSD_HIDDEN.store(true, Ordering::Relaxed);
     }
 }
 
@@ -280,9 +322,14 @@ pub fn set_volume_osd_hidden(hidden: bool) {
         if window.is_none() {
             window = find_volume_osd();
             if window.is_none() && !OSD_TRIGGERED.swap(true, Ordering::Relaxed) {
-                trigger_volume_osd();
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                window = find_volume_osd();
+                // First hide only: hand the trigger to a worker thread. The worker
+                // minimizes the host once it appears; the next tick picks the stored
+                // window up if the worker has not finished yet. The synchronous
+                // find_volume_osd above is window enumeration only (no sleeps) and
+                // stays cheap enough for the tick.
+                let _ = std::thread::Builder::new()
+                    .name("mynotch-osd".into())
+                    .spawn(trigger_and_hide_osd_async);
             }
             if let Some(found) = window {
                 OSD_HWND.store(found.0 as isize, Ordering::Relaxed);
@@ -361,15 +408,52 @@ pub fn set_run_at_startup(enable: bool) -> Result<(), String> {
     }
 }
 
+/// Only `https://` URLs with a non-empty host may be opened in the browser. A mod button
+/// or a crafted target must never smuggle another scheme (`file:`, `ms-settings:`, an
+/// executable path, or a control-character injection) through ShellExecuteW.
+pub fn is_openable_browser_url(url: &str) -> bool {
+    if !url.starts_with("https://") || url.bytes().any(|b| b <= 32 || b == 127) {
+        return false;
+    }
+    let rest = &url["https://".len()..];
+    let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    host_end > 0
+}
+
 pub fn open_browser(url: &str) {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    if !is_openable_browser_url(url) {
+        return;
+    }
     let url_w: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
     unsafe {
         let _ = ShellExecuteW(
             None,
             windows::core::w!("open"),
             windows::core::PCWSTR(url_w.as_ptr()),
+            windows::core::PCWSTR::null(),
+            windows::core::PCWSTR::null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+/// Opens a Windows Settings page. Only the `ms-settings:` scheme is accepted. This is the
+/// dedicated entry point for the app's own hardcoded privacy buttons, so `open_browser`
+/// can stay https-only without breaking them. Never reachable from mod content.
+pub fn open_settings_page(uri: &str) {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    if !uri.starts_with("ms-settings:") || uri.bytes().any(|b| b <= 32 || b == 127) {
+        return;
+    }
+    let uri_w: Vec<u16> = uri.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let _ = ShellExecuteW(
+            None,
+            windows::core::w!("open"),
+            windows::core::PCWSTR(uri_w.as_ptr()),
             windows::core::PCWSTR::null(),
             windows::core::PCWSTR::null(),
             SW_SHOWNORMAL,
@@ -492,8 +576,20 @@ mod tests {
 
     #[test]
     fn test_open_browser_url_valid() {
-        let url = "https://github.com/arwankemis/mynotch";
-        assert!(url.starts_with("https://"));
+        assert!(is_openable_browser_url("https://github.com/arwankemis/mynotch"));
+        assert!(is_openable_browser_url("https://example.com/a?x=1"));
+        for bad in [
+            "http://example.com",
+            "file:///C:/Windows/System32/calc.exe",
+            "ms-settings:privacy-microphone",
+            "https://",
+            "https:///path",
+            "https://example.com/\r\nInjected",
+            "https://exa mple.com",
+            "",
+        ] {
+            assert!(!is_openable_browser_url(bad), "{bad} must be rejected");
+        }
     }
 
     #[test]

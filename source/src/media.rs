@@ -88,12 +88,23 @@ impl MediaService {
         self.commands.send(make(tx)).map_err(|_| "Worker media sedang tidak tersedia.".to_string())?;
         rx.recv_timeout(Duration::from_millis(750)).map_err(|_| "Perintah media melewati batas waktu.".to_string())?
     }
-    pub fn stop(&mut self) {
+    /// Stops the worker. Returns true when the worker was joined cleanly, false when it
+    /// was still running after a bounded 2 s grace period and had to be detached (its
+    /// final state update is dropped because `cancelled` is set). The worker loop wakes
+    /// on Stop immediately, so a healthy worker exits well under the grace period; the
+    /// bound exists only so a stalled WinRT provider cannot hang shutdown forever.
+    /// Callers that need the distinction check the return value; Drop ignores it.
+    pub fn stop(&mut self) -> bool {
         self.cancelled.store(true, Ordering::Release); let _ = self.commands.send(Command::Stop);
-        // A stalled WinRT provider must not hang the UI indefinitely. Late state updates are cancelled.
-        let _ = self.done.recv_timeout(Duration::from_millis(200));
-        if let Some(worker) = self.worker.take() { if worker.is_finished() { let _ = worker.join(); } }
+        let _ = self.done.recv_timeout(Duration::from_secs(2));
+        let joined = match self.worker.take() {
+            None => true,
+            Some(worker) => {
+                if worker.is_finished() { let _ = worker.join(); true } else { false }
+            }
+        };
         if let Ok(mut state) = self.shared.lock() { *state = State::default(); }
+        joined
     }
 }
 impl Drop for MediaService { fn drop(&mut self) { self.stop(); } }

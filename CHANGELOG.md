@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.0.1.5] - 2026-10-31
+
+This release delivers security hardening, network sandboxing for community extensions, clipboard privacy improvements, UI responsiveness enhancements, and reliability safeguards.
+
+### Added
+- **Clipboard Retention Policy:** Added automated expiration for clipboard history (24 hours for regular clips, 30 days for pinned clips) with a 64 KiB per-entry size limit. Added local storage transparency notice in empty clipboard view. Existing entries migrate cleanly on first run.
+- **Configurable Network Allowlist:** Added `net_allowed_hosts` in `settings.json` to allow explicit configuration of allowed private/internal endpoints when needed.
+- **Corrupt State Recovery Hold:** Safeguards corrupt configuration or state files against accidental overwrites, preserving existing data in a recovery snapshot and alerting the user on startup.
+- **Atomic File Operations:** Sticky note text and markdown exports now write through temporary staging files before renaming, eliminating partial file writes on abrupt crashes.
+- **Monitor Work Area Clamping:** Floating sticky note windows are now dynamically clamped within the visible work area of the active monitor.
+
+### Fixed
+- **Volume OSD UI Thread Freeze:** Offloaded initial Windows volume overlay detection to a background worker thread (`mynotch-osd`), preventing startup frame stutters.
+- **Fullscreen Shell Detection:** Added bounding dimensions to prevent fullscreen shell surfaces on Windows 10 from accidentally being treated as volume overlays.
+- **Painting State Guard:** Added RAII `PaintingGuard` ensuring rendering state flags are always reset even if drawing operations encounter unexpected conditions.
+- **WinRT/COM Lifecycle Symmetries:** Paired WinRT initialization with RAII uninitialization in Bluetooth device query routines and extended audio/visualizer thread shutdown grace periods to 2 seconds.
+- **ICU Parser ABI Alignment:** Fixed `UParseError` struct layout (72 bytes) and enforced ICU version gating (>= 50) in lyrics parser routines to prevent memory overruns.
+- **Narrow Notch Reminder Notice:** Replaced empty reminder view with bilingual guidance text on compact notches (<440 px).
+- **Lyrics Connectivity Feedback:** Differentiated network fetch errors from genuine "no lyrics found" track states.
+- **Codebase Dead Code Cleanup:** Removed superseded legacy module `shadow.rs`.
+
+### Security
+- **SSRF & Private Network Guard:** Transport-level filtering blocks loopback, private IPv4/IPv6 ranges (RFC 1918), link-local, broadcast, multicast, documentation, benchmarking, and reserved IP literals across all extension network requests.
+- **Extension Browser Egress Restrictions:** Mod actions `urls_to_open` and `clipboard_copies` now require explicit user button clicks (`button.is_some()`), preventing automated background triggers.
+- **Browser URL Scheme Validation:** `open_browser` validates and accepts only `https://` URLs without control characters; native settings navigation (`ms-settings:`) is isolated to a hardcoded internal handler.
+- **Extension Identifier Validation:** Enforced strict alphanumeric identifier validation across directory discovery and deletion routines to prevent path traversal.
+- **Transactional Extension Extraction:** Zip installation now stages extraction through `.install-<id>` folders with a 1 MiB manifest size limit, safely rolling back if invalid or oversized entries are encountered.
+
+---
+
 ## [0.0.1.4] - 2026-10-31
 
 This release adds native Liquid Glass themes, a continuous spring animation coordinator, in-place streaming updates, and an in-app mod catalog.

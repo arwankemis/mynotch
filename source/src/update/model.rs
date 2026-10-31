@@ -162,18 +162,18 @@ mod tests {
 
     #[test]
     fn test_monotonic_sequence_ordering() {
-        let current = BuildIdentity::new("public", 10401);
+        let current = BuildIdentity::new("public", 10501);
 
         // Older sequence rejected
-        assert!(!select_candidate(&current, "public", "x86_64", "preview", 10400));
+        assert!(!select_candidate(&current, "public", "x86_64", "preview", 10500));
         assert!(!select_candidate(&current, "public", "x86_64", "preview", 100));
         assert!(!select_candidate(&current, "public", "x86_64", "preview", 0));
 
         // Equal sequence rejected
-        assert!(!select_candidate(&current, "public", "x86_64", "preview", 10401));
+        assert!(!select_candidate(&current, "public", "x86_64", "preview", 10501));
 
         // Strictly newer sequence accepted
-        assert!(select_candidate(&current, "public", "x86_64", "preview", 10402));
+        assert!(select_candidate(&current, "public", "x86_64", "preview", 10502));
         assert!(select_candidate(&current, "public", "x86_64", "preview", 20000));
     }
 
@@ -216,9 +216,9 @@ mod tests {
     fn test_current_build_identity_from_manifest() {
         let identity = BuildIdentity::current();
         assert_eq!(identity.product, "mynotch");
-        assert_eq!(identity.version, "0.0.1.4");
-        assert_eq!(identity.version_components, vec![0, 0, 1, 4]);
-        assert_eq!(identity.release_sequence, 10400);
+        assert_eq!(identity.version, "0.0.1.5");
+        assert_eq!(identity.version_components, vec![0, 0, 1, 5]);
+        assert_eq!(identity.release_sequence, 10500);
         assert_eq!(identity.channel, "preview");
         assert_eq!(identity.arch, "x86_64");
         assert_eq!(identity.os, "windows");

@@ -138,8 +138,13 @@ impl Shell{
         self.rw_hit(x,y,290.,20.,action,enabled);
     }}
     pub(super) fn reminder_page(&mut self,p:&mut Painter){unsafe{
-        if self.width<440.{return}
         let lang = self.settings.language.clone();
+        if self.width<440.{
+            // The page layout needs 440 px; a narrow notch used to render a blank page
+            // with no explanation. Say so instead of silently skipping.
+            p.text(crate::i18n::t("reminder.narrow", &lang),18.,150.,(self.width-36.).max(50.),40.,11.,0x8a9291,false);
+            return
+        }
         let accent=COLORS[self.reminder_index];let enabled=self.reminder_enabled();
         // Exact 170 / 20 / 324 column proportions from the accepted HTML mockup.
         let picker_shift=if self.reminder_index==3{8.}else{0.};

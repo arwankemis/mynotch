@@ -3,6 +3,9 @@ use std::time::Duration;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HANDLE, HWND};
 
+/// One clipboard history entry. History is stored **plaintext** in `state.json` (no DPAPI
+/// encryption yet — see clipboard storage documentation); retention is bounded by a per-item size cap and
+/// by TTL expiry in [`expire_history`], not by encryption.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ClipItem {
     pub id: u64,
@@ -12,6 +15,11 @@ pub struct ClipItem {
     pub lines: usize,
     #[serde(default)]
     pub pinned: bool,
+    /// Unix seconds when this entry was captured. `0` means "captured before timestamps
+    /// existed"; [`expire_history`] stamps such legacy entries with "now" instead of
+    /// deleting them, so upgrading never wipes the history.
+    #[serde(default)]
+    pub captured_at: u64,
 }
 
 #[link(name = "user32")]
@@ -40,6 +48,13 @@ unsafe extern "system" {
 const CF_UNICODETEXT: u32 = 13;
 const GMEM_MOVEABLE: u32 = 0x0002;
 const OPEN_ATTEMPTS: usize = 5;
+/// A single clipboard capture is kept at most 64 KiB; anything larger is truncated to a
+/// char boundary instead of growing `state.json` without bound.
+pub const MAX_CLIP_BYTES: usize = 64 * 1024;
+/// Unpinned entries expire after 24 h, pinned entries after 30 days. Pinned is an explicit
+/// user action, so it gets a longer window — but no entry lives forever anymore.
+pub const UNPINNED_TTL_SECS: u64 = 24 * 3600;
+pub const PINNED_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// Another process can hold the clipboard for a few milliseconds. Retry briefly instead of
 /// dropping the event, so a copy made while another app is writing is still captured.
@@ -66,6 +81,40 @@ pub fn trim_history(items: &mut Vec<ClipItem>, max: usize) {
             None => break,
         }
     }
+}
+
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Truncates to at most `max_bytes` bytes without splitting a UTF-8 character.
+pub fn truncate_to_bytes(mut text: String, max_bytes: usize) -> String {
+    if text.len() > max_bytes {
+        let mut end = max_bytes;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text
+}
+
+/// Drops entries older than their TTL. Legacy entries (`captured_at == 0`) are stamped
+/// with `now` and kept, so the first run after upgrading grants them a fresh TTL window
+/// instead of deleting the whole history.
+pub fn expire_history(items: &mut Vec<ClipItem>, now: u64) {
+    for item in items.iter_mut() {
+        if item.captured_at == 0 {
+            item.captured_at = now;
+        }
+    }
+    items.retain(|item| {
+        let ttl = if item.pinned { PINNED_TTL_SECS } else { UNPINNED_TTL_SECS };
+        now.saturating_sub(item.captured_at) < ttl
+    });
 }
 
 fn is_sensitive_clipboard() -> bool {
@@ -111,7 +160,7 @@ pub fn read_clipboard_text() -> Option<String> {
             len += 1;
         }
         let slice = std::slice::from_raw_parts(ptr, len);
-        let text = String::from_utf16_lossy(slice);
+        let text = truncate_to_bytes(String::from_utf16_lossy(slice), MAX_CLIP_BYTES);
         let _ = GlobalUnlock(handle);
         let _ = CloseClipboard();
         if text.is_empty() { None } else { Some(text) }
@@ -175,6 +224,7 @@ mod tests {
             chars: 11,
             lines: 1,
             pinned: true,
+            captured_at: 0,
         };
         assert_eq!(item.chars, 11);
         assert_eq!(item.lines, 1);
@@ -183,7 +233,31 @@ mod tests {
     }
 
     fn clip(id: u64, pinned: bool) -> ClipItem {
-        ClipItem { id, text: format!("item {id}"), time: "12:00".into(), chars: 1, lines: 1, pinned }
+        ClipItem { id, text: format!("item {id}"), time: "12:00".into(), chars: 1, lines: 1, pinned, captured_at: 0 }
+    }
+
+    #[test]
+    fn history_expiry_applies_ttl_and_migrates_legacy_entries() {
+        let now = 1_800_000_000u64;
+        let mut items = vec![
+            ClipItem { captured_at: now - 3600, ..clip(1, false) },
+            ClipItem { captured_at: now - UNPINNED_TTL_SECS - 1, ..clip(2, false) },
+            ClipItem { captured_at: now - PINNED_TTL_SECS + 3600, ..clip(3, true) },
+            ClipItem { captured_at: now - PINNED_TTL_SECS - 1, ..clip(4, true) },
+            ClipItem { captured_at: 0, ..clip(5, false) },
+        ];
+        expire_history(&mut items, now);
+        let ids: Vec<u64> = items.iter().map(|c| c.id).collect();
+        assert_eq!(ids, vec![1, 3, 5]);
+        assert_eq!(items.iter().find(|c| c.id == 5).unwrap().captured_at, now);
+    }
+
+    #[test]
+    fn truncation_never_splits_a_character() {
+        let text = "aé🎉".to_string();
+        assert_eq!(truncate_to_bytes(text.clone(), 100), text);
+        assert_eq!(truncate_to_bytes(text.clone(), 3), "aé");
+        assert_eq!(truncate_to_bytes(text, 2), "a");
     }
 
     #[test]

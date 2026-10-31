@@ -57,6 +57,24 @@ pub fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// Writes `contents` to `path` atomically: a temp file in the same directory is renamed
+/// over the destination, so a crash mid-export never leaves a half-written note file
+/// behind. The previous export is replaced (no .bak is kept).
+fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
+    let mut tmp_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("export").to_string();
+    tmp_name.push_str(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+    if let Err(e) = std::fs::write(&tmp, contents) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+
 pub fn export_note_to_markdown(exports_dir: &Path, note: &StickyNote) -> Result<PathBuf, String> {
     std::fs::create_dir_all(exports_dir).map_err(|e| e.to_string())?;
     let safe_title = sanitize_filename(&note.title);
@@ -72,7 +90,7 @@ pub fn export_note_to_markdown(exports_dir: &Path, note: &StickyNote) -> Result<
         note.content
     );
 
-    std::fs::write(&path, md).map_err(|e| e.to_string())?;
+    atomic_write(&path, &md)?;
     Ok(path)
 }
 
@@ -92,7 +110,7 @@ pub fn export_note_to_txt(exports_dir: &Path, note: &StickyNote) -> Result<PathB
         note.content
     );
 
-    std::fs::write(&path, txt).map_err(|e| e.to_string())?;
+    atomic_write(&path, &txt)?;
     Ok(path)
 }
 
