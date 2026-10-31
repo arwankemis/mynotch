@@ -32,24 +32,7 @@ pub struct BuildIdentity {
     pub channel: String,
 }
 
-pub fn current_profile() -> &'static str {
-    if cfg!(feature = "personal") {
-        "personal"
-    } else {
-        "public"
-    }
-}
-
-fn normalize_arch(arch: &str) -> &str {
-    let trimmed = arch.trim();
-    if trimmed.eq_ignore_ascii_case("x64") || trimmed.eq_ignore_ascii_case("x86_64") {
-        "x86_64"
-    } else if trimmed.eq_ignore_ascii_case("arm64") || trimmed.eq_ignore_ascii_case("aarch64") {
-        "arm64"
-    } else {
-        trimmed
-    }
-}
+pub fn current_profile() -> &'static str { "public" }
 
 pub fn arch_matches(expected: &str, candidate: &str) -> bool {
     normalize_arch(expected).eq_ignore_ascii_case(normalize_arch(candidate))
@@ -223,10 +206,26 @@ mod tests {
         assert_eq!(identity.arch, "x86_64");
         assert_eq!(identity.os, "windows");
 
-        #[cfg(feature = "personal")]
-        assert_eq!(identity.profile, "personal");
-
-        #[cfg(not(feature = "personal"))]
         assert_eq!(identity.profile, "public");
     }
+}
+
+fn normalize_arch(arch: &str) -> &str {
+
+    let trimmed = arch.trim();
+
+    if trimmed.eq_ignore_ascii_case("x64") || trimmed.eq_ignore_ascii_case("x86_64") {
+
+        "x86_64"
+
+    } else if trimmed.eq_ignore_ascii_case("arm64") || trimmed.eq_ignore_ascii_case("aarch64") {
+
+        "arm64"
+
+    } else {
+
+        trimmed
+
+    }
+
 }

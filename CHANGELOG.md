@@ -14,6 +14,7 @@ This release delivers security hardening, network sandboxing for community exten
 > **Upgrade Notice:** Upgrading directly from `v0.0.1.4` or earlier via the in-app update button is not supported due to missing checksum discovery in older binaries. A manual update is required once by downloading `mynotch-0.0.2-windows-x64.zip` and replacing `mynotch.exe`. In-app automatic updates are fully supported starting from `v0.0.2` and later.
 
 ### Added
+- Public distribution checks now inspect source, binaries, and nested ZIP contents before publication.
 - **Clipboard Retention Policy:** Added automated expiration for clipboard history (24 hours for regular clips, 30 days for pinned clips) with a 64 KiB per-entry size limit. Added local storage transparency notice in empty clipboard view. Existing entries migrate cleanly on first run.
 - **Configurable Network Allowlist:** Added `net_allowed_hosts` in `settings.json` to allow explicit configuration of allowed private/internal endpoints when needed.
 - **Corrupt State Recovery Hold:** Safeguards corrupt configuration or state files against accidental overwrites, preserving existing data in a recovery snapshot and alerting the user on startup.
@@ -56,12 +57,11 @@ This release adds native Liquid Glass themes, a continuous spring animation coor
 - **Player Glyphs Encoding:** Restored proper UTF-8 symbols for transport controls (Play, Pause, Skip, Previous) and volume buttons on Glass themes.
 - **Midnight Calendar Rollover:** Fixed calendar state so dates and schedules advance automatically past midnight without requiring manual interaction.
 - **Path Sanitization:** Removed hardcoded local developer paths, replacing them with dynamic environment variables and relative path lookups.
-- **Compiler Hygiene:** Resolved all compiler warnings and dead code annotations across public and personal builds.
+- **Compiler Hygiene:** Resolved all compiler warnings and dead code annotations across public builds.
 - **Driver Binaries Untracked:** Removed heavy binary driver installers and source archives from Git tracking to keep the repository lightweight.
 
 ### Security
 - In-place updater network access is restricted strictly to official GitHub endpoints (`api.github.com`, `github.com`, `githubusercontent.com`).
-- Public release binaries completely isolate internal audio daemon calls, preventing unneeded process spawning on user systems.
 
 ---
 
@@ -107,7 +107,7 @@ This release adds mouse wheel volume control, laptop battery monitoring, Open-Me
 This release introduces Quick Sticky Notes, bilingual interface localization, modular mod support, and fixes across input and memory management.
 
 ### Added
-- **Quick Sticky Notes:** In-notch notes tab with a two-column layout, five pastel color themes, auto-save, and direct export to Markdown or plain text. Includes a pop-out button (`⧉ Pop`) that detaches a note into an independent, always-on-top desktop window.
+- **Quick Sticky Notes:** In-notch notes tab with a two-column layout, five pastel color themes, auto-save, and direct export to Markdown or plain text. Includes a pop-out button (`â§‰ Pop`) that detaches a note into an independent, always-on-top desktop window.
 - **Bilingual Interface (ID / EN):** Complete English and Indonesian localization across tab headers, calendar views, reminder settings, prayer times, dialogs, and toast notices.
 - **Modular Mod Structure:** Introduced manifest-based mod definitions (`.mod.json`) managed under Settings without background daemon overhead.
 - **Context-Aware Stage 1:** Active music playback and running focus timers remain visible on Stage 1. Other tab updates display for 5 seconds before returning to the date and time view.

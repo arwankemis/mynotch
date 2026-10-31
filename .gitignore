@@ -7,7 +7,29 @@
 /source/target/
 /scratch/
 /*.zip
+/SHA256SUMS-*.txt
 /.commandcode/
+/dist/
 /dist-test/
-
 /power-provider/
+
+# Untracked runtime binaries and driver artifacts
+/vendor/power/PawnIO_setup.exe
+/vendor/power/sources/
+
+# Public documentation allowlist
+/docs/*
+!/docs/README.md
+!/docs/PANDUAN.md
+!/docs/PANDUAN-MOD.md
+!/docs/PORTABILITAS.md
+!/docs/PENGEMBANGAN.md
+!/docs/images/
+/docs/images/*
+!/docs/images/README.md
+!/docs/images/*.jpg
+!/docs/images/*.gif
+
+# Python tooling caches
+__pycache__/
+*.py[cod]

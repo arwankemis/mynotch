@@ -20,6 +20,8 @@ pub fn tab_name<'a>(tab: &'a str, lang: &str) -> &'a str {
         "Catatan" => if en { "Notes" } else { "Catatan" },
         "Tugas" => if en { "Tasks" } else { "Tugas" },
         "Cuaca" => if en { "Weather" } else { "Cuaca" },
+
+        "Daya" => if en { "Power" } else { "Daya" },
         _ => tab,
     }
 }
@@ -211,6 +213,19 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "update.error" => if en { "Failed to check updates" } else { "Gagal memeriksa pembaruan" },
         "update.retry" => if en { "Retry" } else { "Coba Lagi" },
         "update.idle_hint" => if en { "Click 'Check for Updates' to fetch the latest release from GitHub." } else { "Klik 'Periksa Pembaruan' untuk mengecek rilis terbaru dari GitHub." },
+        "update.perbarui" => if en { "Update" } else { "Perbarui" },
+        "update.downloading" => if en { "Downloading update..." } else { "Mengunduh pembaruan..." },
+        "update.verifying" => if en { "Verifying update..." } else { "Memverifikasi pembaruan..." },
+        "update.staging" => if en { "Preparing update..." } else { "Menyiapkan pembaruan..." },
+        "update.ready" => if en { "Update ready" } else { "Pembaruan siap" },
+        "update.restart_desc" => if en { "Restart mynotch to apply" } else { "Mulai ulang mynotch untuk menerapkan" },
+        "update.restart_now" => if en { "Restart now" } else { "Mulai ulang sekarang" },
+        "update.restart_later" => if en { "Later" } else { "Nanti" },
+        "update.restarting" => if en { "Restarting mynotch..." } else { "Memulai ulang mynotch..." },
+        "update.updated_to" => if en { "Updated to" } else { "Berhasil diperbarui ke" },
+        "update.rolled_back" => if en { "Update failed to apply. Previous version restored." } else { "Pembaruan gagal diterapkan. Versi sebelumnya dipulihkan." },
+        "update.not_installed" => if en { "Update not installed" } else { "Pembaruan belum dipasang" },
+        "update.no_package" => if en { "No update package for this build" } else { "Paket untuk build ini belum tersedia" },
 
         // Settings General
         "general.language" => if en { "Language" } else { "Bahasa" },
@@ -223,6 +238,41 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "general.default_tab.desc" => if en { "Initial tab when application starts." } else { "Halaman awal ketika aplikasi berjalan." },
         "general.startup" => if en { "Run at Windows startup" } else { "Jalankan saat startup" },
         "general.startup.desc" => if en { "Automatically launch mynotch on login." } else { "Otomatis jalankan mynotch saat masuk Windows." },
+        "general.privacy" => if en { "Privacy & Indicators" } else { "Privasi & Indikator" },
+        "general.privacy.desc" => if en { "Configure microphone and camera privacy indicators." } else { "Pengaturan pemantauan dan indikator privasi." },
+        "general.privacy_open" => if en { "Configure" } else { "Atur" },
+
+        // Privacy
+        "privacy.title" => if en { "Privacy" } else { "Privasi" },
+        "privacy.subtitle" => if en { "Microphone, camera, and display usage status." } else { "Status penggunaan mikrofon, kamera, dan tampilan layar." },
+        "privacy.mic_title" => if en { "Microphone" } else { "Mikrofon" },
+        "privacy.camera_title" => if en { "Camera" } else { "Kamera" },
+        "privacy.share_title" => if en { "Screen Sharing" } else { "Berbagi Layar" },
+        "privacy.record_title" => if en { "Screen Recording" } else { "Perekaman Layar" },
+        "privacy.mic_in_use" => if en { "Microphone in use" } else { "Mikrofon sedang digunakan" },
+        "privacy.cam_in_use" => if en { "Camera in use" } else { "Kamera sedang digunakan" },
+        "privacy.cam_detected" => if en { "Camera activity detected" } else { "Aktivitas kamera terdeteksi" },
+        "privacy.screen_active" => if en { "Screen capture active" } else { "Capture layar aktif" },
+        "privacy.share_active" => if en { "Screen sharing active" } else { "Layar sedang dibagikan" },
+        "privacy.record_active" => if en { "Screen recording active" } else { "Perekaman layar aktif" },
+        "privacy.no_activity" => if en { "No activity detected" } else { "Tidak ada aktivitas terdeteksi" },
+        "privacy.status_unknown" => if en { "Status unknown" } else { "Status belum diketahui" },
+        "privacy.unavailable" => if en { "Monitoring unavailable" } else { "Belum dapat dipantau" },
+        "privacy.limited" => if en { "Limited monitoring" } else { "Pemantauan terbatas" },
+        "privacy.app_unknown" => if en { "App identity unavailable" } else { "Identitas aplikasi tidak tersedia" },
+        "privacy.since_startup" => if en { "Observed since startup" } else { "Terpantau sejak dibuka" },
+        "privacy.open_settings" => if en { "Open Windows settings" } else { "Buka pengaturan Windows" },
+        "privacy.settings_title" => if en { "Privacy" } else { "Privasi" },
+        "privacy.settings_desc" => if en { "Privacy and device monitoring settings." } else { "Pengaturan privasi dan pemantauan perangkat." },
+        "privacy.enabled" => if en { "Enable monitoring" } else { "Aktifkan pemantauan" },
+        "privacy.enabled_desc" => if en { "Monitor Windows microphone and camera usage." } else { "Pantau penggunaan mikrofon dan kamera Windows." },
+        "privacy.fullscreen" => if en { "Show in fullscreen" } else { "Tampilkan saat fullscreen" },
+        "privacy.fullscreen_desc" => if en { "Display indicator when fullscreen app is active." } else { "Tampilkan indikator saat aplikasi fullscreen aktif." },
+        "privacy.app_names" => if en { "Show app names" } else { "Tampilkan nama aplikasi" },
+        "privacy.app_names_desc" => if en { "Display names of applications currently using devices." } else { "Tampilkan nama aplikasi yang sedang menggunakan perangkat." },
+        "privacy.experimental_note" => if en { "Camera monitoring uses experimental system source (ConsentStore)." } else { "Pemantauan kamera menggunakan sumber sistem eksperimental (ConsentStore)." },
+        "privacy.mic_note" => if en { "Microphone monitoring uses Windows CoreAudio active audio sessions." } else { "Pemantauan mikrofon menggunakan sesi audio aktif Windows CoreAudio." },
+        "privacy.coverage_footer" => if en { "Windows does not provide universal APIs for camera & screen monitoring; camera status is read from system registry (experimental)." } else { "Windows tidak menyediakan API universal untuk pemantauan kamera & layar; status kamera bersumber dari registry sistem (eksperimental)." },
 
         // Settings Appearance
         "appearance.position" => if en { "Notch position" } else { "Posisi notch" },
@@ -235,6 +285,17 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "appearance.gap.desc" => if en { "0 px keeps notch flush against screen." } else { "0 px membuat notch menempel layar." },
         "appearance.opacity" => if en { "Background opacity" } else { "Kepekatan latar" },
         "appearance.opacity.desc" => if en { "Higher value makes background denser." } else { "Nilai tinggi membuat latar lebih pekat." },
+        "appearance.material" => if en { "Surface and color" } else { "Permukaan dan warna" },
+        "appearance.material.desc" => if en { "Solid or glass; dark or light." } else { "Solid/kaca; gelap/terang." },
+        "material.solid" => "Solid",
+        "material.lite" => "Glass Lite",
+        "material.adaptive" => "Glass Adaptive",
+        "color.dark" => if en { "Dark" } else { "Gelap" },
+        "color.light" => if en { "Light" } else { "Terang" },
+        "material.fallback.reduced" => if en { "Solid: Windows transparency is off" } else { "Solid: transparansi Windows mati" },
+        "material.fallback.contrast" => if en { "Solid: High Contrast is on" } else { "Solid: Kontras Tinggi aktif" },
+        "material.fallback.software" => if en { "Solid: software renderer" } else { "Solid: renderer perangkat lunak" },
+        "material.fallback.unavailable" => if en { "Solid: backdrop unavailable" } else { "Solid: backdrop tidak tersedia" },
 
         // Settings Audio
         "audio.visualizer" => if en { "Music visualizer" } else { "Visualizer musik" },
@@ -276,6 +337,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "music.single_album" => if en { "Single / Album" } else { "Single / Album" },
         "music.loading_lyrics" => if en { "Loading lyrics…" } else { "Memuat lirik…" },
         "music.no_lyrics" => if en { "Lyrics not available for this song." } else { "Lirik belum tersedia untuk lagu ini." },
+        "music.lyrics_error" => if en { "Lyrics failed to load. Check your connection and try again." } else { "Lirik gagal dimuat. Periksa koneksi lalu coba lagi." },
         "music.follow" => if en { "Follow" } else { "Ikuti" },
         "music.open_player_first" => if en { "Open music player first." } else { "Buka pemutar musik terlebih dahulu." },
 
@@ -298,6 +360,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "clipboard.clear" => if en { "Clear" } else { "Bersihkan" },
         "clipboard.no_history" => if en { "No history yet." } else { "Belum ada riwayat." },
         "clipboard.hint" => if en { "Text you copy (Ctrl+C) in Windows will be automatically saved and shown here." } else { "Teks yang Anda salin (Ctrl+C) di Windows akan otomatis tersimpan dan muncul di sini." },
+        "clipboard.plaintext_note" => if en { "History is stored unencrypted in state.json; unpinned items expire after 24 hours, pinned items after 30 days." } else { "Riwayat tersimpan tanpa enkripsi di state.json; item biasa kedaluwarsa 24 jam, yang disematkan 30 hari." },
         "clipboard.empty_text" => if en { "(Empty text)" } else { "(Teks kosong)" },
         "clipboard.empty_title" => if en { "Clipboard History Empty" } else { "Riwayat Clipboard Kosong" },
         "clipboard.empty_desc1" => if en { "Copy text (Ctrl+C) anywhere," } else { "Salin teks (Ctrl+C) di mana saja," },
@@ -322,6 +385,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
 
         // Reminder Common & Focus
         "reminder.remaining" => if en { "remaining" } else { "tersisa" },
+        "reminder.narrow" => if en { "Expand the notch to view Reminders." } else { "Perluas notch untuk melihat Reminder." },
         "reminder.break_time" => if en { "Break time" } else { "Waktunya istirahat" },
         "reminder.focusing" => if en { "Focusing" } else { "Sedang fokus" },
         "reminder.paused" => if en { "Session paused" } else { "Sesi dijeda" },
@@ -384,6 +448,15 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "mods.type_lua" => "Lua",
         "mods.tab_toggle" => "Tab",
         "mods.net_toggle" => "Net",
+        "mods.tab_mods" => if en { "Mods" } else { "Mod" },
+        "mods.tab_extensions" => if en { "Extensions" } else { "Ekstensi" },
+        "mods.filter_all" => if en { "Explore" } else { "Jelajahi" },
+        "mods.filter_installed" => if en { "Installed" } else { "Terpasang" },
+        "mods.status_installed" => if en { "Installed" } else { "Terpasang" },
+        "mods.status_available" => if en { "Available locally" } else { "Tersedia lokal" },
+        "mods.status_planned" => if en { "Planned" } else { "Direncanakan" },
+        "mods.toggle_active" => if en { "Active" } else { "Aktif" },
+        "mods.toggle_tab" => if en { "Show tab" } else { "Tampilkan tab" },
         "mods.by" => if en { "by" } else { "oleh" },
         "mods.empty" => if en { "No community mods yet." } else { "Belum ada mod komunitas." },
         "mods.back" => if en { "‹ Back" } else { "‹ Kembali" },
@@ -483,10 +556,23 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "weather.presets" => if en { "Quick Presets:" } else { "Pilihan Cepat:" },
         "stage1.weather" => if en { "Weather" } else { "Cuaca" },
 
+        "mod.daya.name" => if en { "Power & Electricity Monitor" } else { "Monitor Daya & Listrik" },
+        "mod.daya.description" => if en { "Real-time PC power consumption (Watt) and monthly PLN electricity cost accumulation" } else { "Estimasi konsumsi daya PC (Watt) dan akumulasi biaya listrik bulanan PLN" },
+
+        "power.header" => if en { "SYSTEM POWER TELEMETRY" } else { "TELEMETRI DAYA SISTEM" },
+        "power.badge" => if en { "Estimate" } else { "Estimasi" },
+        "power.per_hour" => if en { "/hr (PLN)" } else { "/jam (PLN)" },
+        "power.peripheral" => if en { "Peripheral" } else { "Periferal" },
+        "power.monthly_title" => if en { "MONTHLY PLN ACCUMULATION" } else { "AKUMULASI BIAYA PLN BULANAN" },
+        "power.this_month" => if en { "This Month" } else { "Bulan Ini" },
+        "power.current_session" => if en { "Current Session" } else { "Sesi Saat Ini" },
+        "power.monthly_projection" => if en { "Monthly Projection" } else { "Proyeksi Bulanan" },
+        "power.active_days" => if en { "active days" } else { "hari aktif" },
+        "power.tariff_info" => if en { "PLN R-1/TR Tariff Rp 1,444.70/kWh · 90% Gold PSU" } else { "Tarif PLN R-1/TR Rp 1.444,70/kWh · Efisiensi PSU 90%" },
+
         _ => key,
     }
 }
-
 
 pub fn battery_status(percentage: u8, is_charging: bool, lang: &str) -> String {
     let en = lang == "en";
@@ -558,19 +644,22 @@ mod tests {
             "cat.general", "cat.appearance", "cat.tabs", "cat.audio", "cat.reminders", "cat.mods",
             "general.language", "general.fullscreen", "general.minimal", "general.default_tab", "general.startup",
             "appearance.position", "appearance.top", "appearance.bottom", "appearance.scale",
-            "appearance.gap", "appearance.opacity",
+            "appearance.gap", "appearance.opacity", "appearance.material", "appearance.material.desc", "color.dark", "color.light", "material.solid", "material.lite", "material.adaptive", "material.fallback.reduced", "material.fallback.contrast", "material.fallback.software", "material.fallback.unavailable",
             "audio.visualizer", "audio.glow", "audio.romanize", "audio.open_music",
             "reminders.disabled", "reminders.enable", "reminders.configure",
             "stage1.no_music", "stage1.clips", "stage1.notes", "stage1.new_note",
-            "music.no_music", "music.no_artist", "music.no_album", "music.loading_lyrics", "music.no_lyrics",
+            "music.no_music", "music.no_artist", "music.no_album", "music.loading_lyrics", "music.no_lyrics", "music.lyrics_error",
             "calendar.national_holiday", "calendar.collective_leave", "calendar.today_regular", "calendar.today_btn",
-            "clipboard.title", "clipboard.clear", "clipboard.no_history", "clipboard.empty_title",
+            "clipboard.title", "clipboard.clear", "clipboard.no_history", "clipboard.empty_title", "clipboard.plaintext_note",
             "notes.header", "notes.new_btn", "notes.no_notes", "notes.default_title",
-            "reminder.remaining", "reminder.focusing", "reminder.pause", "reminder.start",
+            "reminder.remaining", "reminder.focusing", "reminder.pause", "reminder.start", "reminder.narrow",
             "notice.pinned", "notice.clip_copied", "notice.note_added",
             "mods.import_btn", "mods.folder_btn", "mods.open_btn", "mods.install_btn",
             "mods.uninstall_btn", "mods.type_builtin", "mods.by", "mods.empty", "mods.back",
             "mods.missing", "mods.script_error", "mods.tab_toggle", "mods.net_toggle",
+            "mods.tab_mods", "mods.tab_extensions", "mods.filter_all", "mods.filter_installed",
+            "mods.status_installed", "mods.status_available", "mods.status_planned",
+            "mods.toggle_active", "mods.toggle_tab",
             "toast.hydration_logged", "toast.break_ended", "toast.stretch_alert",
         ];
 
@@ -582,19 +671,6 @@ mod tests {
             assert!(!id.is_empty());
             assert!(!en.is_empty());
         }
-    }
-
-    #[test]
-    fn test_tab_names_translation() {
-        assert_eq!(tab_name("Musik", "id"), "Musik");
-        assert_eq!(tab_name("Musik", "en"), "Music");
-        assert_eq!(tab_name("Kalender", "id"), "Kalender");
-        assert_eq!(tab_name("Kalender", "en"), "Calendar");
-        assert_eq!(tab_name("Reminder", "id"), "Reminder");
-        assert_eq!(tab_name("Reminder", "en"), "Reminders");
-        assert_eq!(tab_name("Catatan", "id"), "Catatan");
-        assert_eq!(tab_name("Catatan", "en"), "Notes");
-        assert_eq!(tab_name("Clipboard", "en"), "Clipboard");
     }
 
     #[test]
@@ -743,5 +819,24 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod public_regression_tests {
+use super::*;
+#[test]
+fn test_tab_names_translation() {
+        assert_eq!(tab_name("Musik", "id"), "Musik");
+        assert_eq!(tab_name("Musik", "en"), "Music");
+        assert_eq!(tab_name("Kalender", "id"), "Kalender");
+        assert_eq!(tab_name("Kalender", "en"), "Calendar");
+        assert_eq!(tab_name("Reminder", "id"), "Reminder");
+        assert_eq!(tab_name("Reminder", "en"), "Reminders");
+        assert_eq!(tab_name("Catatan", "id"), "Catatan");
+        assert_eq!(tab_name("Catatan", "en"), "Notes");
+        assert_eq!(tab_name("Clipboard", "en"), "Clipboard");
+        assert_eq!(tab_name("Daya", "id"), "Daya");
+        assert_eq!(tab_name("Daya", "en"), "Power");
     }
 }

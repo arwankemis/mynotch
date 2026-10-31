@@ -1,9 +1,26 @@
-param([switch]$Test,[string]$Target='x86_64-pc-windows-gnullvm',[string]$RuntimeDll)
+param(
+  [switch]$Test,
+  [string]$Target='x86_64-pc-windows-gnullvm',
+  [string]$RuntimeDll,
+  [switch]$CleanTarget
+)
 $ErrorActionPreference='Stop'
 $packageRoot=Split-Path -Parent $PSScriptRoot
 $sourceRoot=Join-Path $packageRoot 'source'
 $defaultCargoBin=Join-Path $env:USERPROFILE '.cargo\bin'
 if (Test-Path $defaultCargoBin) { $env:PATH = "$defaultCargoBin;$env:PATH" }
+$localRustCandidates = @($env:RUST_ROOT)
+foreach ($cand in $localRustCandidates) {
+  if ($cand -and (Test-Path -LiteralPath (Join-Path $cand 'bin\cargo.exe')) -and (-not (Get-Command cargo -ErrorAction SilentlyContinue))) {
+    $env:PATH = "$(Join-Path $cand 'bin');$env:PATH"
+    if (-not $env:CARGO_HOME) {
+      $cargoHomeCand = Join-Path (Split-Path $cand -Parent) 'cargo-home'
+      if (Test-Path -LiteralPath $cargoHomeCand) { $env:CARGO_HOME = $cargoHomeCand }
+    }
+    $env:RUSTC = Join-Path $cand 'bin\rustc.exe'
+    break
+  }
+}
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw 'Rust/cargo belum tersedia pada PATH lingkungan pengembangan.' }
 $sysroot=(& rustc --print sysroot).Trim()
 if ($Target -eq 'x86_64-pc-windows-gnullvm') {
@@ -22,15 +39,27 @@ $env:PATH = "$packageRoot;$(Join-Path $sysroot 'bin');$env:PATH"
 
 Push-Location $sourceRoot
 try {
-  if($Test){& cargo test --locked --target $Target}else{& cargo build --locked --release --target $Target}
-  if($LASTEXITCODE -ne 0){throw 'Build/test mynotch gagal.'}
-  if(-not $Test){
+  if ($Test) {
+    & cargo test --locked --target $Target
+  } else {
+    & cargo build --locked --release --target $Target
+  }
+  if ($LASTEXITCODE -ne 0) { throw 'Build/test mynotch gagal.' }
+  if (-not $Test) {
     $targetRoot=if($env:CARGO_TARGET_DIR){$env:CARGO_TARGET_DIR}else{Join-Path $sourceRoot 'target'}
     $executable=Join-Path $targetRoot "$Target/release/mynotch.exe"
+    $publicDist=Join-Path $packageRoot 'dist/public'
+    New-Item -ItemType Directory -Path $publicDist -Force | Out-Null
+    Copy-Item -LiteralPath $executable -Destination (Join-Path $publicDist 'mynotch.exe') -Force
     Copy-Item -LiteralPath $executable -Destination (Join-Path $packageRoot 'mynotch.exe') -Force
-    if($RuntimeDll){Copy-Item -LiteralPath $RuntimeDll -Destination (Join-Path $packageRoot 'libunwind.dll') -Force}
-    elseif(Test-Path -LiteralPath (Join-Path $sysroot 'bin/libunwind.dll')){Copy-Item -LiteralPath (Join-Path $sysroot 'bin/libunwind.dll') -Destination (Join-Path $packageRoot 'libunwind.dll') -Force}
-    if($Target -eq 'x86_64-pc-windows-gnullvm' -and -not(Test-Path -LiteralPath (Join-Path $packageRoot 'libunwind.dll'))){throw 'Sertakan libunwind.dll yang cocok dengan toolchain melalui parameter RuntimeDll.'}
-    Write-Output "Build selesai di $packageRoot"
+    $unwindSrc=if($RuntimeDll){$RuntimeDll}elseif(Test-Path -LiteralPath (Join-Path $sysroot 'bin/libunwind.dll')){Join-Path $sysroot 'bin/libunwind.dll'}else{$null}
+    if($unwindSrc){
+      Copy-Item -LiteralPath $unwindSrc -Destination (Join-Path $packageRoot 'libunwind.dll') -Force
+      Copy-Item -LiteralPath $unwindSrc -Destination (Join-Path $publicDist 'libunwind.dll') -Force
+    }
+    Write-Output "Build Public sukses di $publicDist"
   }
-} finally {Pop-Location}
+} finally {
+  if ($CleanTarget) { & cargo clean --manifest-path (Join-Path $sourceRoot 'Cargo.toml') }
+  Pop-Location
+}

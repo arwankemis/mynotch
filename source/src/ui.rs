@@ -9,9 +9,11 @@
 #![allow(dead_code)]
 
 use std::time::{Duration, Instant};
+use std::cell::{Cell, RefCell};
+use crate::motion::MotionCoordinator;
 
 /// One vector icon vocabulary for navigation, settings and compact status.
-pub fn module_icon(module:&str)->&'static str{match module{"Musik"=>"music","Kalender"=>"calendar","Reminder"=>"bell","Clipboard"=>"clipboard","Catatan"=>"edit","Cuaca"=>"cloud",_=>"bell"}}
+pub fn module_icon(module:&str)->&'static str{match module{"Musik"=>"music","Kalender"=>"calendar","Reminder"=>"bell","Clipboard"=>"clipboard","Catatan"=>"edit","Cuaca"=>"cloud","Daya"=>"zap",_=>"bell"}}
 
 /// Match the integer HWND position and the D2D origin in physical pixels.
 pub fn panel_origin_y(bottom:bool,height:f32,scale:f32)->f32{
@@ -81,8 +83,8 @@ pub const TEXT_CAPTION: f32 = 10.;
 
 // --- motion ---------------------------------------------------------------
 
-/// Snappy and fluid transition (~260 ms) matching Apple Dynamic Island and Nusa.
-pub const MORPH_DURATION: Duration = Duration::from_millis(260);
+/// Snappy and fluid transition (~600 ms) governed by continuous analytical spring physics.
+pub const MORPH_DURATION: Duration = Duration::from_millis(600);
 /// Timer resolution while a transition runs (8 ms -> up to 120/144 Hz). Killed as soon as it settles.
 pub const MORPH_TICK_MS: u32 = 8;
 /// Cross-fade between tab pages; fast enough to feel responsive.
@@ -106,17 +108,48 @@ pub fn ease_out_back(t: f32) -> f32 {
     1. + C3 * u * u * u + C1 * u * u
 }
 
-/// Interpolates width, height and corner radius between two shell geometries.
+/// Continuous spring motion coordinator for shell width, height, corner radius, and ear fillets.
+#[derive(Clone)]
 pub struct Morph {
-    started: Instant,
-    duration: Duration,
     from: (f32, f32, f32),
     to: (f32, f32, f32),
+    pub coordinator: RefCell<MotionCoordinator>,
+    last_tick: Cell<Instant>,
 }
 
 impl Morph {
+    /// A resting shell may already have changed its logical stage. Start at the presented frame.
+    pub fn from_presented(frame:Option<crate::glass::FrameContour>,to:(f32,f32,f32),ear:f32)->Self{
+        let (from,from_ear)=frame.map(|c|((c.width,c.height,c.radius),c.ear)).unwrap_or((to,ear));
+        Self::new_with_ear(from,from_ear,to,ear)
+    }
     pub fn new(from: (f32, f32, f32), to: (f32, f32, f32)) -> Self {
-        Self { started: Instant::now(), duration: MORPH_DURATION, from, to }
+        let ear_from = if from.1 >= 24. { 12. } else if from.1 <= 10. { 6. } else { 8. };
+        let ear_to = if to.1 >= 24. { 12. } else if to.1 <= 10. { 6. } else { 8. };
+        Self::new_with_ear(from, ear_from, to, ear_to)
+    }
+
+    pub fn new_with_ear(from: (f32, f32, f32), ear_from: f32, to: (f32, f32, f32), ear_to: f32) -> Self {
+        let mut coordinator = MotionCoordinator::new(from.0, from.1, from.2, ear_from);
+        coordinator.retarget(to.0, to.1, to.2, ear_to);
+        Self {
+            from,
+            to,
+            coordinator: RefCell::new(coordinator),
+            last_tick: Cell::new(Instant::now()),
+        }
+    }
+
+    /// Retargets the continuous spring motion preserving instantaneous position and velocity.
+    pub fn retarget(&mut self, to: (f32, f32, f32), ear: f32) {
+        let current = self.sample();
+        self.from = current;
+        self.to = to;
+        self.coordinator.borrow_mut().retarget(to.0, to.1, to.2, ear);
+    }
+
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.coordinator.borrow_mut().set_reduced_motion(reduced);
     }
 
     pub fn is_horizontal(&self) -> bool {
@@ -130,40 +163,62 @@ impl Morph {
     pub fn from(&self) -> (f32, f32, f32) { self.from }
     pub fn to(&self) -> (f32, f32, f32) { self.to }
 
-    /// Linear 0..1 progress. Content fades are driven by this, not by the eased value.
-    pub fn raw(&self) -> f32 {
-        (self.started.elapsed().as_secs_f32() / self.duration.as_secs_f32()).clamp(0., 1.)
+    pub fn ear(&self) -> f32 {
+        self.sample();
+        self.coordinator.borrow().ear.current
     }
 
-    pub fn finished(&self) -> bool { self.started.elapsed() >= self.duration }
+    /// Relative travel (0..1) on the dominant moving axis, independent of panel dimensions.
+    /// Fade timing follows the geometry actually rendered, including interrupted retargets.
+    pub fn raw(&self) -> f32 {
+        let current=self.sample();
+        if self.coordinator.borrow().is_settled(){return 1.}
+        let axes=[(self.from.0,self.to.0,current.0),(self.from.1,self.to.1,current.1),(self.from.2,self.to.2,current.2)];
+        let (from,to,current)=axes.into_iter().max_by(|a,b|(a.1-a.0).abs().total_cmp(&(b.1-b.0).abs())).unwrap();
+        if (to-from).abs()<=f32::EPSILON{1.}else{((current-from)/(to-from)).clamp(0.,1.)}
+    }
+
+    pub fn finished(&self) -> bool {
+        self.sample();
+        self.coordinator.borrow().is_settled()
+    }
 
     pub fn sample(&self) -> (f32, f32, f32) {
-        let t = self.raw();
-        let inter_tab = self.is_inter_tab();
-        let (w_t, h_t, r_t) = if inter_tab {
-            let ease = ease_out_cubic(t);
-            (ease, ease, ease)
-        } else {
-            let expanding = self.to.1 > self.from.1;
-            let w_t = if self.is_horizontal() {
-                ease_out_cubic(t)
-            } else if expanding {
-                ease_out_back(t)
-            } else {
-                ease_out_cubic(t)
-            };
-            (w_t, ease_out_cubic(t), ease_out_cubic(t))
-        };
-        let width = lerp(self.from.0, self.to.0, w_t);
-        let height = lerp(self.from.1, self.to.1, h_t);
-        let radius = lerp(self.from.2, self.to.2, r_t);
-        (width, height, radius)
+        let now = Instant::now();
+        let last = self.last_tick.get();
+        let dt = now.duration_since(last).as_secs_f32();
+        if dt > 0.0 {
+            self.coordinator.borrow_mut().step(dt);
+            self.last_tick.set(now);
+        }
+        let (w, h, r, _) = self.coordinator.borrow().current_values();
+        (w, h, r)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_is_relative_to_actual_travel_for_arbitrary_panel_sizes(){
+        for scale in [0.5,1.,2.5]{
+            let from=(413.*scale,79.*scale,17.*scale);let to=(729.*scale,347.*scale,29.*scale);
+            let morph=Morph::new(from,to);morph.coordinator.borrow_mut().step(0.1);
+            let current=morph.sample();let expected=((current.0-from.0)/(to.0-from.0)).clamp(0.,1.);
+            assert!((morph.raw()-expected).abs()<0.02,"progress must follow rendered travel, not elapsed time");
+        }
+    }
+    #[test]
+    fn resting_stage_transitions_animate_from_the_last_presented_shape(){
+        for (from,to) in [((340.,30.,15.),(560.,300.,24.)),((560.,300.,24.),(340.,30.,15.))]{
+            let frame=crate::glass::FrameContour{width:from.0,height:from.1,radius:from.2,ear:12.,round_top:false,origin_dip:(0.,0.),scale:1.};
+            let morph=Morph::from_presented(Some(frame),to,12.);
+            let start=morph.sample();assert!((start.1-from.1).abs()<0.5,"transition jumped from {from:?} to {start:?}");
+            morph.coordinator.borrow_mut().step(0.10);let mid=morph.coordinator.borrow().current_values();
+            assert!(mid.1>30.5&&mid.1<299.5,"must show intermediate sizes: {mid:?}");
+            morph.coordinator.borrow_mut().step(2.);assert!((morph.sample().1-to.1).abs()<0.1);
+        }
+    }
 
     #[test]
     fn attached_edge_has_no_pixel_gap_for_dpi_scale_or_stage(){
@@ -205,7 +260,7 @@ mod tests {
         assert!((339.5..=680.).contains(&start.0), "starts inside the morph range, got {}", start.0);
         assert!((51.5..=620.).contains(&start.1), "height starts inside the morph range, got {}", start.1);
         // The clock is monotonic, so a finished morph must report the target exactly.
-        std::thread::sleep(MORPH_DURATION + Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(850));
         assert!(morph.finished());
         let end = morph.sample();
         assert!((end.0 - 680.).abs() < 0.05, "width settles at the panel width, got {}", end.0);

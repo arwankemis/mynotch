@@ -12,6 +12,12 @@ impl Shell {
             "Clipboard"=>self.clipboard_page(p),
             "Catatan"=>self.notes_page(p),
             "Cuaca"=>self.weather_page(p),
+
+            "Daya" => {
+                if !self.draw_mod_tab(p) {
+                    p.text("Pasang atau aktifkan Mod Daya dari Pengaturan → Mod & Ekstensi.",24.,76.,self.width-48.,66.,13.,render::TEXT,false);
+                }
+            }
             _=>{
                 if !self.draw_mod_tab(p) {
                     let msg = crate::i18n::t("shell.select_module", &self.settings.language);
@@ -30,6 +36,10 @@ impl Shell {
     }
 
     fn draw_mockup_player(&mut self,p:&mut Painter){unsafe{
+        if self.glass_config(self.height).is_some() {
+            self.draw_glass_player(p);
+            return;
+        }
         let lang = self.settings.language.clone();
         // 1. Track Content (Artwork 60x60 from y=44 to y=104)
         let art_x=24.;let art_y=44.;let art_size=60.;
@@ -93,6 +103,50 @@ impl Shell {
         let play_symbol=if self.track.playing{"⏸"}else{"▶"};
         self.transport_btn(p,play_symbol,mid_x-14.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
         self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
+    }}
+
+    fn draw_glass_player(&mut self,p:&mut Painter){unsafe{
+        let lang=self.settings.language.clone();
+        let key=if self.cover.is_some(){self.cover_key}else{0};
+        if !p.cover(self.cover.as_ref(),key,20.,72.,108.,false){
+            p.fill(20.,72.,108.,108.,16.,0x23394a);
+            p.text_centered("♫",20.,72.,108.,108.,32.,0xb2e7ee,1.,false);
+        }
+        let title=if self.track.title.is_empty(){crate::i18n::t("music.no_music",&lang)}else{&self.track.title};
+        p.text_ellipsis(title,148.,72.,self.width-176.,27.,20.,0xf5f8ff,true);
+        let artist=if self.track.artist.is_empty(){crate::i18n::t("music.no_artist",&lang)}else{&self.track.artist};
+        p.text_ellipsis(artist,148.,104.,self.width-176.,19.,12.,0xc5cedd,false);
+        let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
+        let duration=self.track.duration_seconds;
+        let ratio=if duration>0.{(position/duration).clamp(0.,1.)}else{0.};
+        let tx=148.;let tw=(self.width-tx-24.).max(1.);
+        p.fill_alpha(tx,135.,tw,4.,2.,0xffffff,0.22);
+        if ratio>0.{p.fill(tx,135.,tw*ratio as f32,4.,2.,0xa1eeff);}
+        if self.track.can_seek {
+            let thumb=tx+tw*ratio as f32;
+            p.fill(thumb-5.,132.,10.,10.,5.,0xa1eeff);
+            if self.hit_enabled{self.hits.push(Hit{rect:render::rect(tx,127.,tw,20.),action:Action::SeekPointer});}
+        }
+        p.text(&time_label(position),tx,147.,55.,16.,11.,0xc5cedd,false);
+        p.text(&time_label(duration),self.width-65.,147.,44.,16.,11.,0xc5cedd,false);
+        let mid=tx+tw*0.5;
+        self.transport_btn(p,"⏮",mid-61.,173.,32.,32.,Action::Previous,false,self.track.can_previous);
+        p.fill_alpha(mid-21.,169.,42.,42.,21.,0xffffff,if self.track.can_toggle{0.92}else{0.22});
+        p.text_centered(if self.track.playing{"Ⅱ"}else{"▶"},mid-21.,169.,42.,42.,17.,0x132333,1.,true);
+        if self.hit_enabled && self.track.can_toggle{self.hits.push(Hit{rect:render::rect(mid-21.,169.,42.,42.),action:Action::Play});}
+        self.transport_btn(p,"⏭",mid+29.,173.,32.,32.,Action::Next,false,self.track.can_next);
+        p.fill_alpha(20.,231.,self.width-40.,1.,0.,0xffffff,0.16);
+
+        let volume=self.last_known_volume;
+        let (caption,label,can_down,can_up)={
+            ("Volume Windows".to_string(),volume.map(|(v,m)|if m{"Mute".into()}else{format!("{:.0}%",v*100.)}).unwrap_or_else(||"Tidak tersedia".into()),volume.is_some_and(|(v,_)|v>0.),volume.is_some_and(|(v,_)|v<1.))
+        };
+        p.outline_icon("volume",20.,251.,16.,0xc5cedd);
+        p.text_ellipsis(&caption,44.,242.,130.,16.,11.,0xc5cedd,false);
+        p.text(&label,44.,259.,130.,18.,12.,0xf5f8ff,true);
+        self.transport_btn(p,"−",188.,246.,30.,28.,Action::VolumeStep(-5),false,can_down);
+        self.transport_btn(p,"+",224.,246.,30.,28.,Action::VolumeStep(5),false,can_up);
+        self.transport_btn(p,"LYRICS",self.width-52.,245.,28.,28.,Action::ToggleLyrics,self.lyric_mode,true);
     }}
 
     fn draw_mockup_lyrics(&mut self,p:&mut Painter){unsafe{
@@ -164,6 +218,10 @@ impl Shell {
         if self.lyrics.is_empty(){
             if self.jobs.contains_key("Musik"){
                 p.text(loading_lyrics_msg,lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
+            }else if let Some(err)=&self.lyrics_error{
+                // A failed fetch used to show the same generic "not available" text as
+                // a song with no lyrics at all; the two cases are now distinguishable.
+                p.text(err.as_str(),lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
             }else if !self.plain_lyrics.is_empty()&&self.plain_lyrics!="Lirik belum tersedia untuk lagu ini."&&self.plain_lyrics!="Lyrics not available for this song."{
                 let plain_lines:Vec<&str>=self.plain_lyrics.lines().filter(|l|!l.trim().is_empty()).collect();
                 if plain_lines.is_empty(){
@@ -225,10 +283,10 @@ impl Shell {
         }
     }}
 
-
     fn calendar_page(&mut self,p:&mut Painter){unsafe{
         if self.width<320.{return}
         let lang = self.settings.language.clone();
+        let holiday_ink=if self.ui_light(){0xff7d7d}else{0xffa7a7};
         let month_name_str = crate::i18n::full_month_name(self.month, &lang);
 
         // LEFT COLUMN (Month Grid): x = 24..296
@@ -239,7 +297,7 @@ impl Shell {
         let col_w=272./7.;
         for i in 0..7 {
             let name = crate::i18n::short_day_name(i, &lang);
-            let color=if i==6{0xff7d7d}else{0x707077};
+            let color=if i==6{holiday_ink}else{0xb9c5d5};
             p.text_centered(name,24.+i as f32*col_w,70.,col_w,16.,10.,color,1.0,false);
         }
 
@@ -281,7 +339,7 @@ impl Shell {
                     p.stroke(x+4.,y-1.,col_w-8.,22.,6.,0x555555,1.0);
                 }
                 let color=if is_holiday||is_sunday{
-                    0xff7d7d
+                    holiday_ink
                 }else if is_leave&&self.settings.collective_leave{
                     0xffa46b
                 }else if day_hov{
@@ -297,7 +355,7 @@ impl Shell {
 
             // Dot indicators below date
             if is_holiday{
-                p.fill(x+col_w*0.5-1.5,y+18.,3.,3.,1.5,0xff7d7d);
+                p.fill(x+col_w*0.5-1.5,y+18.,3.,3.,1.5,holiday_ink);
             }else if is_leave&&self.settings.collective_leave{
                 p.fill(x+col_w*0.5-1.5,y+18.,3.,3.,1.5,0xffa46b);
             }
@@ -308,10 +366,10 @@ impl Shell {
         }
 
         // Calendar legend at y = 232
-        p.fill(24.,236.,4.,4.,2.,0xff7d7d);
-        p.text(crate::i18n::t("calendar.national_holiday", &lang),32.,232.,80.,14.,10.,0x77777c,false);
-        p.fill(124.,236.,4.,4.,2.,0xffa46b);
-        p.text(crate::i18n::t("calendar.collective_leave", &lang),132.,232.,80.,14.,10.,0x77777c,false);
+        p.fill(24.,236.,4.,4.,2.,holiday_ink);
+        p.text(crate::i18n::t("calendar.national_holiday", &lang),32.,232.,92.,16.,11.,0xc5cedd,false);
+        p.fill(CALENDAR_LEAVE_DOT_X,236.,4.,4.,2.,0xffa46b);
+        p.text(crate::i18n::t("calendar.collective_leave", &lang),CALENDAR_LEAVE_TEXT_X,232.,142.,16.,11.,0xc5cedd,false);
 
         // Footer at y = 254
         let footer_text = if self.year==2026 {
@@ -319,19 +377,19 @@ impl Shell {
         } else {
             crate::i18n::t("calendar.footer_other", &lang)
         };
-        p.text(footer_text,24.,254.,184.,16.,9.,0x909096,false);
+        p.text(footer_text,24.,253.,268.,16.,10.,0xc5cedd,false);
         let leave_label = if self.settings.collective_leave {
             crate::i18n::t("calendar.leave_toggle_on", &lang)
         } else {
             crate::i18n::t("calendar.leave_toggle_off", &lang)
         };
-        let leave_hov=self.pointer.is_some_and(|(px,py)|px>=198.&&px<=292.&&py>=250.&&py<=270.);
-        p.text(leave_label,200.,254.,90.,16.,9.,if leave_hov{0xefeff3}else{0x9c9ca3},false);
+        let leave_hov=self.pointer.is_some_and(|(px,py)|px>=198.&&px<=292.&&py>=267.&&py<=287.);
+        p.text(leave_label,200.,269.,90.,16.,10.,if leave_hov{0xefeff3}else{0xc5cedd},false);
         if self.focused.as_ref()==Some(&Action::CalendarLeaveToggle){
-            p.stroke(198.,250.,94.,20.,4.,0xd5d5dc,1.0);
+            p.stroke(198.,267.,94.,20.,4.,0xd5d5dc,1.0);
         }
         if self.hit_enabled{
-            self.hits.push(Hit{rect:render::rect(198.,250.,94.,20.),action:Action::CalendarLeaveToggle});
+            self.hits.push(Hit{rect:render::rect(198.,267.,94.,20.),action:Action::CalendarLeaveToggle});
         }
 
         // Vertical Divider line between columns (x = 308)
@@ -361,7 +419,7 @@ impl Shell {
             }else{
                 crate::i18n::t("calendar.regular_day", &lang).to_string()
             };
-            let status_color=if holiday.is_some_and(|h|!h.collective_leave){0xff7d7d}else if holiday.is_some(){0xffa46b}else{0x88888e};
+            let status_color=if holiday.is_some_and(|h|!h.collective_leave){holiday_ink}else if holiday.is_some(){0xffa46b}else{0xc5cedd};
             p.text_ellipsis(&status_text,324.,122.,188.,18.,11.,status_color,false);
 
             // Button "Hari ini"
@@ -380,7 +438,7 @@ impl Shell {
             p.fill_alpha(324.,178.,188.,1.,0.,0xffffff,0.08);
 
             // Upcoming Holiday
-            p.text(crate::i18n::t("calendar.next_holiday", &lang),324.,186.,188.,14.,8.,0x88888e,true);
+            p.text(crate::i18n::t("calendar.next_holiday", &lang),324.,186.,188.,14.,8.,0xc5cedd,true);
 
             // Find next upcoming holiday strictly >= today
             let next_h=self.holidays.iter().filter(|h|h.date>=today&&!h.collective_leave).min_by_key(|h|h.date);
@@ -483,6 +541,7 @@ impl Shell {
             p.text(empty_msg, left_x, 80., left_w, 20., 11., 0x6e7681, false);
             if self.clip_filter.is_empty() {
                 p.text(crate::i18n::t("clipboard.hint", &lang), left_x, 104., left_w, 54., 10., 0x475569, false);
+                p.text(crate::i18n::t("clipboard.plaintext_note", &lang), left_x, 164., left_w, 48., 9.5, 0x64748b, false);
             }
         } else {
             let start = self.clip_offset.min(total_clips.saturating_sub(1));
@@ -732,9 +791,149 @@ impl Shell {
         }
     }}
 
+    #[allow(dead_code)]
+    fn power_page(&mut self, p: &mut Painter) { unsafe {
+        let w = self.width;
+        if w < 320. { return }
+        let lang = self.settings.language.clone();
+        let total_dc = self.power_snapshot.total_dc_watts.or(self.power_snapshot.active_power_w).unwrap_or(0.0).max(1.0);
+
+        // 1. Header Row: Eyebrow + Live Watt readout + Live Badge
+        p.outline_icon("zap", 24., 44., 13., 0xffa46b);
+        p.text(crate::i18n::t("power.header", &lang), 40., 44., 220., 14., 9., 0x8a8a92, true);
+
+        let dc_w_str = self.power_snapshot.total_dc_watts
+            .or(self.power_snapshot.active_power_w)
+            .map(|w| format!("{:.0}", w))
+            .unwrap_or_else(|| "—".to_string());
+        p.text(&dc_w_str, 24., 56., 70., 26., 22., 0xffffff, true);
+        let w_offset = 24. + dc_w_str.chars().count() as f32 * 13. + 3.;
+        p.text("W", w_offset, 60., 20., 18., 13., 0x88888e, false);
+        let cost_str = if let Some(hourly) = self.power_snapshot.hourly_cost_idr {
+            format!("· Rp {:.0}{}", hourly, crate::i18n::t("power.per_hour", &lang))
+        } else {
+            "· —".to_string()
+        };
+        p.text(&cost_str, w_offset + 20., 60., 180., 18., 11., 0x40c977, false);
+
+        // Badge at top right
+        let badge_w = 88.;
+        let badge_x = w - badge_w - 24.;
+        let is_measured = self.power_snapshot.source_kind == crate::system::SourceKind::Measured;
+        let badge_label = match self.power_snapshot.source_kind {
+            crate::system::SourceKind::Measured => crate::i18n::t("power.badge", &lang),
+            crate::system::SourceKind::Estimated => if lang == "en" { "Estimated" } else { "Estimasi" },
+            _ => if lang == "en" { "Unavailable" } else { "Tidak tersedia" },
+        };
+        p.fill(badge_x, 48., badge_w, 18., 4., if is_measured { 0x15291e } else { 0x252015 });
+        p.stroke(badge_x, 48., badge_w, 18., 4., if is_measured { 0x224a35 } else { 0x4a3a22 }, 1.0);
+        p.fill(badge_x + 8., 55., 4., 4., 2., if is_measured { 0x40c977 } else { 0xf5aa55 });
+        p.text(badge_label, badge_x + 16., 50., 68., 14., 9., if is_measured { 0x40c977 } else { 0xf5aa55 }, false);
+
+        // 2. Row 1: Detail CPU, GPU, Periferal (3 clean cards)
+        let avail_w = w - 48.;
+        let gap = 8.;
+        let card_w = (avail_w - gap * 2.) / 3.;
+        let card_y = 84.;
+        let card_h = 56.;
+        let bar_w = (card_w - 20.).max(2.0);
+
+        let cpu_watts = self.power_snapshot.cpu_watts.unwrap_or(0.0);
+        let gpu_watts = self.power_snapshot.gpu_watts.unwrap_or(0.0);
+        let rest_watts = self.power_snapshot.rest_watts.unwrap_or(0.0);
+        let cpu_name = self.power_snapshot.cpu_name.as_deref().unwrap_or("CPU");
+        let gpu_name = self.power_snapshot.gpu_name.as_deref().unwrap_or("GPU");
+
+        // CPU Card
+        let cpu_x = 24.;
+        p.fill(cpu_x, card_y, card_w, card_h, 8., 0x141416);
+        p.stroke(cpu_x, card_y, card_w, card_h, 8., 0x222226, 1.0);
+        p.text("CPU", cpu_x + 10., card_y + 6., 32., 14., 10., 0x909098, true);
+        p.text_ellipsis(cpu_name, cpu_x + 42., card_y + 6., card_w - 50., 14., 9., 0x6a6a72, false);
+        p.text(&if self.power_snapshot.cpu_watts.is_some() { format!("{:.0} W", cpu_watts) } else { "—".to_string() }, cpu_x + 10., card_y + 20., 80., 20., 16., 0xffa46b, true);
+        let cpu_fill = ((cpu_watts / total_dc) * bar_w).clamp(2.0, bar_w);
+        p.fill(cpu_x + 10., card_y + 44., bar_w, 3., 1.5, 0x242428);
+        if self.power_snapshot.cpu_watts.is_some() {
+            p.fill(cpu_x + 10., card_y + 44., cpu_fill, 3., 1.5, 0xffa46b);
+        }
+
+        // GPU Card
+        let gpu_x = cpu_x + card_w + gap;
+        p.fill(gpu_x, card_y, card_w, card_h, 8., 0x141416);
+        p.stroke(gpu_x, card_y, card_w, card_h, 8., 0x222226, 1.0);
+        p.text("GPU", gpu_x + 10., card_y + 6., 32., 14., 10., 0x909098, true);
+        p.text_ellipsis(gpu_name, gpu_x + 42., card_y + 6., card_w - 50., 14., 9., 0x6a6a72, false);
+        p.text(&if self.power_snapshot.gpu_watts.is_some() { format!("{:.0} W", gpu_watts) } else { "—".to_string() }, gpu_x + 10., card_y + 20., 80., 20., 16., 0x5edbf6, true);
+        let gpu_fill = ((gpu_watts / total_dc) * bar_w).clamp(2.0, bar_w);
+        p.fill(gpu_x + 10., card_y + 44., bar_w, 3., 1.5, 0x242428);
+        if self.power_snapshot.gpu_watts.is_some() {
+            p.fill(gpu_x + 10., card_y + 44., gpu_fill, 3., 1.5, 0x5edbf6);
+        }
+
+        // Periferal Card
+        let rest_x = gpu_x + card_w + gap;
+        p.fill(rest_x, card_y, card_w, card_h, 8., 0x141416);
+        p.stroke(rest_x, card_y, card_w, card_h, 8., 0x222226, 1.0);
+        p.text(crate::i18n::t("power.peripheral", &lang), rest_x + 10., card_y + 6., 54., 14., 10., 0x909098, true);
+        p.text_ellipsis("Board, RAM, Fan", rest_x + 64., card_y + 6., card_w - 72., 14., 9., 0x6a6a72, false);
+        p.text(&if self.power_snapshot.rest_watts.is_some() { format!("{:.0} W", rest_watts) } else { "—".to_string() }, rest_x + 10., card_y + 20., 80., 20., 16., 0xd0d0d6, true);
+        let rest_fill = ((rest_watts / total_dc) * bar_w).clamp(2.0, bar_w);
+        p.fill(rest_x + 10., card_y + 44., bar_w, 3., 1.5, 0x242428);
+        if self.power_snapshot.rest_watts.is_some() {
+            p.fill(rest_x + 10., card_y + 44., rest_fill, 3., 1.5, 0x8e8e94);
+        }
+
+        // 3. Row 2: Akumulasi Biaya PLN Bulanan (Monthly Accumulation instead of 7-day history)
+        let now = Local::now();
+        let current_month_key = now.format("%Y-%m").to_string();
+        if self.state.power_month != current_month_key {
+            self.state.record_power(now.date_naive(), 0.0);
+        }
+        let month_label = format!("{} {}", crate::i18n::month_name(now.month(), &lang), now.year());
+        let hist_y = 148.;
+        p.text(crate::i18n::t("power.monthly_title", &lang), 24., hist_y, 240., 14., 9., 0x808086, true);
+        p.text_centered(&month_label, w - 124., hist_y, 100., 14., 9., 0x5edbf6, 1.0, true);
+
+        let row_y = 164.;
+        let sum_h = 54.;
+        let active_days = self.state.power_days_active.len().max(1);
+        let monthly_kwh = self.state.monthly_kwh;
+        let monthly_cost = self.state.monthly_cost_idr;
+        let session_kwh = self.session_energy_kwh;
+        let session_cost = (session_kwh * 1444.70).round() as u32;
+        let hourly_cost = self.power_snapshot.hourly_cost_idr.unwrap_or(0.0);
+        let daily_avg_cost = (monthly_cost as f32 / active_days as f32).max(hourly_cost * 8.0);
+        let projected_cost = (daily_avg_cost * 30.0).round() as u32;
+
+        // Card 1: Bulan Ini (Highlighted)
+        p.fill(cpu_x, row_y, card_w, sum_h, 8., 0x152b33);
+        p.stroke(cpu_x, row_y, card_w, sum_h, 8., 0x2e6e80, 1.2);
+        p.text(crate::i18n::t("power.this_month", &lang), cpu_x + 10., row_y + 5., card_w - 20., 13., 9.5, 0x5edbf6, true);
+        p.text(&format!("Rp {}", format_rupiah(monthly_cost)), cpu_x + 10., row_y + 19., card_w - 20., 18., 13.5, 0xffffff, true);
+        p.text(&format!("{:.2} kWh · {} {}", monthly_kwh, active_days, crate::i18n::t("power.active_days", &lang)), cpu_x + 10., row_y + 37., card_w - 20., 13., 8.5, 0x8fd8e8, false);
+
+        // Card 2: Sesi Saat Ini
+        p.fill(gpu_x, row_y, card_w, sum_h, 8., 0x141416);
+        p.stroke(gpu_x, row_y, card_w, sum_h, 8., 0x222226, 1.0);
+        p.text(crate::i18n::t("power.current_session", &lang), gpu_x + 10., row_y + 5., card_w - 20., 13., 9.5, 0x909098, true);
+        p.text(&format!("Rp {}", format_rupiah(session_cost)), gpu_x + 10., row_y + 19., card_w - 20., 18., 13.5, 0x40c977, true);
+        p.text(&format!("{:.3} kWh", session_kwh), gpu_x + 10., row_y + 37., card_w - 20., 13., 8.5, 0x6a6a72, false);
+
+        // Card 3: Proyeksi 30 Hari
+        p.fill(rest_x, row_y, card_w, sum_h, 8., 0x141416);
+        p.stroke(rest_x, row_y, card_w, sum_h, 8., 0x222226, 1.0);
+        p.text(crate::i18n::t("power.monthly_projection", &lang), rest_x + 10., row_y + 5., card_w - 20., 13., 9.5, 0x909098, true);
+        p.text(&format!("Rp {}", format_rupiah(projected_cost)), rest_x + 10., row_y + 19., card_w - 20., 18., 13.5, 0xffa46b, true);
+        p.text_ellipsis(crate::i18n::t("power.tariff_info", &lang), rest_x + 10., row_y + 37., card_w - 20., 13., 8.0, 0x6a6a72, false);
+    }}
+
     pub(super) fn action(&mut self,action:Action){
-        let transient=matches!(&action,Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom);
+        let transient=matches!(&action,Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings);
         match action{
+
+            Action::VolumeStep(step)=>self.action(Action::MasterVolumeStep(step)),
+            Action::MasterVolumeStep(step)=>{if let Some(volume)=crate::system::adjust_master_volume(step as f32/100.){self.last_known_volume=Some(volume);}else{self.notice(if self.settings.language=="en"{"The audio endpoint rejected the volume change."}else{"Endpoint audio menolak perubahan volume."});}self.invalidate();},
+
             Action::TogglePin=>{
                 self.pinned=!self.pinned;
                 let notice_text = if self.pinned {
@@ -793,8 +992,7 @@ impl Shell {
                         self.trigger_stage1_temporary(5);
                     }
                     self.settings_open=false;
-                    let from=self.geometry();
-                    self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                    self.retarget_morph();
                     self.update_window_region();
                     self.start_morph_timer();
                     self.make_inputs();
@@ -809,27 +1007,63 @@ impl Shell {
                 self.invalidate();
             },
             Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(6);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));if self.settings_cat==5{self.invalidate_mods();}},
+            Action::PowerSensorSetup=>{
+                if self.is_mod_active("daya"){if let Some(sensors)=&self.power_sensors{sensors.request_admin();}}
+            },
             Action::InstallMod(id)=>{
                 let root=self.store.root.clone();
-                match crate::mods::install_mod(&root,&mut self.settings,&id){
-                    Ok(())=>{self.invalidate_mods();self.save();self.notice(crate::i18n::t("notice.mod_installed", &self.settings.language));}
-                    Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_install", &self.settings.language))),
+                if id == "daya" {
+                    let cat = crate::mods::catalog::get_catalog(&root, &self.settings);
+                    if let Some(entry) = cat.entries.iter().find(|e| e.manifest.id == "daya") {
+                        let pm = crate::mods::package::PackageManager::new(&root);
+                        match pm.install_package(&mut self.settings, &entry.manifest, &[("main.lua",include_bytes!("../../assets/mods/daya/main.lua"))]) {
+                            Ok(()) => {
+                                self.invalidate_mods();
+                                self.save();
+                                self.show_toast(ToastKind::Generic,crate::i18n::t("notice.mod_installed", &self.settings.language),3000);
+                            }
+                            Err(e) => self.notice(format!("{} {e}", crate::i18n::t("error.mod_install", &self.settings.language))),
+                        }
+                    }
+                } else {
+                    match crate::mods::install_mod(&root,&mut self.settings,&id){
+                        Ok(())=>{self.invalidate_mods();self.save();self.show_toast(ToastKind::Generic,crate::i18n::t("notice.mod_installed", &self.settings.language),3000);}
+                        Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_install", &self.settings.language))),
+                    }
                 }
                 self.invalidate();
             },
             Action::UninstallMod(id)=>{
                 let root=self.store.root.clone();
-                match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
-                    Ok(()) => {
-                        self.invalidate_mods();
-                        if !self.settings.enabled(&self.tab){
-                            self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
-                            self.make_inputs();
+                if !crate::mods::package::PackageManager::new(&root).is_installed(&self.settings,&id){return}
+                if id == "daya" {
+                    let pm = crate::mods::package::PackageManager::new(&root);
+                    match pm.uninstall_package(&mut self.settings, &id, true) {
+                        Ok(()) => {
+                            self.invalidate_mods();
+                            if !self.settings.enabled(&self.tab) {
+                                self.tab = self.settings.active_tab_order().first().cloned().unwrap_or_else(|| "Musik".into());
+                                self.make_inputs();
+                            }
+                            self.save();
+                            self.show_toast(ToastKind::Generic,crate::i18n::t("notice.mod_uninstalled", &self.settings.language),3000);
                         }
-                        self.save();
-                        self.notice(crate::i18n::t("notice.mod_uninstalled", &self.settings.language));
+                        Err(e) => self.notice(format!("{} {e}", crate::i18n::t("error.mod_uninstall", &self.settings.language))),
                     }
-                    Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_uninstall", &self.settings.language))),
+                } else {
+                    match crate::mods::uninstall_mod(&root,&mut self.settings,&id){
+                        Ok(()) => {
+                            self.invalidate_mods();
+
+                            if !self.settings.enabled(&self.tab){
+                                self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
+                                self.make_inputs();
+                            }
+                            self.save();
+                            self.show_toast(ToastKind::Generic,crate::i18n::t("notice.mod_uninstalled", &self.settings.language),3000);
+                        }
+                        Err(e)=>self.notice(format!("{} {e}",crate::i18n::t("error.mod_uninstall", &self.settings.language))),
+                    }
                 }
                 self.invalidate();
             },
@@ -864,7 +1098,9 @@ impl Shell {
                     self.invalidate();
                 }
             },
+            Action::BackModsList=>{self.mods_detail_open=false;self.focused=None;self.invalidate();},
             Action::SelectMod(id)=>{
+                self.mods_detail_open=true;self.mods_detail_scroll=0.;
                 self.mods_selected=Some(id);
                 self.invalidate();
             },
@@ -879,8 +1115,7 @@ impl Shell {
                 self.reminder_menu=None;
                 self.focused=None;
                 self.tab_fade=None;
-                let from=self.geometry();
-                self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                self.retarget_morph();
                 self.update_window_region();
                 self.start_morph_timer();
                 self.make_inputs();
@@ -893,8 +1128,7 @@ impl Shell {
                 self.settings_cat=5;
                 self.settings_popup=None;
                 self.focused=None;
-                let from=self.geometry();
-                self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                self.retarget_morph();
                 self.update_window_region();
                 self.start_morph_timer();
                 self.make_inputs();
@@ -908,9 +1142,38 @@ impl Shell {
                 self.invalidate_mods();
             },
             Action::RefreshMods=>{self.invalidate_mods();self.invalidate();},
+            Action::SetModKind(kind)=>{
+                self.mods_kind = kind;self.mods_detail_open=false;
+                self.mods_scroll = 0;
+                self.mods_selected = None;
+                self.invalidate();
+            },
+            Action::SetModFilter(filter)=>{
+                self.mods_filter = filter;self.mods_detail_open=false;
+                self.mods_scroll = 0;
+                self.mods_selected = None;
+                self.invalidate();
+            },
+            Action::ToggleModActive(id)=>{
+                let active = crate::mods::package::PackageManager::new(&self.store.root).is_active(&self.settings,&id);
+                if active {
+                    if !self.settings.disabled_mods.contains(&id) {
+                        self.settings.disabled_mods.push(id.clone());
+                    }
+                } else {
+                    self.settings.disabled_mods.retain(|m| m != &id);
+                }
+                if self.settings.active_tab_order().is_empty(){self.settings.modules.insert("Musik".into(),true);}
+                if !self.settings.enabled(&self.settings.default_tab){self.settings.default_tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());}
+                if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());self.make_inputs();}
+                self.sync_visualizer();
+                self.save();
+                self.invalidate();
+            },
             Action::ToggleModTab(tab)=>{
-                let on=!self.settings.enabled(&tab);
+                let on=!self.settings.mod_tab_enabled(&tab);
                 self.settings.set_mod_tab(&tab,on);
+
                 if self.tab==tab&&!self.settings.enabled(&tab){
                     self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_else(||"Musik".into());
                     self.make_inputs();
@@ -944,16 +1207,80 @@ impl Shell {
             },
             Action::SettingsMenu(key,x,y,w)=>self.open_settings_menu(key,x,y,w),
             Action::SettingsValue(key,value)=>{self.apply_settings_value(key,value);self.settings_popup=None;},
-            Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}let from=self.geometry();self.mod_view=None;self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.start_morph_timer();self.make_inputs();self.update_window_region();},
+            Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}self.mod_view=None;self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.retarget_morph();self.start_morph_timer();self.make_inputs();self.update_window_region();},
             Action::SetDefaultTab(tab)=>{if self.settings.enabled(&tab){self.settings.default_tab=tab;}},
-            Action::Settings=>{self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.mod_view=None;self.settings_open=true;self.set_expanded(true);let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
-            Action::Back=>{self.settings_popup=None;self.focused=None;self.mod_view=None;self.settings_open=false;let from=self.geometry();self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
+            Action::Settings=>{self.privacy_detail_open=false;self.settings_subpage_privacy=false;self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.mod_view=None;self.settings_open=true;self.set_expanded(true);self.retarget_morph();self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
+            Action::Back=>{
+                if self.privacy_detail_open {
+                    self.privacy_detail_open = false;
+                } else if self.settings_subpage_privacy {
+                    self.settings_subpage_privacy = false;
+                } else {
+                    self.settings_open = false;
+                }
+                self.settings_popup=None;self.focused=None;self.mod_view=None;self.retarget_morph();self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();
+            },
+            Action::PrivacyDetail => {
+                self.privacy_detail_open = true;
+                self.settings_open = false;
+                self.set_expanded(true);
+                self.retarget_morph();
+                self.update_window_region();
+                self.start_morph_timer();
+                self.invalidate();
+            },
+            Action::PrivacyClose => {
+                self.privacy_detail_open = false;
+                self.retarget_morph();
+                self.update_window_region();
+                self.start_morph_timer();
+                self.invalidate();
+            },
+            Action::OpenWindowsMicSettings => {
+                crate::system::open_settings_page("ms-settings:privacy-microphone");
+            },
+            Action::OpenWindowsCameraSettings => {
+                crate::system::open_settings_page("ms-settings:privacy-webcam");
+            },
+            Action::OpenPrivacySettings => {
+                self.settings_subpage_privacy = true;
+                self.invalidate();
+            },
+            Action::ClosePrivacySettings => {
+                self.settings_subpage_privacy = false;
+                self.invalidate();
+            },
             Action::Close=>self.set_expanded(false),Action::Exit=>{self.flush_note_edits();unsafe{let _=DestroyWindow(self.hwnd);}},
             Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},
             Action::Minimal=>{self.settings.minimal=!self.settings.minimal;if !self.expanded{self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));}self.sync_visualizer();self.save();},
             Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(MIN_OPACITY as i32,255)as u8;self.save();self.invalidate();},
             Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
+                "privacy_enabled" => {
+                    self.settings.privacy_enabled = !self.settings.privacy_enabled;
+                    if self.settings.privacy_enabled {
+                        if self.privacy_monitor.is_none() && !self.preview {
+                            self.privacy_monitor = Some(crate::privacy::PrivacyMonitorHandle::start(self.privacy_mailbox_tx.clone()));
+                        }
+                    } else {
+                        if let Some(mut mon) = self.privacy_monitor.take() {
+                            mon.stop();
+                        }
+                        self.privacy_snapshot = crate::privacy::PrivacySnapshot::new(self.privacy_mailbox_tx.current_generation());
+                    }
+                    self.save();
+                    self.invalidate();
+                },
+                "privacy_show_fullscreen" => {
+                    self.settings.privacy_show_fullscreen = !self.settings.privacy_show_fullscreen;
+                    self.save();
+                    self.invalidate();
+                },
+                "privacy_show_app_names" => {
+                    self.settings.privacy_show_app_names = !self.settings.privacy_show_app_names;
+                    self.save();
+                    self.invalidate();
+                },
                 "auto_break"=>self.settings.auto_break=!self.settings.auto_break,
                 "startup"=>{
                     let new_val=!self.settings.run_at_startup;
@@ -1040,8 +1367,7 @@ impl Shell {
                     let _=MessageBeep(0x00000040);
                     SetTimer(Some(self.hwnd),3,2200,None);
                 }
-                let from=self.geometry();
-                self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                self.retarget_morph();
                 self.start_morph_timer();
                 self.invalidate();
             },
@@ -1126,7 +1452,7 @@ impl Shell {
                         self.settings.weather_city=if city.is_empty(){crate::i18n::t("weather.custom",&self.settings.language).to_string()}else{city};
                         self.settings.weather_configured=true;
                         self.weather_custom_open=false;
-                        self.morph=None;self.layout();
+                        self.retarget_morph();self.layout();
                         self.save();
                         self.make_inputs();
                         self.refresh_weather();
@@ -1152,7 +1478,7 @@ impl Shell {
             Action::WeatherToggleCustom=>{
                 self.weather_menu_open=false;
                 self.weather_custom_open=!self.weather_custom_open;
-                self.morph=None;self.layout();
+                self.retarget_morph();self.layout();
                 self.make_inputs();
                 if !self.weather_custom_open{self.drafts.retain(|(page,id),_|page!="Cuaca"||!(30..=32).contains(id));}
                 self.invalidate();
@@ -1163,18 +1489,153 @@ impl Shell {
                 let api=self.online.clone();
                 self.job("Update",move||super::Event::Update(api.check_update()));
             },
-            Action::DownloadUpdate=>{
-                if let super::UpdateStatus::Available(ref rel) = self.update_status {
-                    let zip_url = rel.assets.iter()
-                        .find(|a| a.name.ends_with(".zip"))
-                        .map(|a| a.browser_download_url.as_str())
-                        .unwrap_or(rel.html_url.as_str());
-                    crate::system::open_browser(zip_url);
+            Action::DownloadUpdate | Action::PerbaruiUpdate => {
+                if let super::UpdateStatus::Available(ref candidate) = self.update_status {
+                    let cand = candidate.clone();
+                    self.update_status = super::UpdateStatus::Downloading {
+                        percent: 0,
+                        downloaded_bytes: 0,
+                        total_bytes: Some(cand.asset_size),
+                    };
+                    self.invalidate();
+
+                    let poster = self.poster();
+                    let current_exe = std::env::current_exe().unwrap_or_default();
+                    let install_dir = current_exe.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+
+                    std::thread::spawn(move || {
+                        let cancel = crate::net::Cancellation::default();
+                        let tx_id = format!(
+                            "tx-{}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis())
+                                .unwrap_or(0)
+                        );
+                        let tx_dir = install_dir.join(".mynotch-update").join(&tx_id);
+                        let stage_dir = tx_dir.join("stage");
+                        let backup_dir = tx_dir.join("backup");
+                        let part_zip = stage_dir.join("package.zip.part");
+                        let final_zip = stage_dir.join("package.zip");
+
+                        let poster_prog = poster.clone();
+                        let dl_res = crate::update::download::download_to_file(
+                            &cand.asset_url,
+                            &part_zip,
+                            &final_zip,
+                            cand.expected_sha256.as_deref(),
+                            &cancel,
+                            move |downloaded, total| {
+                                let pct = total
+                                    .map(|tot| {
+                                        if tot > 0 {
+                                            ((downloaded * 100) / tot).min(100) as u8
+                                        } else {
+                                            0
+                                        }
+                                    })
+                                    .unwrap_or(0);
+                                poster_prog.send(super::Event::UpdateProgress(pct, downloaded, total));
+                            },
+                        );
+
+                        if let Err(e) = dl_res {
+                            poster.send(super::Event::UpdateStaged(Err(e)));
+                            return;
+                        }
+
+                        let extract_res =
+                            crate::update::archive::extract_zip_file_safely(&final_zip, &stage_dir);
+                        let extracted = match extract_res {
+                            Ok(files) => files,
+                            Err(e) => {
+                                poster.send(super::Event::UpdateStaged(Err(e)));
+                                return;
+                            }
+                        };
+
+                        let managed_files: Vec<crate::update::transaction::ManagedFile> = extracted
+                            .into_iter()
+                            .map(|rel| crate::update::transaction::ManagedFile {
+                                relative_path: rel,
+                                stage_sha256: None,
+                                original_sha256: None,
+                            })
+                            .collect();
+
+                        let journal = crate::update::transaction::TransactionJournal::new(
+                            tx_id,
+                            install_dir.clone(),
+                            stage_dir,
+                            backup_dir,
+                            install_dir.join("mynotch.exe"),
+                            std::process::id(),
+                            managed_files,
+                            cand.version.clone(),
+                            crate::update::current_profile().to_string(),
+                        );
+
+                        if let Err(e) = journal.save(&tx_dir) {
+                            poster.send(super::Event::UpdateStaged(Err(e)));
+                            return;
+                        }
+
+                        if let Err(e) = crate::update::ui::prepare_helper_copy(&install_dir, &tx_dir) {
+                            poster.send(super::Event::UpdateStaged(Err(e)));
+                            return;
+                        }
+
+                        poster.send(super::Event::UpdateStaged(Ok((cand.version, tx_dir))));
+                    });
                 }
             },
-            Action::OpenReleaseNotes=>{
-                if let super::UpdateStatus::Available(ref rel) = self.update_status {
-                    crate::system::open_browser(&rel.html_url);
+            Action::RestartNow => {
+                if let super::UpdateStatus::AwaitingRestart { ref tx_dir, .. } = self.update_status {
+                    let tx_path = tx_dir.clone();
+                    self.flush_note_edits();
+                    self.save();
+
+                    if let Ok(exe) = std::env::current_exe() {
+                        if let Ok(root) = crate::app::storage_root(&exe, self.preview) {
+                            crate::update::ui::PendingUpdate::clear(&root);
+                        }
+                    }
+
+                    let helper_exe = tx_path.join("helper").join("mynotch_helper.exe");
+                    if let Ok(mut journal) =
+                        crate::update::transaction::TransactionJournal::load(&tx_path)
+                    {
+                        journal.parent_pid = std::process::id();
+                        let _ = journal.save(&tx_path);
+                    }
+
+                    let _ = crate::update::ui::spawn_helper(&helper_exe, &tx_path);
+                    std::process::exit(0);
+                }
+            },
+            Action::RestartLater => {
+                if let super::UpdateStatus::AwaitingRestart {
+                    ref version,
+                    ref tx_dir,
+                } = self.update_status
+                {
+                    if let Ok(exe) = std::env::current_exe() {
+                        if let Ok(root) = crate::app::storage_root(&exe, self.preview) {
+                            let pending = crate::update::ui::PendingUpdate::new(
+                                tx_dir.clone(),
+                                version.clone(),
+                                crate::update::current_profile().to_string(),
+                            );
+                            let _ = pending.save(&root);
+                        }
+                    }
+                    self.toast = None;
+                    self.invalidate();
+                }
+            },
+            Action::OpenReleaseNotes => {
+                if let super::UpdateStatus::Available(ref update) = self.update_status {
+                    crate::system::open_browser(&update.html_url);
                 }
             },
             Action::OpenRepoUrl=>{
@@ -1183,8 +1644,7 @@ impl Shell {
             Action::AiSave=>{let key=self.input(43);if !key.is_empty(){match crate::secrets::protect(&key){Ok(secret)=>self.settings.ai_key=secret,Err(e)=>{self.notice(e);return}}}self.settings.ai_endpoint=self.input(41).trim().into();self.settings.ai_model=self.input(42).trim().into();self.clear_input(43);self.notice(crate::i18n::t("notice.ai_saved", &self.settings.language));},Action::AiSend=>self.send_ai(),Action::AiClear=>self.ai_messages.clear(),
             Action::ToggleLyrics=>{
                 self.lyric_mode=!self.lyric_mode;
-                let from=self.geometry();
-                self.morph=Some(ui::Morph::new(from,self.target_geometry()));
+                self.retarget_morph();
                 self.update_window_region();
                 self.start_morph_timer();
                 self.invalidate();
@@ -1195,6 +1655,7 @@ impl Shell {
                 2=>{self.settings.minimal=false;self.set_expanded(false);},
                 3=>{self.settings.minimal=false;self.set_expanded(false);},
                 4=>{self.settings.minimal=true;self.set_expanded(false);},
+
                 _=>{}
             },
             Action::NoteAdd => {
@@ -1371,7 +1832,7 @@ impl Shell {
         self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.clock_timer();self.invalidate();
     }
     fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
-    fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice(crate::i18n::t("notice.calendar_feed_removed", &self.settings.language));return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
+    pub(super) fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice(crate::i18n::t("notice.calendar_feed_removed", &self.settings.language));return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
     fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen||!self.settings.enabled("AI"){return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice(crate::i18n::t("notice.ai_key_missing", &self.settings.language));return}};if self.settings.ai_model.trim().is_empty(){self.notice(crate::i18n::t("notice.ai_model_missing", &self.settings.language));return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
 
         pub(super) fn hit(&mut self, x: f32, y: f32, w: f32, h: f32, action: Action) {
@@ -1379,8 +1840,6 @@ impl Shell {
             self.hits.push(Hit { rect: render::rect(x, y, w, h), action });
         }
     }
-
-
 
     fn draw_button(&mut self, p: &mut Painter, label: &str, x: f32, y: f32, w: f32, h: f32, action: Action) { unsafe {
         let hover = self.pointer.is_some_and(|(px, py)| px >= x && px <= x + w && py >= y && py <= y + h);
@@ -1396,14 +1855,14 @@ impl Shell {
         if self.mods_cache.is_none() {
             let mut list = crate::mods::available_mods(&self.store.root);
             list.sort_by(|a, b| {
-                let rank = |m: &crate::mods::ModManifest| match m.id.as_str() { "sticky_notes" => 0u8, "weather" => 1, _ => 2 };
+                let rank = |m: &crate::mods::ModManifest| match m.id.as_str() { "sticky_notes" => 0u8, "weather" => 1,  "daya" => 3, _ => 4 };
                 rank(a).cmp(&rank(b)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             });
             self.mods_cache = Some(list);
         }
         self.mods_cache.clone().unwrap_or_default()
     }
-    pub(super) fn invalidate_mods(&mut self) { self.mods_cache = None; }
+    pub(super) fn invalidate_mods(&mut self) { self.mods_cache = None;self.mods_catalog_cache=None; }
 
     /// Community mod currently being shown, whether via Settings → Buka or via a tab the user
     /// opted into. The Lua cache is keyed by the manifest id, so both routes share it.
@@ -1456,19 +1915,39 @@ impl Shell {
             .map(|(url, (_, result))| (url.clone(), result.clone()))
             .collect();
         let http_allowed = self.settings.network_mods.iter().any(|mod_id| mod_id == &manifest.id);
-        let output = crate::mod_script::run_lua_mod_with_config(
-            &script,
+        let permissions = self.settings.permissions.get(&manifest.id).cloned().unwrap_or_else(|| manifest.permissions.clone());
+        let mod_data_dir = self.store.root.join("mod-data").join(&manifest.id);
+        let mut history = if permissions.iter().any(|p| p == "power.read") {
+            crate::mods::power_broker::load_monthly_history(&self.store.root, chrono::Local::now().year())
+        } else {
+            vec![]
+        };
+
+        if permissions.iter().any(|p|p=="power.read"){history.extend(self.power_energy.history(chrono::Local::now().year()));}
+        let mut script_bytes = std::fs::read(&script).unwrap_or_default();
+        let digest=crate::update::crypto::Sha256::digest_hex(&script_bytes);
+        if use_bundled_daya(&manifest.id,&manifest.publisher,script_bytes.is_empty(),&digest){script_bytes=include_bytes!("../../assets/mods/daya/main.lua").to_vec();}
+        let output = crate::mod_script::run_lua_mod_source_capabilities(
+            &script_bytes,
             button.as_deref(),
             config.as_ref(),
             http_allowed,
             &http_cache,
+            &permissions,
+            Some(&self.power_snapshot),
+            &history,
+            Some(&mod_data_dir),
         );
-        // Side effects only on a click or the first run of this mod; a periodic refresh must not
-        // reopen the browser or re-copy to the clipboard every second.
+        // Toasts may fire on a click or the first run of this mod, but opening a browser
+        // or writing to the clipboard is click-only: a periodic refresh (or the first
+        // automatic run) must never reopen the browser or re-copy every second, and a
+        // mod must never push a URL or a clipboard write without an explicit click.
         let first_run = self.mod_output.as_ref().is_none_or(|(cached, _)| cached != &manifest.id);
         if let Ok(value) = &output {
             if button.is_some() || first_run {
                 for toast in value.toasts.clone() { self.notice(toast); }
+            }
+            if button.is_some() {
                 for url in &value.urls_to_open { crate::system::open_browser(url); }
                 for text in &value.clipboard_copies {
                     crate::clipboard::set_clipboard_text(text);
@@ -1505,8 +1984,7 @@ impl Shell {
             self.settings_open = true;
             self.settings_cat = 5;
             self.notice(crate::i18n::t("mods.missing", &self.settings.language));
-            let from = self.geometry();
-            self.morph = Some(ui::Morph::new(from, self.target_geometry()));
+            self.retarget_morph();
             self.start_morph_timer();
             return
         };
@@ -1522,6 +2000,7 @@ impl Shell {
         p.text_ellipsis(&format!("v{} · {}", manifest.version, kind), 148., 27., self.width - 166., 14., 9.5, MUTED, false);
         p.text_ellipsis(&manifest.description, 18., 47., self.width - 36., 16., 10., MUTED, false);
         p.fill(18., 67., self.width - 36., 1., 0., 0x222229);
+        if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{self.draw_button(p,if self.settings.language=="en"{"Set up CPU sensor"}else{"Siapkan sensor CPU"},self.width-194.,10.,174.,28.,Action::PowerSensorSetup);}
         self.draw_mod_body(p, &manifest, 77.);
     }}
 
@@ -1532,7 +2011,12 @@ impl Shell {
         let Some(manifest) = self.mods().into_iter().find(|m| m.tab_name == tab) else { return false };
         p.outline_icon(&manifest.icon, 24., 38., 20., 0x6ee7b7);
         p.text_ellipsis(&manifest.name, 52., 34., self.width - 76., 18., 13., render::TEXT, true);
-        p.text_ellipsis(&manifest.description, 52., 53., self.width - 76., 14., 9.5, MUTED, false);
+        let description=if manifest.id=="daya"&&manifest.publisher=="mynotch"{"Sensor CPU/GPU · energi komponen teramati"}else{&manifest.description};
+        p.text_ellipsis(description, 52., 53., if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{self.width-262.}else{self.width-76.}, 14., 9.5, MUTED, false);
+        if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{
+            let label=if self.settings.language=="en"{"Set up CPU sensor"}else{"Siapkan sensor CPU"};
+            self.draw_button(p,label,self.width-194.,34.,174.,28.,Action::PowerSensorSetup);
+        }
         p.fill(24., 74., self.width - 48., 1., 0., 0x222229);
         self.draw_mod_body(p, &manifest, 82.);
         true
@@ -1593,6 +2077,10 @@ impl Shell {
                             draw_ranked(p, output.ranked_left.as_ref(), output.ranked_right.as_ref(), body_y, self.width);
                             return;
                         }
+                        if output.gauge.is_some() || output.metrics.is_some() || output.history.is_some() {
+                            self.draw_dashboard_widgets(p, &output, body_y);
+                            return;
+                        }
                         let card_w = (content_w - 12.) / 2.;
                         let card_h = 68.;
                         for (i, card) in output.cards.iter().enumerate() {
@@ -1630,6 +2118,116 @@ impl Shell {
                 }
             }
             crate::mods::ModType::Builtin => {}
+        }
+    }}
+
+    unsafe fn draw_dashboard_widgets(&mut self, p: &mut Painter, output: &crate::mod_script::LuaModOutput, start_y: f32) { unsafe {
+        let margin = 18.;
+        let content_w = self.width - margin * 2.;
+
+        let top_y = start_y;
+        let gauge_w = 150.;
+        let metrics_x = margin + gauge_w + 16.;
+        let metrics_w = content_w - gauge_w - 16.;
+
+        // 1. Gauge
+        if let Some(gauge) = &output.gauge {
+            let cx = margin + gauge_w * 0.5;
+            let cy = top_y + 68.;
+            let r = 58.;
+            let val = gauge.value.unwrap_or(0.0);
+            let max = gauge.max.unwrap_or(1.0).max(0.001);
+            let ratio = if gauge.value.is_some() { val / max } else { 0.0 };
+
+            // Arc
+            p.draw_gauge_arc(cx, cy, r, ratio, 0x64748b, 0x69d2e5, 3.5);
+
+            // Value text
+            let val_str = if let Some(v) = gauge.value {
+                if v.abs()<0.1{format!("{v:.3}")}else{format!("{v:.2}")}.replace('.', ",")
+            } else {
+                "—".to_string()
+            };
+            p.text_centered(&val_str, cx - 50., cy - 20., 100., 28., 24., 0xf3f3f5, 1.0, true);
+
+            // Subtitle
+            p.text_centered(&gauge.label, cx - 60., cy + 10., 120., 16., 10., 0xa0a0ad, 1.0, false);
+
+            // Target
+            if let Some(target) = &gauge.target_label {
+                p.text_centered(target, cx - 60., cy + 44., 120., 14., 9.5, 0xa0a0ad, 1.0, false);
+            }
+        }
+
+        // 2. Metrics (2x2 grid)
+        if let Some(metrics) = &output.metrics {
+            let col_w = (metrics_w - 10.) / 2.;
+            let row_h = 44.;
+
+            for (i, item) in metrics.items.iter().take(4).enumerate() {
+                let col = i % 2;
+                let row = i / 2;
+                let x = metrics_x + col as f32 * (col_w + 10.);
+                let y = top_y + 8. + row as f32 * (row_h + 8.);
+
+                p.text_ellipsis(&item.label, x, y, col_w, 14., 10., 0xa0a0ad, false);
+
+                let val_y = y + 16.;
+                let value_size=if p.measure_text(&item.value,18.,true)>col_w{12.}else{18.};
+                p.text_ellipsis(&item.value, x, val_y, col_w, 22., value_size, 0xf3f3f5, true);
+
+                if let Some(ref unit) = item.unit {
+                    let text_w = p.measure_text(&item.value, 18., true);
+                    p.text(unit, x + text_w + 4., val_y + 4., 30., 16., 11., 0xa0a0ad, false);
+                }
+            }
+
+            if let Some(ref note) = metrics.note {
+                for (i,line) in super::settings::wrap_lines(p,note,metrics_w,10.5,2).iter().enumerate(){p.text(line,metrics_x,top_y+100.+i as f32*16.,metrics_w,16.,10.5,0xc5cedd,false);}
+            }
+        }
+
+        // 3. History
+        if let Some(history) = &output.history {
+            let hist_y = top_y + 138.;
+            p.fill(margin, hist_y, content_w, 1., 0., 0x292932);
+
+            let head_y = hist_y + 8.;
+            p.text(&history.title, margin, head_y, 180., 18., 11., 0xf3f3f5, true);
+
+            // Year and unit pills
+            let unit_w = 46.;
+            let year_w = 48.;
+            let unit_x = self.width - margin - unit_w;
+            let year_x = unit_x - year_w - 8.;
+
+            p.fill(year_x, head_y - 2., year_w, 20., 4., 0x181820);
+            p.stroke(year_x, head_y - 2., year_w, 20., 4., 0x30303c, 1.);
+            p.text_centered(&history.year, year_x, head_y + 1., year_w, 14., 9.5, 0xcfcfd8, 1.0, false);
+
+            p.fill(unit_x, head_y - 2., unit_w, 20., 4., 0x181820);
+            p.stroke(unit_x, head_y - 2., unit_w, 20., 4., 0x30303c, 1.);
+            p.text_centered(&history.unit, unit_x, head_y + 1., unit_w, 14., 9.5, 0xcfcfd8, 1.0, false);
+
+            let row_start_y = head_y + 26.;
+            let row_h = 28.;
+
+            if history.items.is_empty() {
+                p.text(if self.settings.language=="en"{"No energy observations yet."}else{"Belum ada energi yang tercatat."}, margin, row_start_y + 4., content_w, 16., 10., 0xb9c5d5, false);
+            } else {
+                for (i, item) in history.items.iter().take((((self.height-18.-row_start_y)/row_h).floor().max(0.)as usize).min(4)).enumerate() {
+                    let y = row_start_y + i as f32 * row_h;
+                    if i > 0 {
+                        p.fill(margin, y - 2., content_w, 1., 0., 0x1f1f26);
+                    }
+                    p.text(&item.label, margin, y, 120., 18., 11., 0xe1e1e8, false);
+                    if let Some(ref meta) = item.meta {
+                        p.text_ellipsis(meta, margin + 120., y + 2., 90., 14., 9., 0x888894, false);
+                    }
+                    let val_str = format!("{}  ›", item.value);
+                    p.text_centered(&val_str, self.width - margin - 140., y, 140., 18., 11., 0xb9becb, 1.0, false);
+                }
+            }
         }
     }}
 }
@@ -1716,3 +2314,29 @@ unsafe fn draw_ranked_lane(p: &mut Painter, lane: &LuaRanked, x: f32, y: f32, wi
         p.fill_alpha(x + 22., row_y + 30., bar_w, 2., 1., change_color, 0.32);
     }
 }}
+
+#[allow(dead_code)]
+fn format_rupiah(amount: u32) -> String {
+    let s = amount.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (idx, ch) in s.chars().enumerate() {
+        if idx > 0 && (s.len() - idx) % 3 == 0 {
+            out.push('.');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+const CALENDAR_LEAVE_DOT_X:f32=140.;
+fn use_bundled_daya(id:&str,publisher:&str,empty:bool,digest:&str)->bool{id=="daya"&&publisher=="mynotch"&&(empty||matches!(digest,"b684e22620aecd8f4a83d0fc4b6c19385d251e77657b67357e2ab3bb4b29f6e2"|"e3ea02fb30d315af59655a22993563ddf660e21d4ad6447fbbca0f5eaf00851c"|"b7e3c112b5a885d703d8d0829bb7997718906a3d28d770c7004bb0ad6b3b5bd7"))}
+const CALENDAR_LEAVE_TEXT_X:f32=148.;
+#[cfg(test)]mod calendar_legend_tests{
+#[test]fn official_legacy_daya_upgrades_but_custom_scripts_stay_intact(){
+    let digest="e3ea02fb30d315af59655a22993563ddf660e21d4ad6447fbbca0f5eaf00851c";
+    assert!(super::use_bundled_daya("daya","mynotch",false,digest));
+    assert!(!super::use_bundled_daya("daya","someone-else",false,digest));
+    assert!(!super::use_bundled_daya("daya","mynotch",false,"custom-script-digest"));
+}
+#[test]fn leave_marker_precedes_its_text_without_overlap(){assert!(super::CALENDAR_LEAVE_DOT_X+4.+4.<=super::CALENDAR_LEAVE_TEXT_X);}
+}
