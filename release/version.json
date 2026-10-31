@@ -1,8 +1,8 @@
 {
   "product": "mynotch",
-  "display_version": "0.0.1.5",
-  "version_components": [0, 0, 1, 5],
+  "display_version": "0.0.2",
+  "version_components": [0, 0, 2],
   "prerelease": null,
-  "release_sequence": 10500,
+  "release_sequence": 20000,
   "channel": "preview"
 }
