@@ -25,7 +25,7 @@ Scroll over Stage 0 or 1 to adjust Windows master volume. Laptop and Bluetooth b
 | [<img src="docs/images/clipboard.jpg" width="240" alt="Clipboard history and pinning">](docs/images/clipboard.jpg) | [<img src="docs/images/weather.jpg" width="240" alt="Jakarta weather and hourly forecast">](docs/images/weather.jpg) | [<img src="docs/images/settings.jpg" width="240" alt="Appearance settings">](docs/images/settings.jpg) |
 | Search, pin, and reuse copied text. | Current conditions and hourly forecast via Open-Meteo. | Position, scale, colors, and materials. Solid fallback shown. |
 
-Click a screenshot to view it at full size. All nine captures use the **public v0.0.2 release executable** and separate preview data. Notes uses a sample checklist; weather shows the Jakarta preset. [Capture details](docs/images/README.md).
+Click a screenshot to view it at full size. All nine captures use the **public v0.0.2 release executable** and separate preview data. Notes uses a sample checklist; weather shows the Jakarta preset. [Screenshot notes](docs/images/README.md).
 
 <details>
 <summary>Feature details, optional mods, and privacy</summary>
@@ -83,6 +83,8 @@ Connected Bluetooth audio devices can show battery levels in Stage 1 and brief c
 mynotch also has microphone and camera activity indicators. These reflect activity Windows makes available to the app; screen-capture detection is not supported.
 
 </details>
+
+[Panduan penggunaan, mod, data, dan build](docs/README.md).
 
 ## Download and run
 
