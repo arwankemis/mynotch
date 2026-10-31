@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 This release delivers security hardening, network sandboxing for community extensions, clipboard privacy improvements, UI responsiveness enhancements, and reliability safeguards.
 
+> [!NOTE]
+> **Upgrade Notice:** Upgrading directly from `v0.0.1.4` or earlier via the in-app update button is not supported due to missing checksum discovery in older binaries. A manual update is required once by downloading `mynotch-0.0.2-windows-x64.zip` and replacing `mynotch.exe`. In-app automatic updates are fully supported starting from `v0.0.2` and later.
+
 ### Added
 - **Clipboard Retention Policy:** Added automated expiration for clipboard history (24 hours for regular clips, 30 days for pinned clips) with a 64 KiB per-entry size limit. Added local storage transparency notice in empty clipboard view. Existing entries migrate cleanly on first run.
 - **Configurable Network Allowlist:** Added `net_allowed_hosts` in `settings.json` to allow explicit configuration of allowed private/internal endpoints when needed.
@@ -18,6 +21,7 @@ This release delivers security hardening, network sandboxing for community exten
 - **Monitor Work Area Clamping:** Floating sticky note windows are now dynamically clamped within the visible work area of the active monitor.
 
 ### Fixed
+- **In-App Updater SHA-256 Resolution:** Added automatic extraction and verification of SHA-256 checksums from GitHub release digests and release notes in the updater candidate selector.
 - **Volume OSD UI Thread Freeze:** Offloaded initial Windows volume overlay detection to a background worker thread (`mynotch-osd`), preventing startup frame stutters.
 - **Fullscreen Shell Detection:** Added bounding dimensions to prevent fullscreen shell surfaces on Windows 10 from accidentally being treated as volume overlays.
 - **Painting State Guard:** Added RAII `PaintingGuard` ensuring rendering state flags are always reset even if drawing operations encounter unexpected conditions.

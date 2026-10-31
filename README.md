@@ -73,6 +73,7 @@ Four built-in reminders you can configure independently:
 - Check for new releases directly from **Settings -> Updates**.
 - Downloads signed GitHub release archives over HTTPS.
 - Safe in-place file replacement with SHA-256 validation and automatic rollback if an update fails.
+- *Note:* Upgrading from `v0.0.1.4` or earlier requires a one-time manual file replacement. In-app automatic updates are active starting from `v0.0.2` and later.
 
 ---
 
@@ -80,7 +81,7 @@ Four built-in reminders you can configure independently:
 
 mynotch is completely portable and requires no installer:
 
-1. Download `mynotch-update-public-windows-x64-0.0.1.4.zip` (or `mynotch.exe` and `libunwind.dll`) from the [Releases](https://github.com/arwankemis/mynotch/releases) page.
+1. Download `mynotch-0.0.2-windows-x64.zip` (or `mynotch.exe` and `libunwind.dll`) from the [Releases](https://github.com/arwankemis/mynotch/releases) page.
 2. Extract the files into a folder of your choice.
 3. Run `mynotch.exe`.
 
