@@ -56,7 +56,8 @@ pub struct TwsInfo {
 struct WinRtApartment { initialized: bool }
 impl WinRtApartment {
     fn new() -> Self {
-        use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+        use windows::Win32::System::WinRT::RO_INIT_MULTITHREADED;
+        windows::core::link!("api-ms-win-core-winrt-l1-1-0.dll" "system" fn RoInitialize(inittype: windows::Win32::System::WinRT::RO_INIT_TYPE) -> windows::core::HRESULT);
         let hr = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
         Self { initialized: hr.0 == 0 }
     }
