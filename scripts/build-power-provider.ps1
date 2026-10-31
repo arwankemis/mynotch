@@ -27,9 +27,10 @@ foreach($name in @('Program.cs','PowerProvider.csproj','packages.lock.json','NuG
  Copy-Item -LiteralPath (Join-Path $project $name) -Destination (Join-Path $output 'source') -Force
 }
 # Include package-provided notices as well as exact MPL/LGPL/GPL source archives above.
-$lock=Get-Content (Join-Path $project 'packages.lock.json') -Raw|ConvertFrom-Json -AsHashtable
-foreach($framework in $lock.dependencies.Values){foreach($id in $framework.Keys){
- $version=$framework[$id].resolved
+$lock=Get-Content (Join-Path $project 'packages.lock.json') -Raw|ConvertFrom-Json
+foreach($frameworkProp in $lock.dependencies.psobject.Properties){foreach($idProp in $frameworkProp.Value.psobject.Properties){
+ $id=$idProp.Name
+ $version=$idProp.Value.resolved
  $cache=Join-Path $env:USERPROFILE ".nuget/packages/$($id.ToLowerInvariant())/$version"
  if(Test-Path -LiteralPath $cache){
   $noticeDir=Join-Path $output "notices/$id-$version"
@@ -41,7 +42,7 @@ Copy-Item -LiteralPath (Join-Path $project 'README.md') -Destination (Join-Path 
 & (Join-Path $output 'mynotch-power.exe') --self-test
 if($LASTEXITCODE -ne 0){throw 'Provider self-test failed'}
 $files=Get-ChildItem -LiteralPath $output -Recurse -File|Where-Object {$_.Name -ne 'bundle-files.json'}|ForEach-Object {
- [pscustomobject]@{path=[IO.Path]::GetRelativePath($output,$_.FullName).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+ [pscustomobject]@{path=$_.FullName.Substring($output.Length).TrimStart('\','/').Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
 }
 $files|ConvertTo-Json -Depth 3|Set-Content (Join-Path $output 'bundle-files.json') -Encoding utf8
 Write-Output "Self-contained sensor provider ready: $output"

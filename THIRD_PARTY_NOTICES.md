@@ -1,6 +1,6 @@
 # Third-party notices
 
-This private alpha application uses the components below. Their license texts are included under licenses/. The application has not established a license for public redistribution of its own source.
+This application uses the open source components below. Their license texts are included under licenses/.
 
 | Package | Version | License expression |
 |---|---|---|
@@ -9,6 +9,7 @@ This private alpha application uses the components below. Their license texts ar
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
+| piccolo | 0.3.3 | MIT |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
 | serde | 1.0.229 | MIT OR Apache-2.0 |
@@ -29,6 +30,7 @@ This private alpha application uses the components below. Their license texts ar
 | windows-result | 0.4.1 | MIT OR Apache-2.0 |
 | windows-strings | 0.5.1 | MIT OR Apache-2.0 |
 | windows-threading | 0.2.1 | MIT OR Apache-2.0 |
+| zip | 7.3.0 | MIT OR Apache-2.0 |
 | zmij | 1.0.23 | MIT |
 
 ## Runtime

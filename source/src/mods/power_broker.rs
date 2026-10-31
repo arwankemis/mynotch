@@ -22,7 +22,7 @@ impl ObservedEnergy{
         let mut months=std::collections::BTreeMap::<u32,MonthlyPowerHistory>::new();
         for (date,kwh) in &self.days{
             let Ok(day)=chrono::NaiveDate::parse_from_str(date,"%Y-%m-%d") else{continue};if day.year()!=year||!kwh.is_finite()||*kwh<0.{continue}
-            let h=months.entry(day.month()).or_insert_with(||MonthlyPowerHistory{year,month:day.month(),name:format!("Sensor · {:02}/{year}",day.month()),total_kwh:0.,total_cost_idr:0,provenance:"sensor_component_subtotal".into(),days:0,daily_buckets:vec![]});
+            let h=months.entry(day.month()).or_insert_with(||MonthlyPowerHistory{year,month:day.month(),name:format!("Sensor Â· {:02}/{year}",day.month()),total_kwh:0.,total_cost_idr:0,provenance:"sensor_component_subtotal".into(),days:0,daily_buckets:vec![]});
             h.total_kwh+=kwh;h.days+=1;
         }
         months.into_values().rev().collect()
@@ -93,6 +93,7 @@ impl EnergyIntegrator {
         delta_kwh
     }
 
+    #[allow(dead_code)]
     pub fn today_kwh(&self) -> f32 {
         self.today_kwh
     }
@@ -127,6 +128,7 @@ pub fn load_monthly_history(root: &Path, year: i32) -> Vec<MonthlyPowerHistory> 
     list
 }
 
+#[allow(dead_code)]
 pub fn save_monthly_history(root: &Path, history: &MonthlyPowerHistory) -> Result<(), String> {
     let year_dir = get_history_dir(root).join(history.year.to_string());
     std::fs::create_dir_all(&year_dir).map_err(|e| e.to_string())?;
@@ -135,6 +137,7 @@ pub fn save_monthly_history(root: &Path, history: &MonthlyPowerHistory) -> Resul
 }
 
 /// Idempotent migration from legacy State fields into MonthlyPowerHistory
+#[allow(dead_code)]
 pub fn migrate_legacy_power_data(root: &Path, state: &mut crate::core::State) -> bool {
     if state.monthly_kwh <= 0.0 && state.power_month.is_empty() {
         return false;

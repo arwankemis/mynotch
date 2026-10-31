@@ -92,12 +92,14 @@ impl<'a> PackageManager<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn disable_package(&self, settings: &mut Settings, id: &str) {
         if !settings.disabled_mods.iter().any(|m| m == id) {
             settings.disabled_mods.push(id.to_string());
         }
     }
 
+    #[allow(dead_code)]
     pub fn enable_package(&self, settings: &mut Settings, id: &str) {
         settings.disabled_mods.retain(|m| m != id);
     }

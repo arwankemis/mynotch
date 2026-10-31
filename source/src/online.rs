@@ -328,7 +328,7 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
     #[test]
-    fn query_encoding_preserves_metadata_boundaries() { assert_eq!(encode("A&B / C"),"A%26B%20%2F%20C");assert_eq!(encode("é"),"%C3%A9"); }
+    fn query_encoding_preserves_metadata_boundaries() { assert_eq!(encode("A&B / C"),"A%26B%20%2F%20C");assert_eq!(encode("Ã©"),"%C3%A9"); }
     #[test]
     fn provider_requests_keep_keys_out_of_url_and_preserve_system_messages() {
         let messages=vec![ChatMessage{role:"system".into(),content:"Be clear".into()},ChatMessage{role:"user".into(),content:"Hello".into()}];
@@ -362,6 +362,7 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 pub fn parse_version_numbers(v: &str) -> Vec<u64> {
     let cleaned = v.trim().trim_start_matches(|c| c == 'v' || c == 'V');
     let main_part = cleaned.split(['-', '+', ' ']).next().unwrap_or(cleaned);
@@ -371,6 +372,7 @@ pub fn parse_version_numbers(v: &str) -> Vec<u64> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn is_newer_release(tag: &str, current: &str) -> bool {
     let tag_nums = parse_version_numbers(tag);
     let cur_nums = parse_version_numbers(current);

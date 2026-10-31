@@ -532,6 +532,7 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Default, Clone)]
 pub struct CpuSampler {
     prev_idle: u64,
@@ -539,6 +540,7 @@ pub struct CpuSampler {
     last_usage: f32,
 }
 
+#[allow(dead_code)]
 impl CpuSampler {
     pub fn sample(&mut self) -> f32 {
         unsafe {
@@ -650,6 +652,7 @@ impl Default for PowerSnapshot {
     }
 }
 
+#[allow(dead_code)]
 pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
     let cpu_watts = (15.0 + cpu_usage * 65.0).clamp(10.0, 120.0);
     let gpu_watts = (10.0 + gpu_usage * 150.0).clamp(5.0, 250.0);
