@@ -328,7 +328,7 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
     #[test]
-    fn query_encoding_preserves_metadata_boundaries() { assert_eq!(encode("A&B / C"),"A%26B%20%2F%20C");assert_eq!(encode("Ã©"),"%C3%A9"); }
+    fn query_encoding_preserves_metadata_boundaries() { assert_eq!(encode("A&B / C"),"A%26B%20%2F%20C");assert_eq!(encode("é"),"%C3%A9"); }
     #[test]
     fn provider_requests_keep_keys_out_of_url_and_preserve_system_messages() {
         let messages=vec![ChatMessage{role:"system".into(),content:"Be clear".into()},ChatMessage{role:"user".into(),content:"Hello".into()}];
