@@ -6,37 +6,29 @@ Built with Rust, Direct2D, and DirectWrite. The interface uses native Windows AP
 
 **Current release: v0.0.2 (preview)** · [Download for Windows x64](https://github.com/arwankemis/mynotch/releases/tag/v0.0.2) · [Changelog](CHANGELOG.md)
 
-![mynotch public v0.0.2 showing Spotify playback controls](docs/images/music.jpg)
+## Three stages
 
-Control the current Windows media session without switching back to the player. This is the public build connected to Spotify.
+| Stage 0: minimal | Stage 1: compact | Stage 2: expanded |
+|:---:|:---:|:---:|
+| [<img src="docs/images/stage-0.jpg" width="240" alt="Stage 0: minimal notch">](docs/images/stage-0.jpg) | [<img src="docs/images/stage-1.jpg" width="240" alt="Stage 1: date and time bar">](docs/images/stage-1.jpg) | [<img src="docs/images/calendar.jpg" width="240" alt="Stage 2: expanded calendar">](docs/images/calendar.jpg) |
+| Small notch in minimal mode. Hover to reveal the bar. | Default resting view with time and contextual status. Click to expand. | Interactive tabs for music, calendar, reminders, and enabled mods. |
 
-## From a small notch to a full panel
+Scroll over Stage 0 or 1 to adjust Windows master volume. Laptop and Bluetooth battery levels appear when Windows reports them; this desktop capture has neither. The compact views use the same scale as the expanded panel.
 
-mynotch has three stages. The compact screenshots use the same horizontal scale as the expanded panel, so you can see how much space each stage takes.
+## Screenshots
 
-### Stage 0: minimal notch
+| Music | Reminders | Notes |
+|:---:|:---:|:---:|
+| [<img src="docs/images/music.jpg" width="240" alt="Spotify playback controls">](docs/images/music.jpg) | [<img src="docs/images/reminders.jpg" width="240" alt="Hydration reminder settings">](docs/images/reminders.jpg) | [<img src="docs/images/notes.jpg" width="240" alt="Sample note and export controls">](docs/images/notes.jpg) |
+| Windows media controls, seek bar, and lyrics access. | Water intake, targets, and reminder intervals. | Color-coded notes, Markdown/text export, and desktop pop-out. |
+| **Clipboard** | **Weather** | **Appearance** |
+| [<img src="docs/images/clipboard.jpg" width="240" alt="Clipboard history and pinning">](docs/images/clipboard.jpg) | [<img src="docs/images/weather.jpg" width="240" alt="Jakarta weather and hourly forecast">](docs/images/weather.jpg) | [<img src="docs/images/settings.jpg" width="240" alt="Appearance settings">](docs/images/settings.jpg) |
+| Search, pin, and reuse copied text. | Current conditions and hourly forecast via Open-Meteo. | Position, scale, colors, and materials. Solid fallback shown. |
 
-![Stage 0: a small black notch at the screen edge](docs/images/stage-0.jpg)
+Click a screenshot to view it at full size. All nine captures use the **public v0.0.2 release executable** and separate preview data. Notes uses a sample checklist; weather shows the Jakarta preset. [Capture details](docs/images/README.md).
 
-A small notch stays at the screen edge when minimal mode is enabled. Hover over it to reveal the compact bar. Use this mode when you want the controls nearby while keeping the screen clear.
-
-### Stage 1: compact status bar
-
-![Stage 1: compact bar with date, time, and expand control](docs/images/stage-1.jpg)
-
-The bar shows the date and time, with context from music playback or a running focus timer. Laptop and Bluetooth audio battery levels appear when Windows reports them; they are absent on the desktop used for this screenshot. Scroll over Stage 0 or Stage 1 to adjust Windows master volume.
-
-Stage 1 is the default resting view. Click the bar to open Stage 2.
-
-### Stage 2: interactive panel
-
-![Stage 2: expanded calendar with month view, selected day, and upcoming holiday](docs/images/calendar.jpg)
-
-The panel opens into tabs for music, calendar, reminders, and any optional tools you enable. The calendar shows Indonesian national holidays and collective leave days, supports month navigation with the mouse wheel, and updates the date at midnight.
-
-All screenshots on this page come from the **public v0.0.2 release executable**, using its preview modes and separate preview data. Crops are placed on a neutral background. [Capture details](docs/images/README.md).
-
-## What you can do
+<details>
+<summary>Feature details, optional mods, and privacy</summary>
 
 ### Music controls and lyrics
 
@@ -46,15 +38,15 @@ There is also an audio spectrum visualizer and a synchronized lyrics view, with 
 
 The volume HUD handles notch scrolling and volume-key changes. While mynotch is running, it attempts to suppress the Windows volume overlay so volume feedback stays in the notch.
 
-### Reminders you can adjust
+### Calendar and holidays
 
-![Reminders panel showing hydration intake, target, interval, and serving size](docs/images/reminders.jpg)
+Browse months with the mouse wheel, check Indonesian national holidays and collective leave days, and see the selected day's details. The date updates automatically at midnight.
+
+### Reminders you can adjust
 
 Track water intake against a daily target and choose when to get a drink reminder. The reminder panel also includes a focus timer with work and break intervals, movement and eye-rest reminders, and prayer schedules for configured locations. Each reminder has its own settings.
 
 ### Notes that can leave the notch
-
-![Notes panel with a sample checklist, note colors, export buttons, and Pop control](docs/images/notes.jpg)
 
 Keep short notes in the panel, choose a color, or use **Pop** to put a note in a floating desktop window. Notes save automatically and can be exported as Markdown or plain text. The screenshot uses a sample checklist.
 
@@ -62,23 +54,17 @@ Notes is an optional built-in mod. Enable it under **Settings > Mods & Extension
 
 ### Clipboard history with search and pinning
 
-![Clipboard panel with a text entry, Pin, Copy Again, and Delete controls](docs/images/clipboard.jpg)
-
 Find copied text, pin snippets you reuse, and copy an entry again. Clipboard history is disabled by default; enable its tab in Settings when you want to use it.
 
 In v0.0.2, ordinary entries expire after 24 hours and pinned entries after 30 days. Each entry is limited to 64 KiB. mynotch respects supported clipboard exclusion flags used by password managers, but cannot identify every sensitive text item. History is stored locally as plain text in `data/state.json`.
 
 ### Weather without an API key
 
-![Weather panel showing Jakarta temperature, hourly forecast, humidity, wind, and rain probability](docs/images/weather.jpg)
-
 See current conditions, feels-like temperature, hourly forecasts, humidity, wind, and rain probability. Weather uses Open-Meteo and supports city presets or custom coordinates. The background changes with the weather and time of day.
 
 Weather is an optional built-in mod, available under **Settings > Mods & Extensions**. The screenshot shows the Jakarta preset; readings change over time.
 
 ### Appearance and behavior
-
-![Appearance settings with position, scale, edge gap, opacity, and material selection](docs/images/settings.jpg)
 
 Place the notch at the top or bottom, change its scale and edge gap, and choose a light or dark color scheme. **Settings > Appearance** has three material choices: Solid, Glass Lite, and Glass Adaptive. Glass effects depend on Windows backdrop support and can fall back to Solid, as shown in this capture.
 
@@ -95,6 +81,8 @@ Lua scripts run in the Piccolo sandbox with instruction limits. Network access r
 Connected Bluetooth audio devices can show battery levels in Stage 1 and brief connection notices. Battery reporting depends on the device and Windows driver.
 
 mynotch also has microphone and camera activity indicators. These reflect activity Windows makes available to the app; screen-capture detection is not supported.
+
+</details>
 
 ## Download and run
 
@@ -150,3 +138,4 @@ The release display version comes from [`release/version.json`](release/version.
 ## License
 
 [MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for bundled components and their licenses.
+
