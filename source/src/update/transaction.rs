@@ -223,6 +223,7 @@ pub fn execute_rollback(
     journal: &mut TransactionJournal,
     tx_dir: &Path,
 ) -> Result<(), String> {
+    let mut first_error = None;
     for managed in &journal.managed_files {
         let backup_path = journal.backup_dir.join(&managed.relative_path);
         let live_path = journal.install_dir.join(&managed.relative_path);
@@ -231,14 +232,25 @@ pub fn execute_rollback(
             if let Some(parent) = live_path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let _ = fs::copy(&backup_path, &live_path);
+            if let Err(e) = fs::copy(&backup_path, &live_path) {
+                if first_error.is_none() {
+                    first_error = Some(format!("Gagal memulihkan {:?}: {e}", live_path));
+                }
+            }
         } else if live_path.exists() {
-            // File was newly added in update, remove it during rollback
-            let _ = fs::remove_file(&live_path);
+            if let Err(e) = fs::remove_file(&live_path) {
+                if first_error.is_none() {
+                    first_error = Some(format!("Gagal menghapus berkas baru {:?}: {e}", live_path));
+                }
+            }
         }
     }
 
     let _ = journal.set_phase(tx_dir, TransactionPhase::RolledBack);
+    if let Some(err) = first_error {
+        let _ = journal.record_error(tx_dir, format!("Rollback tidak lengkap: {err}"));
+        return Err(err);
+    }
     Ok(())
 }
 

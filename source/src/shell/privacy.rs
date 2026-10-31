@@ -300,6 +300,8 @@ impl Shell {
                     ("ACTIVE", *color, 0x1e2420)
                 } else if state.coverage == Coverage::Unsupported {
                     ("UNSUPPORTED", 0x777782, 0x1b1b22)
+                } else if is_unknown {
+                    ("UNKNOWN", 0xc5a059, 0x282318)
                 } else {
                     ("INACTIVE", 0x777782, 0x1b1b22)
                 };

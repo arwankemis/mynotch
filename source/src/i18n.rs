@@ -257,7 +257,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "privacy.record_active" => if en { "Screen recording active" } else { "Perekaman layar aktif" },
         "privacy.no_activity" => if en { "No activity detected" } else { "Tidak ada aktivitas terdeteksi" },
         "privacy.status_unknown" => if en { "Status unknown" } else { "Status belum diketahui" },
-        "privacy.unavailable" => if en { "Monitoring unavailable" } else { "Belum dapat dipantau" },
+        "privacy.unavailable" => if en { "Not monitored by mynotch" } else { "Tidak dimonitor oleh mynotch" },
         "privacy.limited" => if en { "Limited monitoring" } else { "Pemantauan terbatas" },
         "privacy.app_unknown" => if en { "App identity unavailable" } else { "Identitas aplikasi tidak tersedia" },
         "privacy.since_startup" => if en { "Observed since startup" } else { "Terpantau sejak dibuka" },

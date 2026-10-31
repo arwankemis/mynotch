@@ -383,6 +383,11 @@ privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,privacy_d
     }
     APP.with(|cell|*cell.borrow_mut()=Some(app));
     let _=ShowWindow(hwnd,SW_SHOWNOACTIVATE);let _=InvalidateRect(Some(hwnd),None,false);
+    for i in 0..args.len() {
+        if args[i] == "--update-ack-tx" && i + 1 < args.len() {
+            let _ = crate::update::helper::write_health_ack(std::path::Path::new(&args[i + 1]));
+        }
+    }
     let mut message=MSG::default();
     while GetMessageW(&mut message,None,0,0).as_bool(){
         if message.message == WM_KEYDOWN && message.wParam.0 == 0x41 {
@@ -849,10 +854,10 @@ impl Shell {
         self.width=width;self.height=height;
         let monitor=MonitorFromWindow(self.hwnd,MONITOR_DEFAULTTONEAREST);
         let mut monitor_info=MONITORINFO{cbSize:std::mem::size_of::<MONITORINFO>()as u32,..Default::default()};
-        let monitor_top=if GetMonitorInfoW(monitor,&mut monitor_info).as_bool(){monitor_info.rcMonitor.top}else{area.top};
+        let (work_area, monitor_top) = if GetMonitorInfoW(monitor,&mut monitor_info).as_bool(){(monitor_info.rcWork, monitor_info.rcMonitor.top)}else{(area, area.top)};
         let pixel_width=((ui::CANVAS_WIDTH)*self.scale).max(1.)as i32;
         let pixel_height=((ui::CANVAS_HEIGHT)*self.scale).max(1.)as i32;
-        let x=area.left+(area.right-area.left-pixel_width)/2;let y=ui::window_top(self.settings.bottom,self.settings.edge_gap,self.scale,area.top,area.bottom,monitor_top);
+        let x=work_area.left+(work_area.right-work_area.left-pixel_width)/2;let y=ui::window_top(self.settings.bottom,self.settings.edge_gap,self.scale,work_area.top,work_area.bottom,monitor_top);
         if pixel_width!=self.canvas_w||pixel_height!=self.canvas_h||x!=self.win_x||y!=self.win_y{
             if self.preview{eprintln!("layout work_top={} monitor_top={} scale={} window_top={} panel_top={}",area.top,monitor_top,self.scale,y,y as f32+ui::panel_origin_y(self.settings.bottom,height,self.scale)*self.scale);}
             self.canvas_w=pixel_width;self.canvas_h=pixel_height;self.win_x=x;self.win_y=y;

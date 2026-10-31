@@ -127,6 +127,15 @@ pub fn request(method: &str, url: &str, headers: &[(&str, &str)], body: &[u8]) -
         if !allowed {
             return Err("Host tujuan diblokir: alamat IP literal atau jaringan privat/loopback hanya diizinkan bila tercantum di net_allowed_hosts.".into());
         }
+    } else if let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&(parsed.host.as_str(), parsed.port)) {
+        for addr in addrs {
+            if host_is_blocked(&addr.ip().to_string()) {
+                let allowed = ALLOWED_HOSTS.lock().map(|set| host_allowed(&parsed.host, &set)).unwrap_or(false);
+                if !allowed {
+                    return Err("Host tujuan diblokir: domain mengarah ke alamat IP privat atau loopback.".into());
+                }
+            }
+        }
     }
     if !matches!(method, "GET" | "POST") { return Err("Metode HTTP tidak didukung.".into()); }
     if body.len() > MAX_REQUEST_BYTES { return Err("Request melebihi batas ukuran.".into()); }

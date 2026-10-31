@@ -21,26 +21,57 @@ impl CameraMonitorWorker {
             .spawn(move || {
                 let mut last_active = false;
                 let mut last_apps: Vec<String> = Vec::new();
+                let mut was_unknown = false;
 
                 while !stop_flag.load(Ordering::Relaxed) {
-                    if let Ok(probe) = probe_consent_store_webcam() {
-                        let is_active = !probe.active_candidates.is_empty();
-                        let apps = probe.active_candidates;
+                    match probe_consent_store_webcam() {
+                        Ok(probe) => {
+                            if !probe.key_exists {
+                                if !was_unknown {
+                                    was_unknown = true;
+                                    last_active = false;
+                                    last_apps.clear();
+                                    let _ = event_tx.send(PrivacyEvent::CapabilityUpdate {
+                                        kind: CapabilityKind::Camera,
+                                        activity: Activity::Unknown,
+                                        evidence: None,
+                                        applications: Vec::new(),
+                                    });
+                                }
+                            } else {
+                                let is_active = !probe.active_candidates.is_empty();
+                                let apps = probe.active_candidates;
 
-                        let changed = is_active != last_active || apps != last_apps;
-                        if changed {
-                            last_active = is_active;
-                            last_apps = apps.clone();
+                                let changed = is_active != last_active || apps != last_apps || was_unknown;
+                                if changed {
+                                    was_unknown = false;
+                                    last_active = is_active;
+                                    last_apps = apps.clone();
 
-                            if is_active {
+                                    if is_active {
+                                        let _ = event_tx.send(PrivacyEvent::CapabilityUpdate {
+                                            kind: CapabilityKind::Camera,
+                                            activity: Activity::Active,
+                                            evidence: Some(Evidence::ConsentStoreExperimental),
+                                            applications: apps,
+                                        });
+                                    } else {
+                                        let _ = event_tx.send(PrivacyEvent::CameraInactive);
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            if !was_unknown {
+                                was_unknown = true;
+                                last_active = false;
+                                last_apps.clear();
                                 let _ = event_tx.send(PrivacyEvent::CapabilityUpdate {
                                     kind: CapabilityKind::Camera,
-                                    activity: Activity::Active,
-                                    evidence: Some(Evidence::ConsentStoreExperimental),
-                                    applications: apps,
+                                    activity: Activity::Unknown,
+                                    evidence: None,
+                                    applications: Vec::new(),
                                 });
-                            } else {
-                                let _ = event_tx.send(PrivacyEvent::CameraInactive);
                             }
                         }
                     }

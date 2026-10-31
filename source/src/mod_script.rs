@@ -125,6 +125,12 @@ pub struct LuaModState {
     pub power_snapshot: Option<crate::system::PowerSnapshot>,
     pub power_history: Vec<crate::mods::power_broker::MonthlyPowerHistory>,
     pub mod_data_dir: Option<PathBuf>,
+    pub allowed_endpoints: Vec<String>,
+}
+
+fn is_reserved_storage_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower == "observed-energy" || lower.starts_with("observed-") || lower.starts_with('.')
 }
 
 fn json_to_value<'gc>(ctx: piccolo::Context<'gc>, value: &serde_json::Value) -> Value<'gc> {
@@ -222,6 +228,20 @@ pub fn run_lua_mod_source_capabilities(
 ) -> Result<LuaModOutput, String> {
     let mut lua = Lua::core();
 
+    let mut allowed_endpoints = Vec::new();
+    if let Some(cfg) = config {
+        if let Some(ep) = cfg.get("endpoint").and_then(|v| v.as_str()) {
+            allowed_endpoints.push(ep.to_string());
+        }
+        if let Some(arr) = cfg.get("endpoints").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(s) = item.as_str() {
+                    allowed_endpoints.push(s.to_string());
+                }
+            }
+        }
+    }
+
     let state = Arc::new(Mutex::new(LuaModState {
         last_clicked_button: last_clicked_button.map(|s| s.to_string()),
         output: LuaModOutput::default(),
@@ -231,6 +251,7 @@ pub fn run_lua_mod_source_capabilities(
         power_snapshot: power_snapshot.cloned(),
         power_history: power_history.to_vec(),
         mod_data_dir: mod_data_dir.map(|p| p.to_path_buf()),
+        allowed_endpoints,
     }));
 
     // Register UI & System sandbox APIs
@@ -577,7 +598,12 @@ pub fn run_lua_mod_source_capabilities(
                         if !st.output.http_urls.iter().any(|u| u == &url) {
                             st.output.http_urls.push(url.clone());
                         }
-                        if !st.http_allowed {
+                        let url_allowed = if st.allowed_endpoints.is_empty() {
+                            true
+                        } else {
+                            st.allowed_endpoints.iter().any(|ep| url.starts_with(ep))
+                        };
+                        if !st.http_allowed || !url_allowed {
                             status = "blocked";
                         } else if let Some(result) = st.http_cache.get(&url) {
                             match result {
@@ -755,6 +781,11 @@ pub fn run_lua_mod_source_capabilities(
 
         let cb_storage_get_json = Callback::from_fn(&ctx, |ctx, _, mut stack| {
             let key = value_to_string(stack.get(0));
+            if is_reserved_storage_key(&key) {
+                stack.clear();
+                stack.push_back(Value::Nil);
+                return Ok(CallbackReturn::Return);
+            }
             let mut val = Value::Nil;
             let state_val = ctx.get_global("__mod_state");
             if let Value::UserData(ud) = state_val {
@@ -783,6 +814,11 @@ pub fn run_lua_mod_source_capabilities(
         let cb_storage_set_json = Callback::from_fn(&ctx, |ctx, _, mut stack| {
             let key = value_to_string(stack.get(0));
             let text = value_to_string(stack.get(1));
+            if is_reserved_storage_key(&key) {
+                stack.clear();
+                stack.push_back(Value::Boolean(false));
+                return Ok(CallbackReturn::Return);
+            }
             let mut ok = false;
             let state_val = ctx.get_global("__mod_state");
             if let Value::UserData(ud) = state_val {

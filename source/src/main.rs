@@ -41,13 +41,7 @@ fn main(){
         std::process::exit(0);
     }
 
-    // 2. Healthcheck ACK when launched after update
-    for i in 0..args.len() {
-        if args[i] == "--update-ack-tx" && i + 1 < args.len() {
-            let _ = update::helper::write_health_ack(std::path::Path::new(&args[i + 1]));
-        }
-    }
-
+    // 2. Healthcheck ACK is delivered after successful window creation in shell::run()
     // 3. Durable pending update on normal startup
     let preview=app::is_preview_args(&args);
     if !preview {
@@ -57,7 +51,7 @@ fn main(){
                     if pending.tx_dir.exists() {
                         let journal_file = update::transaction::TransactionJournal::journal_file(&pending.tx_dir);
                         if journal_file.exists() {
-                            if let Ok(journal) = update::transaction::TransactionJournal::load(&pending.tx_dir) {
+                            if let Ok(mut journal) = update::transaction::TransactionJournal::load(&pending.tx_dir) {
                                 if journal.phase == update::transaction::TransactionPhase::Prepared {
                                     if let Some(install_dir) = exe.parent() {
                                         if let Ok(helper_exe) = update::ui::prepare_helper_copy(install_dir, &pending.tx_dir) {
@@ -66,6 +60,8 @@ fn main(){
                                             std::process::exit(0);
                                         }
                                     }
+                                } else if matches!(journal.phase, update::transaction::TransactionPhase::Swapping | update::transaction::TransactionPhase::BackingUp | update::transaction::TransactionPhase::Relaunching) {
+                                    let _ = update::transaction::execute_rollback(&mut journal, &pending.tx_dir);
                                 }
                             }
                         }

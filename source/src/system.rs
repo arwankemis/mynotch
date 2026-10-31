@@ -58,7 +58,7 @@ impl WinRtApartment {
     fn new() -> Self {
         use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
         let hr = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
-        Self { initialized: hr.is_ok() }
+        Self { initialized: hr.0 == 0 }
     }
 }
 impl Drop for WinRtApartment {

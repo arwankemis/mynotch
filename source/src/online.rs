@@ -96,7 +96,10 @@ impl OnlineService {
         if title.trim().is_empty() || artist.trim().is_empty() { return Ok(LyricsResult::default()); }
         if [title, artist, album].iter().any(|v| v.len() > 4096) || !duration.is_finite() || !(0.0..=86400.0).contains(&duration) { return Err("Metadata lagu tidak valid.".into()); }
         let duration = duration.round() as u64;
-        let key = serde_json::to_string(&(title.trim(), artist.trim(), album.trim(), duration)).map_err(|_| "Metadata lagu tidak valid.")?;
+        let raw_key = serde_json::to_string(&(title.trim(), artist.trim(), album.trim(), duration)).map_err(|_| "Metadata lagu tidak valid.")?;
+        let mut hasher = crate::update::crypto::Sha256::new();
+        hasher.update(raw_key.as_bytes());
+        let key = hasher.finish().iter().map(|b| format!("{b:02x}")).collect::<String>();
         if let Some(result) = self.read_cache::<LyricsResult>("lyrics", &key, 7 * 86400) {
             // A negative lookup has a shorter TTL, so newly published lyrics can appear.
             if result.instrumental || !result.plain_lyrics.is_empty() || !result.synced_lyrics.is_empty() || self.read_cache::<LyricsResult>("lyrics", &key, 30 * 60).is_some() { return Ok(result); }

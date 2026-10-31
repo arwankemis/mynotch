@@ -285,10 +285,15 @@ pub fn uninstall_mod(root: &Path, settings: &mut Settings, id: &str) -> Result<(
     if mod_file.exists() {
         std::fs::remove_file(mod_file).map_err(|e|format!("Gagal menghapus registrasi mod: {e}"))?;
     }
-    if manifest.mod_type==ModType::Builtin {
-        let folder=root.join("mods").join(id);
-        if folder.exists(){std::fs::remove_dir_all(folder).map_err(|e|format!("Gagal menghapus paket mod: {e}"))?;}
+    let folder = root.join("mods").join(id);
+    if folder.exists() {
+        let _ = std::fs::remove_dir_all(folder);
     }
+    let data_folder = root.join("mod-data").join(id);
+    if data_folder.exists() {
+        let _ = std::fs::remove_dir_all(data_folder);
+    }
+    settings.permissions.remove(id);
     settings.installed_mods.retain(|m| m != id);
     settings.disabled_mods.retain(|m|m!=id);
     settings.network_mods.retain(|m| m != id);
@@ -465,6 +470,10 @@ pub fn install_mod_package(root: &Path, settings: &mut Settings, package_path: &
 
         let target_dir = mods_dir.join(&manifest.id);
         std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+        let old_lua = target_dir.join("main.lua");
+        if old_lua.exists() {
+            let _ = std::fs::remove_file(old_lua);
+        }
         std::fs::write(target_dir.join("mod.json"), &bytes).map_err(|e| e.to_string())?;
 
         if !settings.installed_mods.iter().any(|m| m == &manifest.id) {
