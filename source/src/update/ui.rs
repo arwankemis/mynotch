@@ -196,18 +196,20 @@ pub fn select_release_candidate(
 }
 
 fn parse_version_sequence(s: &str) -> u64 {
+    // E.g. "1.2.3.4-alpha.1" -> 1 * 100000000 + 2 * 1000000 + 3 * 10000 + 4
     let clean = s.split('-').next().unwrap_or(s);
     let parts: Vec<u64> = clean
         .split('.')
         .filter_map(|p| p.parse::<u64>().ok())
         .collect();
 
-    let p0 = parts.first().copied().unwrap_or(0);
-    let p1 = parts.get(1).copied().unwrap_or(0);
-    let p2 = parts.get(2).copied().unwrap_or(0);
-    let p3 = parts.get(3).copied().unwrap_or(0);
-
-    p0 * 1_000_000_000 + p1 * 1_000_000 + p2 * 1_000 + p3
+    match parts.len() {
+        1 => parts[0] * 10000,
+        2 => parts[0] * 1000000 + parts[1] * 10000,
+        3 => parts[0] * 100000000 + parts[1] * 1000000 + parts[2] * 10000,
+        4 => parts[0] * 100000000 + parts[1] * 1000000 + parts[2] * 10000 + parts[3],
+        _ => parts.first().copied().unwrap_or(0),
+    }
 }
 
 pub fn prepare_helper_copy(install_dir: &Path, tx_dir: &Path) -> Result<PathBuf, String> {
