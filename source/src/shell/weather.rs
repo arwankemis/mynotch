@@ -3,13 +3,17 @@ use crate::{i18n,weather};
 use chrono::{DateTime,Utc};
 
 impl Shell {
-    pub(super) fn refresh_weather(&mut self){
+    pub(super) fn refresh_weather(&mut self, force: bool){
         if !self.settings.enabled("Cuaca")||self.fullscreen||self.suspended||self.jobs.contains_key("Cuaca"){return}
         // Repeated clicks/scrolls must not spawn workers or reread the disk cache every frame.
         if self.weather_refresh.attempt.is_some_and(|at|at.elapsed()<Duration::from_secs(2)){return}
         self.weather_refresh.attempt=Some(Instant::now());
+        if force {
+            self.notice(crate::i18n::t("weather.loading", &self.settings.language));
+            self.invalidate();
+        }
         let api=self.online.clone();let(lat,lon)=(self.settings.latitude,self.settings.longitude);
-        self.job("Cuaca",move||Event::Weather(api.weather(lat,lon)));
+        self.job("Cuaca",move||Event::Weather(if force { api.weather_force(lat,lon) } else { api.weather(lat,lon) }, force));
     }
     pub(super) fn reset_weather_location(&mut self){
         self.cancel_job("Cuaca");self.weather=None;self.weather_updated=None;self.weather_refresh.attempt=None;self.weather_refresh.failed=false;self.weather_menu_open=false;
@@ -20,7 +24,7 @@ impl Shell {
     }
     pub(super) fn poll_weather(&mut self){
         let visible=self.tab=="Cuaca"&&!self.settings_open&&self.hover_stage>=1&&!self.fullscreen&&!self.suspended;
-        if weather::refresh_due(self.settings.enabled("Cuaca"),visible,self.jobs.contains_key("Cuaca"),self.weather_refresh.failed,self.weather_refresh.attempt.map(|at|at.elapsed())){self.refresh_weather();}
+        if weather::refresh_due(self.settings.enabled("Cuaca"),visible,self.jobs.contains_key("Cuaca"),self.weather_refresh.failed,self.weather_refresh.attempt.map(|at|at.elapsed())){self.refresh_weather(false);}
     }
     pub(super) fn weather_page(&mut self,p:&mut Painter){unsafe{
         if !self.settings.enabled("Cuaca"){return}
@@ -37,8 +41,10 @@ impl Shell {
         let refresh=t("weather.refresh");let refresh_w=(p.measure_text(refresh,10.,false)+17.).min(82.);
         let refresh_x=254.-refresh_w;
         self.hit(refresh_x,211.,refresh_w,22.,Action::WeatherRefresh);
-        p.outline_icon("undo",refresh_x,216.,11.,0xc7d9e7);
-        p.text(refresh,refresh_x+16.,212.,refresh_w-16.,20.,10.,0xc7d9e7,false);
+        let is_loading = self.jobs.contains_key("Cuaca");
+        let refresh_fg = if is_loading { 0x6a8090 } else { 0xc7d9e7 };
+        p.outline_icon("undo",refresh_x,216.,11.,refresh_fg);
+        p.text(refresh,refresh_x+16.,212.,refresh_w-16.,20.,10.,refresh_fg,false);
         if let Some(report)=self.weather.as_ref(){
             let now=Utc::now();
             let(_,condition)=i18n::weather_condition(report.weather_code,report.is_day,&lang);

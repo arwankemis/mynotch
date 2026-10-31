@@ -218,13 +218,13 @@ fn test_rehearsal_profile_enforcement_in_candidate_selection() {
                 name: "mynotch-update-public-windows-x64-0.0.2.0.zip".into(),
                 size: 5000000,
                 browser_download_url: "https://github.com/arwankemis/mynotch/releases/download/v0.0.2.0/public.zip".into(),
-                digest: None,
+                digest: Some("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into()),
             },
             crate::online::ReleaseAsset {
                 name: "mynotch-update-personal-windows-x64-0.0.2.0.zip".into(),
                 size: 6000000,
                 browser_download_url: "https://github.com/arwankemis/mynotch/releases/download/v0.0.2.0/personal.zip".into(),
-                digest: None,
+                digest: Some("sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".into()),
             },
         ],
     };

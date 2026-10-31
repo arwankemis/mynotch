@@ -79,10 +79,18 @@ impl OnlineService {
     }
 
     pub fn weather(&self, latitude: f64, longitude: f64) -> Result<WeatherReport, String> {
+        self.weather_internal(latitude, longitude, false)
+    }
+    pub fn weather_force(&self, latitude: f64, longitude: f64) -> Result<WeatherReport, String> {
+        self.weather_internal(latitude, longitude, true)
+    }
+    fn weather_internal(&self, latitude: f64, longitude: f64, force: bool) -> Result<WeatherReport, String> {
         net::check_cancel()?;
         if !latitude.is_finite() || !longitude.is_finite() || !(-90.0..=90.0).contains(&latitude) || !(-180.0..=180.0).contains(&longitude) { return Err("Koordinat cuaca tidak valid.".into()); }
         let key = format!("v2:{latitude:.4},{longitude:.4}");
-        if let Some(report) = self.read_cache("weather", &key, 30 * 60) { return Ok(report); }
+        if !force {
+            if let Some(report) = self.read_cache("weather", &key, 30 * 60) { return Ok(report); }
+        }
         let url = format!("https://api.open-meteo.com/v1/forecast?latitude={latitude:.4}&longitude={longitude:.4}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto&forecast_days=2&forecast_hours=6&timeformat=unixtime");
         let body = net::get(&url)?;
         let report = parse_weather(&body)?;

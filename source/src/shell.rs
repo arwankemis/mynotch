@@ -138,7 +138,7 @@ enum Event {
 
     Artwork(u64,Result<crate::artwork::Artwork,String>),
     Completed(&'static str,u64,Box<Event>),
-    Media(MediaEvent),Levels(Vec<f32>),Lyrics(String,Result<LyricsResult,String>),Weather(Result<WeatherReport,String>),
+    Media(MediaEvent),Levels(Vec<f32>),Lyrics(String,Result<LyricsResult,String>),Weather(Result<WeatherReport,String>, bool),
     Agenda(Result<Vec<CalendarEvent>,String>),Ai(Result<String,String>),Notice(String),Update(Result<Option<crate::online::GithubRelease>,String>),
     UpdateProgress(u8, u64, Option<u64>),
     UpdateStaged(Result<(String, std::path::PathBuf), String>),
@@ -1308,7 +1308,7 @@ impl Shell {
                     }
                     return LRESULT(0);
                 }
-                if self.tab=="Cuaca"&&rel_y>42.{self.refresh_weather();return LRESULT(0);}
+                if self.tab=="Cuaca"&&rel_y>42.{self.refresh_weather(true);return LRESULT(0);}
                 if self.tab=="Reminder"&&self.reminder_menu.is_some()&&rel_x>=229.{self.handle_reminder_menu_key(if wheel_delta>0{0x26}else{0x28});return LRESULT(0);}
                 if self.tab=="Reminder"&&rel_x<208.&&rel_y>48.{self.action(Action::ReminderStep(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
                 if self.tab=="Kalender"&&rel_x<308.&&rel_y>42.{self.action(Action::Month(if wheel_delta>0{-1}else{1}));return LRESULT(0);}
@@ -1625,7 +1625,7 @@ impl Shell {
         Event::Artwork(key,result)=>{if key==self.cover_key&&self.settings.enabled("Musik"){self.cover=result.ok();if self.preview{eprintln!("artwork ready={}",self.cover.is_some());}}},
         Event::Levels(levels)=>{if self.visualizer.is_some(){self.levels=levels;self.sync_active_lyric();}},
         Event::Lyrics(key,result)=>{if key==self.lyrics_key&&self.settings.enabled("Musik"){match result{Ok(value)=>{self.lyrics_error=None;self.lyrics=crate::lyrics::parse_lrc_with_options(&value.synced_lyrics,self.settings.romanize_lyrics);self.plain_lyrics=if value.instrumental{"Instrumental · nikmati musiknya.".into()}else if value.plain_lyrics.is_empty()&&self.lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini.".into()}else if self.settings.romanize_lyrics{crate::lyrics::romanize_text(&value.plain_lyrics)}else{value.plain_lyrics};self.layout();},Err(_)=>{self.lyrics.clear();self.plain_lyrics.clear();self.lyrics_error=Some(crate::i18n::t("music.lyrics_error", &self.settings.language).to_string());self.layout();}}}},
-        Event::Weather(result)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());self.weather_refresh.failed=false;},Err(_)=>{self.weather_refresh.failed=true;self.notice(crate::i18n::t("weather.fetch_failed",&self.settings.language));}}}},
+        Event::Weather(result, is_manual)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());self.weather_refresh.failed=false;if is_manual{self.notice(crate::i18n::t("notice.weather_updated",&self.settings.language));}},Err(_)=>{self.weather_refresh.failed=true;self.notice(crate::i18n::t("weather.fetch_failed",&self.settings.language));}}}},
         Event::Agenda(result)=>{if self.settings.enabled("Kalender"){match result{Ok(value)=>{self.agenda=value;self.agenda_updated=Some(Instant::now());},Err(e)=>self.notice(e)}}},
         Event::Ai(result)=>{if self.settings.enabled("AI"){match result{Ok(text)=>self.ai_messages.push(crate::online::ChatMessage{role:"assistant".into(),content:text}),Err(e)=>self.notice(e)}}},
         Event::Update(result)=>{
@@ -2513,7 +2513,7 @@ pub(super) fn should_revert_stage1(tab: &str, reminder_index: usize, lyric_mode:
     if lyric_mode {
         return false;
     }
-    if tab == "Kalender" || tab == "Cuaca" {
+    if tab == "Kalender" {
         return false;
     }
     if tab == "Reminder" && reminder_index == 0 {
@@ -2618,7 +2618,7 @@ fn stage1_revert_rules_match_specification() {
         // Clipboard, Catatan, Musik without lyrics revert to calendar
         assert!(should_revert_stage1("Clipboard", 0, false));
         assert!(should_revert_stage1("Catatan", 0, false));
-        assert!(!should_revert_stage1("Cuaca", 0, false));
+        assert!(should_revert_stage1("Cuaca", 0, false));
         assert!(should_revert_stage1("Musik", 0, false));
         assert!(should_revert_stage1("Daya", 0, false));
         assert!(should_revert_stage1("Sistem", 0, false));

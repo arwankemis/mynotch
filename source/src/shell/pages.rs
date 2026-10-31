@@ -986,7 +986,7 @@ impl Shell {
                     self.tab_fade=Some((self.tab.clone(),Instant::now(),dir));
                     self.tab=tab;
                     if self.tab == "Cuaca" && self.weather.is_none() {
-                        self.refresh_weather();
+                        self.refresh_weather(false);
                     }
                     if self.hover_stage == 1 && self.should_revert_stage1_to_calendar() {
                         self.trigger_stage1_temporary(5);
@@ -1455,13 +1455,13 @@ impl Shell {
                         self.retarget_morph();self.layout();
                         self.save();
                         self.make_inputs();
-                        self.refresh_weather();
+                        self.refresh_weather(true);
                         self.invalidate();
                     },
                     _=>self.notice(crate::i18n::t("weather.invalid_coords",&self.settings.language))
                 }
             },
-            Action::WeatherRefresh=>self.refresh_weather(),
+            Action::WeatherRefresh=>self.refresh_weather(true),
             Action::WeatherToggleMenu=>{self.weather_menu_open=!self.weather_menu_open;},
             Action::WeatherSetCity(city,lat,lon)=>{
                 self.reset_weather_location();
@@ -1472,7 +1472,7 @@ impl Shell {
                 self.settings.weather_configured=true;
                 self.save();
                 self.make_inputs();
-                self.refresh_weather();
+                self.refresh_weather(true);
                 self.invalidate();
             },
             Action::WeatherToggleCustom=>{

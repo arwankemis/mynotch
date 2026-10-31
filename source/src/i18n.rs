@@ -534,6 +534,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "weather.now" => if en { "Now" } else { "Kini" },
         "weather.unavailable" => if en { "Weather unavailable. Try refreshing." } else { "Cuaca belum tersedia. Coba muat ulang." },
         "weather.fetch_failed" => if en { "Could not update weather. Please try again later." } else { "Cuaca gagal diperbarui. Coba lagi nanti." },
+        "notice.weather_updated" => if en { "Weather data updated." } else { "Data cuaca diperbarui." },
         "weather.stale" => if en { "Last known" } else { "Data terakhir" },
         "weather.invalid_coords" => if en { "Invalid latitude/longitude." } else { "Lintang/bujur tidak valid." },
         "weather.location_hint" => if en { "Example: -6.2088, 106.8456 (Jakarta)" } else { "Contoh: -6.2088, 106.8456 (Jakarta)" },
