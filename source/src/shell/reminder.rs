@@ -45,7 +45,7 @@ impl Shell{
             self.trigger_stage1_temporary(5);
         }
         self.reminder_anim=Some((current,Instant::now()));self.focused=None;
-        if (from.1-self.target_geometry().1).abs()>0.1{self.morph=Some(ui::Morph::new(from,self.target_geometry()));self.layout();self.update_window_region();}
+        if (from.1-self.target_geometry().1).abs()>0.1{self.retarget_morph();self.layout();self.update_window_region();}
         self.make_inputs();self.start_morph_timer();if index==3{self.refresh_prayers(false);}self.invalidate();
     }
     fn reminder_position(&self)->f32{match self.reminder_anim{Some((from,t))=>{let x=(t.elapsed().as_secs_f32()/0.18).min(1.);from+(self.reminder_index as f32-from)*(1.-(1.-x).powi(3))},None=>self.reminder_index as f32}}
