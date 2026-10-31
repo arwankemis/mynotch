@@ -2129,7 +2129,7 @@ impl Shell {
                     }
                 };
 
-                if self.stage1_tab()=="Cuaca"&&self.volume_hud.is_none(){
+                if !(self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active()) && self.stage1_tab()=="Cuaca"&&self.volume_hud.is_none(){
                     let rail_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
                         crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot)
                     } else {

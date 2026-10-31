@@ -23,7 +23,8 @@ impl Shell {
         if !self.settings.enabled("Cuaca") { self.reset_weather_location();self.weather_custom_open=false; }
     }
     pub(super) fn poll_weather(&mut self){
-        let visible=self.tab=="Cuaca"&&!self.settings_open&&self.hover_stage>=1&&!self.fullscreen&&!self.suspended;
+        let reverted=self.hover_stage==1&&self.should_revert_stage1_to_calendar()&&!self.is_stage1_temporary_active();
+        let visible=self.tab=="Cuaca"&&!self.settings_open&&self.hover_stage>=1&&!reverted&&!self.fullscreen&&!self.suspended;
         if weather::refresh_due(self.settings.enabled("Cuaca"),visible,self.jobs.contains_key("Cuaca"),self.weather_refresh.failed,self.weather_refresh.attempt.map(|at|at.elapsed())){self.refresh_weather(false);}
     }
     pub(super) fn weather_page(&mut self,p:&mut Painter){unsafe{
