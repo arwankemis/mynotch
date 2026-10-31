@@ -1,122 +1,72 @@
 # Changelog
 
-Semua pembaruan penting dan catatan rilis untuk mynotch didokumentasikan di berkas ini.
+All notable changes and release notes for mynotch are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to Semantic Versioning.
 
 ---
 
-## [0.0.1.3 alpha] - 29 Oktober 2026
+## [0.0.1.4] - 2026-10-31
 
-Rilis ini menambah mod komunitas berbasis JSON dan Lua, pengelola mod di Pengaturan, deteksi TWS, dan indikator volume bawaan mynotch.
+This release adds native Liquid Glass themes, a continuous spring animation coordinator, in-place streaming updates, and an in-app mod catalog.
 
-### Fitur baru
+### Added
+- **Native Liquid Glass Materials:** Added `Glass Lite` and `Glass Adaptive` theme options alongside `Solid`. Uses native Desktop Window Manager (DWM) backdrop blur with custom polygon contour clipping for seamless window edges.
+- **Continuous Spring Animation Engine:** Replaced fixed-step lerp with a sub-stepped semi-implicit Euler spring coordinator running at up to 240 Hz. Stage and tab changes retarget mid-flight without positional jumps.
+- **Automatic Streaming In-Place Updater:** Self-update system that downloads releases from GitHub, validates SHA-256 signatures, performs zip-slip-safe extractions, and uses a health-checked helper process with automatic rollback on failure.
+- **Mod & Extension Catalog:** Added a dedicated catalog under Settings to discover, install, toggle, and uninstall official extensions with a single click.
+- **Daya Energy Monitor:** Added an optional hardware power monitoring extension with out-of-process sensor isolation.
+- **Project Licensing:** Added root MIT license and updated third-party notices covering Piccolo and Zip libraries.
 
-- Mod komunitas:
-  - Tombol "Impor Mod" menerima paket `.zip` atau manifest `.json`, lalu mengekstraknya ke `data/mods/`. Tombol "Folder Mod" membuka direktori itu di Explorer.
-  - Tiap mod punya tombol Buka, Pasang/Lepas, dan Hapus. Toggle "Tab" menampilkan halaman mod di bilah notch. Toggle "Net" memberi izin permintaan HTTPS ke host yang diminta skrip.
-  - Mesin Lua 5.4 berbasis Piccolo berjalan di sandbox tanpa akses file bebas. Batas instruksi menghentikan skrip yang berulang tanpa henti.
-  - API Lua: `ui.card`, `ui.button`, `ui.text`, `ui.headline`, `ui.ranked`, `system.toast`, `system.open_url`, `system.copy`, `system.config`, `system.json_decode`, dan `system.http_get` dengan cache mengikuti `refresh_seconds` (default 60 detik).
-  - Halaman mod merender grid kartu, panel headline, dua lane peringkat, dan pesan galat skrip. Galat tidak menghentikan aplikasi.
-- Deteksi TWS dan headset Bluetooth:
-  - Perangkat audio Bluetooth yang terhubung dibaca lewat Windows Devices Enumeration.
-  - Toast berisi nama perangkat muncul saat perangkat tersambung atau terputus.
-  - Stage 1 menampilkan ikon 🎧 dan persentase baterai bila Windows menyediakan `System.Devices.BatteryLife`.
-  - Pemeriksaan berjalan di thread terpisah setiap 10 detik.
-- Indikator volume:
-  - Selama notch terlihat, mynotch menahan OSD volume Windows dan menampilkan HUD-nya sendiri.
-  - HUD muncul untuk perubahan volume dari tombol media, tombol HID laptop, scroll di notch, atau aplikasi lain.
-  - Di fullscreen yang menyembunyikan notch, OSD Windows dibiarkan tampil.
-- Contoh mod `examples/mods/ihsg-monitor/`:
-  - Mengambil 105 emiten likuid dari Yahoo Finance dalam enam permintaan berisi maksimal 20 simbol.
-  - Menampilkan top 5 gainer dan top 5 loser. Jika tidak ada emiten yang naik, lane kiri berisi lima emiten dengan penurunan paling kecil dan judulnya menjadi "Paling Tahan".
-  - Data contoh dipakai saat izin jaringan mati atau permintaan gagal.
+### Fixed
+- **Player Glyphs Encoding:** Restored proper UTF-8 symbols for transport controls (Play, Pause, Skip, Previous) and volume buttons on Glass themes.
+- **Midnight Calendar Rollover:** Fixed calendar state so dates and schedules advance automatically past midnight without requiring manual interaction.
+- **Path Sanitization:** Removed hardcoded local developer paths, replacing them with dynamic environment variables and relative path lookups.
+- **Compiler Hygiene:** Resolved all compiler warnings and dead code annotations across public and personal builds.
+- **Driver Binaries Untracked:** Removed heavy binary driver installers and source archives from Git tracking to keep the repository lightweight.
 
-### Perbaikan dan penyempurnaan
-
-- Baris di lane peringkat mod diwarnai menurut tanda nilainya sendiri, bukan warna lane. Lane "Paling Tahan" tidak lagi menampilkan angka negatif berwarna hijau.
-- Footer Stage 1 menempatkan baterai TWS sebelum baterai laptop dan melebarkan pill sesuai isi teks.
-- Deskripsi Pengaturan Umum tidak lagi menulis versi aplikasi secara hardcode.
-- Contoh mod yang tersedia: `kurs_usd`, `counter_lua`, dan `ihsg-monitor`. Panduan pembuatan dan pengemasan mod ada di `docs/PANDUAN-MOD.md`.
+### Security
+- In-place updater network access is restricted strictly to official GitHub endpoints (`api.github.com`, `github.com`, `githubusercontent.com`).
+- Public release binaries completely isolate internal audio daemon calls, preventing unneeded process spawning on user systems.
 
 ---
 
-## [0.0.1.2 alpha] - 28 Oktober 2026
+## [0.0.1.3] - 2026-10-29
 
-Rilis 0.0.1.2 alpha menambahkan kontrol volume master lewat scroll mouse, indikator baterai laptop, mod cuaca Open-Meteo, pencarian dan pin riwayat clipboard, opsi startup Windows, serta pemeriksa rilis GitHub.
+### Added
+- **Community Mod System:** Support for custom mods packaged as `.zip` archives or `.json` manifests. Includes isolated Lua 5.4 scripting environment (Piccolo) with instruction limits and opt-in network permissions.
+- **Bluetooth & TWS Battery Monitoring:** Background polling for connected Bluetooth headsets and speakers, surfacing battery percentages in the Stage 1 bar.
+- **Windows Volume HUD:** Intercepts and replaces the default Windows volume overlay with a notch-based HUD when active.
+- **Sample Extensions:** Added sample mods in `examples/mods/`, including the IHSG market monitor and currency tracker.
 
-### Fitur baru
-
-- Kontrol volume pada notch: gulirkan roda mouse di atas notch (Stage 0 dan Stage 1) untuk mengatur volume master Windows via Core Audio. HUD volume muncul sementara menampilkan persentase dan bar level.
-- Pemantau baterai di Stage 1: menampilkan persentase baterai laptop, ikon pengisian daya, dan peringatan baterai lemah di samping jam. Notifikasi toast muncul saat kabel adaptor terpasang atau dilepas.
-- Mod cuaca Open-Meteo:
-  - Panel native 560 x 240 dengan informasi suhu, kondisi bilingual, suhu terasa, kelembapan, kecepatan angin, peluang hujan, dan prakiraan per jam hingga empat jam ke depan.
-  - Background bergradasi dari hitam notch mengikuti kondisi langit serta status siang atau malam.
-  - Ikon MGC Weather dimuat dari atlas offline via WIC Direct2D (gaya gradasi pada panel dan prakiraan per jam; gaya color fill pada Stage 1).
-  - Pilihan kota preset untuk Jakarta, Bandung, dan Surabaya, serta formulir koordinat lintang dan bujur kustom.
-  - Refresh data dapat dipicu dengan klik tombol atau scroll mouse pada tab cuaca. Cache 30 menit dan pembatasan frekuensi refresh menjaga efisiensi jaringan. Mod bersifat opsional dan dapat dilepas lewat Pengaturan.
-- Pengelola clipboard:
-  - Tombol pin untuk menyematkan klip penting ke urutan teratas riwayat.
-  - Kolom pencarian instan untuk menyaring riwayat teks saat mengetik.
-- Jalankan saat startup Windows: opsi di menu Pengaturan > Umum yang memanfaatkan registry pengguna (HKCU) tanpa service latar belakang.
-- Pemeriksa pembaruan dalam aplikasi: menu Pembaruan di Pengaturan untuk memeriksa rilis baru dari GitHub, menampilkan versi terpasang, tag rilis baru, ukuran berkas, serta tautan unduh paket.
-
-### Perbaikan dan penyempurnaan
-
-- Normalisasi layout Stage 1:
-  - Menyamakan format status kalender, cuaca, dan musik dengan gap 8 px di kedua sisi pemisah `|`.
-  - Teks informasi panjang dipotong dengan ellipsis sebelum pemisah agar jam dan baterai tetap terbaca.
-  - Ikon Stage 1 ikut bergeser bersama grup teks saat dipusatkan.
-  - Transisi perubahan ukuran compact menggunakan morph 260 ms yang mengambil sampel posisi saat berjalan.
-- Penanganan status musik sementara: pergantian lagu memunculkan status musik di Stage 1 selama lima detik tanpa mengubah tab pilihan pengguna, lalu kembali ke status sebelumnya setelah waktu habis.
-- Pemetaan ikon navigasi tab cuaca dipulihkan ke ikon awan (cloud).
-- Penyesuaian lebar Stage 1 untuk mengakomodasi indikator baterai laptop di semua tab aktif tanpa memotong teks tanggal.
-- Sinkronisasi label versi 0.0.1.2 alpha pada deskripsi menu Pengaturan Umum dan skrip pembuatan paket rilis.
+### Fixed
+- Rank lane coloring now respects individual value signs rather than the entire column color.
+- Widened Stage 1 pill dimensions to accommodate long battery percentages.
 
 ---
 
-## [0.0.1.1 alpha] - 27 Oktober 2026
+## [0.0.1.2] - 2026-10-28
 
-Rilis 0.0.1.1 alpha menambahkan catatan cepat (quick sticky notes), sistem mod modular, dukungan bilingual Indonesia dan English, serta perbaikan navigasi dan bug UI.
-
-### Fitur baru
-
-- Quick Sticky Notes:
-  - Tab Catatan pada notch dengan tata letak dua kolom (daftar memo di kiri dan editor teks di kanan).
-  - Lima pilihan warna untuk mengelompokkan catatan.
-  - Tombol Pop to Desktop untuk melepas catatan menjadi jendela melayang di desktop dengan pin always-on-top.
-  - Ekspor catatan ke format Markdown (`.md`) atau teks biasa (`.txt`), serta tombol salin langsung ke clipboard.
-  - Penyimpanan otomatis tanpa tombol simpan manual.
-- Mod modular: menu Mod & Ekstensi di Pengaturan untuk memasang atau melepas fitur tambahan berbasis manifest (`.mod.json`).
-- Dukungan bilingual: pilihan bahasa Indonesia dan English di Pengaturan yang langsung diterapkan ke seluruh judul tab, kalender, pengingat, dan teks tombol.
-- Transisi status Stage 1: status musik aktif dan timer fokus tetap tampil di Stage 1, sedangkan catatan baru, klip tersalin, atau pengingat sholat tampil selama 5 detik sebelum kembali ke tampilan tanggal dan jam.
-
-### Perbaikan dan kenyamanan antarmuka
-
-- Dukungan tombol `Ctrl+A` di seluruh kotak input teks.
-- Dukungan scroll mouse untuk berpindah bulan di kalender dan halaman di clipboard.
-- Tombol Ikuti pada pemutar musik untuk kembali ke baris lirik aktif setelah digulir manual.
-- Mode minimal disesuaikan menjadi kapsul hitam solid.
-- Penambahan jeda hover 140 ms agar notch tidak terbuka saat kursor mouse lewat sepintas.
-- Penyesuaian teks pengingat sholat menjadi "Tepat waktu" saat lead time bernilai 0 menit.
-- Mengklik kartu libur nasional berikutnya langsung membuka tanggal terkait di kalender.
-- Penanda fokus keyboard dan dukungan penekanan tombol Space atau Enter pada kontrol interaktif.
-
-### Perbaikan bug
-
-- Mengatasi draf catatan baru yang sempat menampilkan teks dari catatan sebelumnya setelah penghapusan.
-- Memperbaiki pembungkusan kata DirectWrite agar teks panjang tidak meluap keluar batas panel.
-- Memperbaiki pelepasan handle GDI dan alokasi memori internal ICU pada pengurai lirik dan clipboard.
-- Mengabaikan format clipboard sensitif dari aplikasi pengelola kata sandi.
-- Memastikan menu pop-up pengaturan dan pengingat tertutup saat notch berpindah mode.
-- Memperbaiki prioritas notifikasi toast untuk penyelesaian sesi fokus.
+### Added
+- Mouse wheel master volume control directly over the notch bar.
+- Laptop battery level indicator on Stage 1.
+- Open-Meteo weather mod with sky conditions, humidity, wind, and precipitation probability.
+- Clipboard history search and item pinning.
+- Option to launch mynotch on Windows startup via the user registry.
 
 ---
 
-## [0.0.1 alpha] - 26 Oktober 2026
+## [0.0.1.1] - 2026-10-27
 
-- Rilis perdana mynotch dengan executable `mynotch.exe` untuk Windows x64.
-- Integrasi kontrol media musik, lirik sinkron, dan visualizer spektrum audio WASAPI.
-- Kalender bulanan dengan penanda resmi Hari Libur Nasional Indonesia 2026.
-- Pengingat harian: fokus Pomodoro, hidrasi, peregangan tubuh, dan jadwal sholat berbasis data myQuran (WIB).
-- Riwayat teks clipboard lokal opsional.
-- Tata letak Pengaturan dua kolom.
-- Dukungan fallback Direct3D software WARP saat inisialisasi Direct2D perangkat keras membutuhkan cadangan.
+### Added
+- Sticky notes mod with pop-out desktop window mode and Markdown/plain text export.
+- Bilingual Indonesian and English interface support with instant switching.
+- Enhanced stage morphing animations and layout adjustments.
+
+---
+
+## [0.0.1] - 2026-10-26
+
+- Initial alpha release of mynotch.
+- Core three-stage notch bar built with Rust, Direct2D, and DirectWrite.
+- Basic music playback controls, monthly calendar, and local clipboard storage.
