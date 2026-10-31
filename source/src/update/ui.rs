@@ -89,6 +89,47 @@ impl PendingUpdate {
     }
 }
 
+pub fn extract_sha256_for_asset(
+    release: &crate::online::GithubRelease,
+    asset_name: &str,
+) -> Option<String> {
+    // 1. Try to find from asset.digest if supplied by GitHub Releases API ("sha256:<hex>")
+    for asset in &release.assets {
+        if asset.name.eq_ignore_ascii_case(asset_name) {
+            if let Some(digest) = &asset.digest {
+                let cleaned = digest.trim().strip_prefix("sha256:").unwrap_or(digest.trim());
+                if cleaned.len() == 64 && cleaned.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Some(cleaned.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+
+    // 2. Fall back to parsing release body / release notes text
+    // E.g.
+    // "<64-hex-sha256>  mynotch-update-public-windows-x64-0.0.2.zip"
+    // or
+    // "`<64-hex-sha256>` mynotch-update-public-windows-x64-0.0.2.zip"
+    if let Some(body) = &release.body {
+        for line in body.lines() {
+            let line_lower = line.to_ascii_lowercase();
+            if line_lower.contains(&asset_name.to_ascii_lowercase()) {
+                for token in line.split_whitespace() {
+                    let token = token.trim_matches(|c: char| {
+                        c == '`' || c == '*' || c == '|' || c == ':' || c == '(' || c == ')' || c == '[' || c == ']' || c == ','
+                    });
+                    let cleaned = token.strip_prefix("sha256:").unwrap_or(token);
+                    if cleaned.len() == 64 && cleaned.bytes().all(|b| b.is_ascii_hexdigit()) {
+                        return Some(cleaned.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 pub fn select_release_candidate(
     identity: &BuildIdentity,
     releases: &[crate::online::GithubRelease],
@@ -132,6 +173,8 @@ pub fn select_release_candidate(
                 continue;
             }
 
+            let expected_sha256 = extract_sha256_for_asset(release, &asset.name);
+
             return Ok(Some(AvailableUpdate {
                 version: version_str.to_string(),
                 tag_name: release.tag_name.clone(),
@@ -141,7 +184,7 @@ pub fn select_release_candidate(
                 asset_name: asset.name.clone(),
                 asset_size: asset.size,
                 release_sequence: candidate_seq,
-                expected_sha256: None,
+                expected_sha256,
             }));
         }
     }
@@ -205,6 +248,46 @@ pub fn spawn_helper(helper_exe: &Path, tx_dir: &Path) -> Result<std::process::Ch
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_sha256_for_asset() {
+        let dummy_hash = "b4ea3358ef49ecca8f23d039b87ae56fa91fd722054d9dded8426f3c9f8ca533";
+        let rel_with_digest = crate::online::GithubRelease {
+            tag_name: "v0.0.2".into(),
+            name: None,
+            body: None,
+            html_url: "".into(),
+            published_at: None,
+            assets: vec![crate::online::ReleaseAsset {
+                name: "pkg.zip".into(),
+                size: 100,
+                browser_download_url: "".into(),
+                digest: Some(format!("sha256:{dummy_hash}")),
+            }],
+        };
+        assert_eq!(
+            extract_sha256_for_asset(&rel_with_digest, "pkg.zip"),
+            Some(dummy_hash.to_string())
+        );
+
+        let rel_with_body = crate::online::GithubRelease {
+            tag_name: "v0.0.2".into(),
+            name: None,
+            body: Some(format!("### Checksums\n```\n{dummy_hash}  pkg.zip\n```")),
+            html_url: "".into(),
+            published_at: None,
+            assets: vec![crate::online::ReleaseAsset {
+                name: "pkg.zip".into(),
+                size: 100,
+                browser_download_url: "".into(),
+                digest: None,
+            }],
+        };
+        assert_eq!(
+            extract_sha256_for_asset(&rel_with_body, "pkg.zip"),
+            Some(dummy_hash.to_string())
+        );
+    }
 
     #[test]
     fn test_pending_update_durable() {

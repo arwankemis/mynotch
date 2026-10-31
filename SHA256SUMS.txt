@@ -1,3 +1,3 @@
-7d292789a460efa2b42692eb621b0cb84735d852e2b24eeec18606e441fec0a1  mynotch.exe
+2ba9324ad850e6469311a19a19b98abef52349242cfdb03b4ecc48d429fb7869  mynotch.exe
 13bf4e99b0193634ebdeb0bbdeff9753b39f1d04799183f664111014aabf4c2c  libunwind.dll
-b4ea3358ef49ecca8f23d039b87ae56fa91fd722054d9dded8426f3c9f8ca533  mynotch-update-public-windows-x64-0.0.2.zip
+a41e3468997cce821501d7109e0b2d0bea816c0699dd0e7aa3125a0ad370af9b  mynotch-update-public-windows-x64-0.0.2.zip
