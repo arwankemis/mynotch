@@ -1562,10 +1562,7 @@ impl Shell {
                 self.last_move=Instant::now();
                 self.notice(crate::i18n::t("toast.stretch_alert", &self.settings.language));
             }
-            if self.settings.eye_reminder&&self.last_eye.elapsed().as_secs()>=self.settings.eye_interval as u64*60{
-                self.last_eye=Instant::now();
-                self.notice(crate::i18n::t("toast.eye_alert", &self.settings.language));
-            }
+
         }
         if self.breathing.is_some_and(|start|start.elapsed().as_secs()>=60){self.breathing=None;self.notice(crate::i18n::t("notice.breathing_done", &self.settings.language));}
         let schedule=Local::now().format("%Y-%m-%d %H:%M").to_string();if self.settings.enabled("Reminder")&&self.settings.focus_enabled&&self.last_schedule!=schedule{let time=Local::now().format("%H:%M").to_string();if self.settings.focus_schedule.contains(&time){self.focus.start(self.settings.focus_minutes,false);self.notice(crate::i18n::t("notice.focus_scheduled", &self.settings.language));}self.last_schedule=schedule;}

@@ -95,7 +95,7 @@ impl Default for Settings {
         theme_material: "solid".into(),
         theme_color: "dark".into(),
         focus_minutes:25,break_minutes:5,focus_enabled:true,stretch_after_focus:true,prayer_city:"Jakarta".into(),prayer_sound:false,auto_break:false,stretch_seconds:60,prayer_enabled:false,prayer_lead:5,prayer_times:vec![String::new();5],prayer_date:String::new(),water_target:2000,water_serving:250,water_interval:45,move_interval:45,eye_interval:25,
-        water_reminder:true,move_reminder:true,eye_reminder:true,
+        water_reminder:true,move_reminder:true,eye_reminder:false,
         latitude:-6.2088,longitude:106.8456,weather_city:"Jakarta".into(),weather_configured:false,
         calendar_feed:String::new(),collective_leave:true,
         ai_provider:"OpenAI compatible".into(),ai_endpoint:"https://api.openai.com/v1".into(),ai_model:String::new(),ai_key:String::new(),
