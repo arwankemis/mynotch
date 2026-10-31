@@ -4,7 +4,7 @@ use windows::core::BOOL;
 use windows::Win32::Foundation::{HANDLE, HWND};
 
 /// One clipboard history entry. History is stored **plaintext** in `state.json` (no DPAPI
-/// encryption yet — see clipboard storage documentation); retention is bounded by a per-item size cap and
+/// encryption yet); retention is bounded by a per-item size cap and
 /// by TTL expiry in [`expire_history`], not by encryption.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ClipItem {
