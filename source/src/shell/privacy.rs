@@ -363,19 +363,6 @@ impl Shell {
             self.st_row_compact(p, 216.0, t("privacy.app_names", &lang), t("privacy.app_names_desc", &lang));
             self.st_toggle(p, 512.0, 227.0, self.settings.privacy_show_app_names, Action::Toggle("privacy_show_app_names"), self.settings.privacy_enabled);
 
-            // Return button to General Settings
-            let back_btn_hover = self.pointer.is_some_and(|(px, py)| {
-                px >= 196.0 && px <= 300.0 && py >= 280.0 && py <= 310.0
-            });
-            p.fill(196.0, 280.0, 104.0, 30.0, 7.0, if back_btn_hover { 0x2a2a34 } else { 0x1e1e26 });
-            p.outline_icon("left", 204.0, 287.0, 14.0, muted);
-            p.text_centered(t("settings.back", &lang), 220.0, 280.0, 72.0, 30.0, 11.5, fg, 1.0, false);
-            if self.hit_enabled {
-                self.hits.push(Hit {
-                    rect: render::rect(196.0, 280.0, 104.0, 30.0),
-                    action: Action::ClosePrivacySettings,
-                });
-            }
         }
     }
 }

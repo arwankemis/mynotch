@@ -7,6 +7,7 @@ use super::super::{PowerSnapshot,Quality,SourceKind};
 pub struct Frame{
  pub schema:u32,pub backend:String,pub cpu_name:Option<String>,pub gpu_name:Option<String>,pub cpu_watts:Option<f32>,pub gpu_watts:Option<f32>,
  #[serde(default)]pub driver_installed:bool,#[serde(default)]pub setup_required:bool,pub status:String,
+ #[serde(default)]pub gpu_usage:Option<f32>,#[serde(default)]pub cpu_usage:Option<f32>,
 }
 impl Frame{
  pub fn decode(bytes:&[u8])->Option<Self>{
@@ -17,7 +18,7 @@ impl Frame{
  }
  pub fn apply(&self,s:&mut PowerSnapshot){
   if self.cpu_name.is_some(){s.cpu_name=self.cpu_name.clone();}if self.gpu_name.is_some(){s.gpu_name=self.gpu_name.clone();}
-  s.cpu_watts=self.cpu_watts;s.gpu_watts=self.gpu_watts;s.cpu_setup_required=self.setup_required;
+  s.cpu_watts=self.cpu_watts;s.gpu_watts=self.gpu_watts;s.cpu_setup_required=self.setup_required;if self.cpu_usage.is_some(){s.cpu_usage=self.cpu_usage;}if self.gpu_usage.is_some(){s.gpu_usage=self.gpu_usage;}
   if self.cpu_watts.is_some()||self.gpu_watts.is_some(){s.active_power_w=Some(self.cpu_watts.unwrap_or(0.)+self.gpu_watts.unwrap_or(0.));s.total_dc_watts=s.active_power_w;s.source_kind=SourceKind::Derived;s.quality=Quality::Partial;}
   s.provider_note=Some(match self.status.as_str(){
    "ready"=>"Sensor bawaan · subtotal CPU/GPU, bukan listrik seluruh PC",

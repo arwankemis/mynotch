@@ -16,7 +16,7 @@ impl Shell {
         self.job("Cuaca",move||Event::Weather(if force { api.weather_force(lat,lon) } else { api.weather(lat,lon) }, force));
     }
     pub(super) fn reset_weather_location(&mut self){
-        self.cancel_job("Cuaca");self.weather=None;self.weather_updated=None;self.weather_refresh.attempt=None;self.weather_refresh.failed=false;self.weather_menu_open=false;
+        self.cancel_job("Cuaca");self.weather=None;self.weather_updated=None;self.weather_fetched_time=None;self.weather_refresh.attempt=None;self.weather_refresh.failed=false;self.weather_menu_open=false;
         self.drafts.retain(|(page,id),_|page!="Cuaca"||!(30..=32).contains(id));
     }
     pub(super) fn sync_weather_lifecycle(&mut self){
@@ -55,7 +55,8 @@ impl Shell {
             let condition_w=p.measure_text(condition,11.5,false).min((234.-details_w-8.).max(32.));
             p.text_ellipsis(condition,18.,175.,condition_w,20.,11.5,0xffffff,false);
             p.text_ellipsis(&details,18.+condition_w+8.,176.,234.-condition_w-8.,18.,10.5,0xd4e3ee,false);
-            let time=DateTime::parse_from_rfc3339(&report.updated_at).ok().map(|time|time.format("%H:%M").to_string()).unwrap_or_else(||"—".into());
+            let slot_time=DateTime::parse_from_rfc3339(&report.updated_at).ok().map(|time|time.format("%H:%M").to_string()).unwrap_or_else(||"—".into());
+            let time=self.weather_fetched_time.as_deref().unwrap_or(&slot_time);
             let updated=format!("{} {time}",t(if self.weather_refresh.failed{"weather.stale"}else{"weather.updated"}));
             p.text_ellipsis(&updated,18.,212.,(refresh_x-26.).max(20.),20.,10.,0xb9cbd9,false);
             let x=266.;let w=(self.width-x-16.).max(100.);

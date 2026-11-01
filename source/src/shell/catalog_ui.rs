@@ -55,7 +55,8 @@ impl Shell{
             let hover=self.pointer.is_some_and(|(x,py)|x>=v.left&&x<=v.right&&py>=y&&py<=y+44.);
             p.fill_alpha(v.left,y,v.right-v.left,44.,9.,0xffffff,if hover{0.11}else{0.045});
             p.outline_icon(&m.icon,v.left+12.,y+13.,18.,if entry.is_installed{ACCENT}else{MUTED});
-            p.text_ellipsis(&m.name,v.left+42.,y+5.,v.right-v.left-76.,19.,12.,FG,true);
+            let name=crate::i18n::mod_name(&m.id,&m.name,&lang);
+            p.text_ellipsis(name,v.left+42.,y+5.,v.right-v.left-76.,19.,12.,FG,true);
             let status=if entry.is_installed{if entry.is_active{t("mods.status_installed",&lang)}else{t("reminders.inactive",&lang)}}else if entry.available{t("mods.status_available",&lang)}else{t("mods.status_planned",&lang)};
             p.text_ellipsis(status,v.left+42.,y+25.,v.right-v.left-76.,15.,10.5,MUTED,false);
             p.outline_icon("right",v.right-24.,y+15.,12.,MUTED);
@@ -70,14 +71,15 @@ impl Shell{
         let bottom=if entry.is_installed{400.}else{260.};let max=(bottom-v.bottom).max(0.);let scroll=self.mods_detail_scroll.clamp(0.,max);self.mods_detail_scroll=scroll;
         let hits=self.hits.len();let pointer=self.pointer;
         p.clip(v.left,v.top,v.right-v.left,v.bottom-v.top);p.translate_relative(0.,-scroll);self.pointer=pointer.map(|(x,y)|(x,y+scroll));
-        p.outline_icon(&m.icon,198.,159.,24.,ACCENT);p.text_ellipsis(&m.name,232.,154.,304.,23.,15.,FG,true);
+        let name=crate::i18n::mod_name(&m.id,&m.name,&lang);
+        p.outline_icon(&m.icon,198.,159.,24.,ACCENT);p.text_ellipsis(name,232.,154.,304.,23.,15.,FG,true);
         p.text_ellipsis(&format!("v{} · {}",m.version,m.author),232.,181.,304.,18.,11.,MUTED,false);
         let desc_y=if entry.is_installed{312.}else{208.};
         for (i,line)in wrap_lines(p,&m.description,340.,11.5,2).iter().enumerate(){p.text(line,196.,desc_y+i as f32*17.,340.,17.,11.5,MUTED,false);}
         if entry.is_installed{
             self.st_row_compact(p,204.,if lang=="en"{"Active"}else{"Aktif"},if lang=="en"{"Enable this package"}else{"Jalankan fitur paket ini"});
             self.st_toggle(p,512.,215.,entry.is_active,Action::ToggleModActive(m.id.clone()),true);
-            if !m.tab_name.is_empty(){self.st_row_compact(p,252.,if lang=="en"{"Show tab"}else{"Tampilkan tab"},&m.tab_name);self.st_toggle(p,512.,263.,entry.is_tab_enabled,Action::ToggleModTab(m.tab_name.clone()),true);}
+            if !m.tab_name.is_empty(){let tab_label=crate::i18n::tab_name(&m.tab_name,&lang);self.st_row_compact(p,252.,if lang=="en"{"Show tab"}else{"Tampilkan tab"},tab_label);self.st_toggle(p,512.,263.,entry.is_tab_enabled,Action::ToggleModTab(m.tab_name.clone()),true);}
             let permissions=if m.permissions.is_empty(){if lang=="en"{"No additional capabilities".into()}else{"Tanpa kapabilitas tambahan".into()}}else{m.permissions.join(" · ")};
             p.text_ellipsis(&permissions,196.,362.,340.,22.,11.,MUTED,false);
         }

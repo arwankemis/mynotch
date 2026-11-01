@@ -25,7 +25,7 @@ pub struct WeatherReport {
     pub hourly: Vec<ForecastHour>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct LyricsResult { pub plain_lyrics: String, pub synced_lyrics: String, pub instrumental: bool }
+pub struct LyricsResult { pub plain_lyrics: String, pub synced_lyrics: String, pub instrumental: bool, #[serde(default)] pub is_youtube: bool }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage { pub role: String, pub content: String }
 
@@ -100,8 +100,12 @@ impl OnlineService {
     }
 
     pub fn lyrics(&self, title: &str, artist: &str, album: &str, duration: f64) -> Result<LyricsResult, String> {
+        self.lyrics_with_options(title, artist, album, duration, true)
+    }
+
+    pub fn lyrics_with_options(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool) -> Result<LyricsResult, String> {
         net::check_cancel()?;
-        if title.trim().is_empty() || artist.trim().is_empty() { return Ok(LyricsResult::default()); }
+        if title.trim().is_empty() { return Ok(LyricsResult::default()); }
         if [title, artist, album].iter().any(|v| v.len() > 4096) || !duration.is_finite() || !(0.0..=86400.0).contains(&duration) { return Err("Metadata lagu tidak valid.".into()); }
         let duration = duration.round() as u64;
         let raw_key = serde_json::to_string(&(title.trim(), artist.trim(), album.trim(), duration)).map_err(|_| "Metadata lagu tidak valid.")?;
@@ -112,12 +116,29 @@ impl OnlineService {
             // A negative lookup has a shorter TTL, so newly published lyrics can appear.
             if result.instrumental || !result.plain_lyrics.is_empty() || !result.synced_lyrics.is_empty() || self.read_cache::<LyricsResult>("lyrics", &key, 30 * 60).is_some() { return Ok(result); }
         }
+        // Step 1: Exact query on LRCLIB
         let url = format!("https://lrclib.net/api/get?track_name={}&artist_name={}&album_name={}&duration={duration}", encode(title.trim()), encode(artist.trim()), encode(album.trim()));
-        let result = match net::get(&url) {
-            Ok(body) => parse_lyrics(&body)?,
-            Err(error) if error == "Layanan mengembalikan HTTP 404." => LyricsResult::default(),
-            Err(error) => return Err(error),
+        let mut result = match net::get(&url) {
+            Ok(body) => parse_lyrics(&body).unwrap_or_default(),
+            Err(_) => LyricsResult::default(),
         };
+        // Step 2: Search LRCLIB without strict duration/album constraint
+        if result.synced_lyrics.is_empty() && result.plain_lyrics.is_empty() && !result.instrumental {
+            let search_url = format!("https://lrclib.net/api/search?track_name={}&artist_name={}", encode(title.trim()), encode(artist.trim()));
+            if let Ok(search_body) = net::get(&search_url) {
+                if let Some(search_res) = parse_lyrics_search(&search_body) {
+                    result = search_res;
+                }
+            }
+        }
+        // Step 3: YouTube captions fallback only if allowed (browser / YouTube media)
+        if allow_youtube && result.synced_lyrics.is_empty() && result.plain_lyrics.is_empty() && !result.instrumental {
+            if let Ok(yt_res) = crate::youtube::fetch_captions(title.trim(), artist.trim(), duration as f64) {
+                if !yt_res.synced_lyrics.is_empty() || !yt_res.plain_lyrics.is_empty() {
+                    result = yt_res;
+                }
+            }
+        }
         net::check_cancel()?;let _ = self.write_cache("lyrics", &key, &result);
         Ok(result)
     }
@@ -248,9 +269,37 @@ fn parse_weather(body: &[u8]) -> Result<WeatherReport, String> {
 fn parse_lyrics(body: &[u8]) -> Result<LyricsResult, String> {
     let value = json_response(body)?;
     if !value.is_object() { return Err("Respons lirik tidak valid.".into()); }
-    let result = LyricsResult { plain_lyrics: value["plainLyrics"].as_str().unwrap_or("").to_owned(), synced_lyrics: value["syncedLyrics"].as_str().unwrap_or("").to_owned(), instrumental: value["instrumental"].as_bool().unwrap_or(false) };
+    let result = LyricsResult { plain_lyrics: value["plainLyrics"].as_str().unwrap_or("").to_owned(), synced_lyrics: value["syncedLyrics"].as_str().unwrap_or("").to_owned(), instrumental: value["instrumental"].as_bool().unwrap_or(false), is_youtube: false };
     if result.plain_lyrics.len() > 1024 * 1024 || result.synced_lyrics.len() > 1024 * 1024 { return Err("Lirik melebihi batas ukuran.".into()); }
     Ok(result)
+}
+
+fn parse_lyrics_search(body: &[u8]) -> Option<LyricsResult> {
+    let value = json_response(body).ok()?;
+    let items = value.as_array()?;
+    let mut candidate = None;
+    for item in items {
+        let synced = item["syncedLyrics"].as_str().unwrap_or("").to_owned();
+        let plain = item["plainLyrics"].as_str().unwrap_or("").to_owned();
+        let instrumental = item["instrumental"].as_bool().unwrap_or(false);
+        if !synced.is_empty() {
+            return Some(LyricsResult {
+                plain_lyrics: plain,
+                synced_lyrics: synced,
+                instrumental,
+                is_youtube: false,
+            });
+        }
+        if candidate.is_none() && (!plain.is_empty() || instrumental) {
+            candidate = Some(LyricsResult {
+                plain_lyrics: plain,
+                synced_lyrics: synced,
+                instrumental,
+                is_youtube: false,
+            });
+        }
+    }
+    candidate
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -334,7 +383,7 @@ mod tests {
         assert!(fresh(1000, 1029, 30)); assert!(!fresh(1000, 1030, 30)); assert!(!fresh(1001, 1000, 30));
         let root = std::env::temp_dir().join(format!("notch-cache-test-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
         let service = OnlineService::new(root.clone());
-        service.write_cache("lyrics", "fixture", &LyricsResult { plain_lyrics:"hello".into(),synced_lyrics:"".into(),instrumental:false }).unwrap();
+        service.write_cache("lyrics", "fixture", &LyricsResult { plain_lyrics:"hello".into(),synced_lyrics:"".into(),instrumental:false, is_youtube: false }).unwrap();
         assert_eq!(service.read_cache::<LyricsResult>("lyrics","fixture",30).unwrap().plain_lyrics,"hello");
         assert!(service.read_cache::<LyricsResult>("lyrics","other",30).is_none());
         let path=cache_path(&root,"lyrics","fixture");fs::write(path,"invalid JSON").unwrap();assert!(service.read_cache::<LyricsResult>("lyrics","fixture",30).is_none());

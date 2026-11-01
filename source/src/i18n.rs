@@ -26,6 +26,22 @@ pub fn tab_name<'a>(tab: &'a str, lang: &str) -> &'a str {
     }
 }
 
+pub fn mod_name<'a>(id: &str, raw_name: &'a str, lang: &str) -> &'a str {
+    let en = lang == "en";
+    match id {
+        "daya" => if en { "Power" } else { "Daya" },
+        "weather" => if en { "Weather" } else { "Prakiraan Cuaca" },
+        "sticky_notes" => if en { "Quick Sticky Notes" } else { "Catatan Cepat" },
+        _ => {
+            if raw_name == "Daya" {
+                if en { "Power" } else { "Daya" }
+            } else {
+                raw_name
+            }
+        }
+    }
+}
+
 pub fn month_name(month: u32, lang: &str) -> &'static str {
     let en = lang == "en";
     match month {
@@ -557,7 +573,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "weather.presets" => if en { "Quick Presets:" } else { "Pilihan Cepat:" },
         "stage1.weather" => if en { "Weather" } else { "Cuaca" },
 
-        "mod.daya.name" => if en { "Power & Electricity Monitor" } else { "Monitor Daya & Listrik" },
+        "mod.daya.name" => if en { "Power" } else { "Daya" },
         "mod.daya.description" => if en { "Real-time PC power consumption (Watt) and monthly PLN electricity cost accumulation" } else { "Estimasi konsumsi daya PC (Watt) dan akumulasi biaya listrik bulanan PLN" },
 
         "power.header" => if en { "SYSTEM POWER TELEMETRY" } else { "TELEMETRI DAYA SISTEM" },
@@ -839,5 +855,7 @@ fn test_tab_names_translation() {
         assert_eq!(tab_name("Clipboard", "en"), "Clipboard");
         assert_eq!(tab_name("Daya", "id"), "Daya");
         assert_eq!(tab_name("Daya", "en"), "Power");
+        assert_eq!(mod_name("daya", "Daya", "id"), "Daya");
+        assert_eq!(mod_name("daya", "Daya", "en"), "Power");
     }
 }

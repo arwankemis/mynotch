@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.0.2.2] - 2026-11-01
+
+This release delivers borderless fullscreen gaming focus protections, YouTube timedtext caption fallback for synchronized lyrics with intelligent line wrapping, extended hardware telemetry (CPU, GPU, RAM, multi-drive storage) in the Power mod, custom media player iconography, and bilingual UI refinements.
+
+### Added
+- **YouTube Captions Fallback:** Added synchronized lyrics fetching from YouTube timedtext captions when songs are not indexed on LRCLIB. Includes a browser window heuristic to ensure captions only query when YouTube media playback is active.
+- **Lyric Line Splitting (`split_long_lines`):** Lyric lines exceeding 40 characters are automatically split across word boundaries with smooth, interpolated timestamps to prevent text truncation on compact notch displays.
+- **RAM & Hardware Load Telemetry:** Extended system telemetry to monitor RAM utilization (used/total GB and percentage) via `GlobalMemoryStatusEx`, CPU total load, and GPU load with responsive sub-metric progress bars in the Power mod.
+- **Interactive Multi-Drive Storage Dropdown:** Added an interactive drive selector overlay displaying per-partition storage usage (`A:`-`Z:`) with storage progress bars, viewport clamping, and non-blocking asynchronous disk sampling guarded against offline media errors.
+- **Dedicated Media Icons:** Added native vector icons for VLC Media Player and YouTube / YouTube Music in Stage 1 playback pills alongside Spotify.
+- **Rounded Artwork Rendering (`cover_rounded`):** Render album art with smooth rounded geometric corner clipping via Direct2D layer masks.
+- **Bilingual Interface Localization (EN / ID):** Full English and Indonesian localization across mod catalog titles ("Power" / "Daya"), tab headers, hardware sensor telemetry notices, and gauge units.
+
+### Fixed
+- **Borderless Gaming Focus & Fullscreen Detection (`WS_EX_NOACTIVATE`):**
+  - Added `WS_EX_NOACTIVATE` window style so the notch never intercepts keyboard or mouse control from active games.
+  - Rewrote borderless fullscreen detection (`is_borderless_fullscreen_rect`) to identify borderless windowed games, anti-DirectFlip margins (e.g. 1-2px variations), and custom resolution viewports while keeping normal maximized desktop application windows accessible.
+- **Multi-Core CPU Load Spike:** Updated the companion power provider (`Program.cs`) to prioritize `CPU Total` load sensors over single-core spikes (`CPU Core #1`).
+- **UI Thread Freezing on Storage Queries:** Offloaded multi-drive filesystem inspection to an asynchronous background worker (`self.job("Storage", ...)`), eliminating frame drops on slow or spinning hard drives.
+- **Stage 1 Power Tab Persistence:** Excluded the Power / Daya tab from the 5-second calendar auto-revert timeout, allowing continuous hardware monitoring on Stage 1.
+- **Weather Refresh Timestamp:** Displays the actual timestamp when the forecast was fetched (`weather_fetched_time`) rather than the meteorological slot time.
+- **Redundant Back Button Removal:** Removed the duplicate in-page back button on the Privacy Indicator settings sub-page, consolidating navigation to the header back button and adjusting scroll height boundaries.
+
+---
+
+## [0.0.2.1] - 2026-10-31
+
+This release resolves weather refresh caching and multi-monitor alignment, reinforces in-app auto-updater transactions, and stabilizes Direct2D WinRT threading apartments.
+
+### Added
+- **Live Weather Manual Refresh:** Manual refresh, coordinates update, and city preset selection force an immediate live forecast fetch from Open-Meteo, bypassing the disk cache with visual loading indicators.
+- **Stage 1 Weather Auto-Revert:** Switching to Weather displays the forecast on Stage 1 for 5 seconds before returning to the calendar view.
+
+### Fixed
+- **In-App Updater Verification:** Enforced SHA-256 digest validation before staging and extraction, hardened crash-safe helper swaps with automatic transaction rollbacks, and strengthened archive directory traversal protections.
+- **Multi-Monitor & DPI Alignment:** Corrected screen boundary calculations and notch positioning across secondary monitors and mixed DPI setups.
+- **Direct2D / WinRT Apartment Stabilization:** Linked threading apartment initialization directly for robust Direct2D and WASAPI startup across Windows toolchains.
+- **Reminder Cleanup:** Removed obsolete phantom eye reminder timer.
+
+---
+
 ## [0.0.2] - 2026-10-31
 
 This release delivers security hardening, network sandboxing for community extensions, clipboard privacy improvements, UI responsiveness enhancements, and reliability safeguards.

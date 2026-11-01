@@ -91,6 +91,45 @@ pub fn apply_readings(snapshot:&mut PowerSnapshot,readings:&[SensorReading],prov
         snapshot.provider_note=Some(format!("{provider} · subtotal sensor CPU/GPU, bukan daya total PC/stopkontak"));
     }else{snapshot.provider_note=Some(format!("{provider} terdeteksi, tetapi sensor watt CPU/GPU tidak tersedia."));}
 }
+
+pub fn localize_provider_note(raw: &str, lang: &str) -> String {
+    if lang == "en" {
+        if raw.contains("Sensor bawaan") || raw.contains("subtotal CPU/GPU") {
+            "Built-in sensor · CPU/GPU subtotal, not full PC power".to_string()
+        } else if raw.contains("Memerlukan driver WinRing0") {
+            "Requires WinRing0 driver; run power sensor installation".to_string()
+        } else if raw.contains("Perlu hak administrator") {
+            "Administrator privileges required to read CPU power sensor".to_string()
+        } else if raw.contains("tidak ditemukan") {
+            "CPU/GPU power sensor not found on this device".to_string()
+        } else if raw.contains("Mendeteksi") {
+            "Detecting hardware and power sensors…".to_string()
+        } else if raw.contains("belum memberikan data baru") {
+            "Built-in sensor reader has not provided new data; reconnecting…".to_string()
+        } else if raw.contains("Memperbarui sensor") {
+            "Updating sensors…".to_string()
+        } else if raw.contains("tidak merespons") {
+            "Sensor provider not responding; no new power measurements.".to_string()
+        } else if raw.contains("Estimasi lama") {
+            "Legacy estimate, not hardware sensor".to_string()
+        } else if raw.contains("bukan daya total") {
+            "Sensor subtotal, not total PC/wall power".to_string()
+        } else if raw.contains("Pembaca sensor bawaan gagal") {
+            "Built-in sensor reader failed; try re-enabling Power mod".to_string()
+        } else if raw.contains("Sensor watt belum tersedia") {
+            "Watt sensor not yet available.".to_string()
+        } else if raw.contains("Status sensor daya tidak diketahui") {
+            "Power sensor status unknown".to_string()
+        } else if raw.contains("tidak tersedia") {
+            "Watt sensor not available on this device.".to_string()
+        } else {
+            raw.to_string()
+        }
+    } else {
+        raw.to_string()
+    }
+}
+
 #[cfg(test)]mod tests{
     use super::*;
     #[test]fn stalled_sensor_snapshot_cannot_keep_integrating_cached_watts(){

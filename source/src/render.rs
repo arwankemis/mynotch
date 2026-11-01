@@ -428,7 +428,7 @@ impl Painter {
             }
         }
     }}
-    pub unsafe fn icon_media_app(&mut self,cx:f32,cy:f32,source_app:&str,playing:bool){unsafe{
+    pub unsafe fn icon_media_app(&mut self,cx:f32,cy:f32,source_app:&str,is_youtube:bool,playing:bool){unsafe{
         let app=source_app.to_lowercase();
         let r=8.0;let d=16.0;
         let left=cx-r;let top=cy-r;
@@ -453,6 +453,61 @@ impl Painter {
 
                     self.brush.SetColor(&color(0x000000,1.0));
                     self.context.DrawGeometry(&path,&self.brush,1.4,None);
+                }
+            }
+        }else if app.contains("vlc") || app.contains("videolan"){
+            // VLC media player: traffic cone on dark disc
+            self.fill(left,top,d,d,r,0x1a1a1e);
+            self.fill(cx-4.5,cy+4.0,9.0,2.0,1.0,0xff8800);
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx-1.2,cy-5.5),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(pt(cx+1.2,cy-5.5));
+                    sink.AddLine(pt(cx+3.8,cy+4.2));
+                    sink.AddLine(pt(cx-3.8,cy+4.2));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    let _=sink.Close();
+                    self.brush.SetColor(&color(0xff8800,1.0));
+                    self.context.FillGeometry(&path,&self.brush,None);
+                }
+            }
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx-1.8,cy-1.8),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(pt(cx+1.8,cy-1.8));
+                    sink.AddLine(pt(cx+2.3,cy-0.2));
+                    sink.AddLine(pt(cx-2.3,cy-0.2));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    let _=sink.Close();
+                    self.brush.SetColor(&color(0xffffff,1.0));
+                    self.context.FillGeometry(&path,&self.brush,None);
+                }
+            }
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx-2.7,cy+1.2),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(pt(cx+2.7,cy+1.2));
+                    sink.AddLine(pt(cx+3.3,cy+2.8));
+                    sink.AddLine(pt(cx-3.3,cy+2.8));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    let _=sink.Close();
+                    self.brush.SetColor(&color(0xffffff,1.0));
+                    self.context.FillGeometry(&path,&self.brush,None);
+                }
+            }
+            self.fill(cx-1.0,cy-6.0,2.0,1.6,1.0,0xff8800);
+        }else if is_youtube || app.contains("youtube") || app.contains("ytm") {
+            // YouTube / YouTube Music: Red circle with white play triangle
+            self.fill(left,top,d,d,r,0xff0000);
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx-2.2,cy-3.6),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(pt(cx+3.4,cy));
+                    sink.AddLine(pt(cx-2.2,cy+3.6));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    let _=sink.Close();
+                    self.brush.SetColor(&color(0xffffff,1.0));
+                    self.context.FillGeometry(&path,&self.brush,None);
                 }
             }
         }else if app.contains("chrome")||app.contains("google"){
@@ -579,13 +634,103 @@ impl Painter {
     }}
     pub fn clear_weather_icons(&mut self){self.weather_icons=[None,None];self.weather_gradient=None;}
     pub unsafe fn cover(&mut self,art:Option<&crate::artwork::Artwork>,key:u64,x:f32,y:f32,size:f32,glow:bool)->bool{unsafe{
-        if self.artwork_key!=key{self.artwork=None;self.artwork_key=key;
-            if let Some(art)=art{let props=D2D1_BITMAP_PROPERTIES1{pixelFormat:D2D1_PIXEL_FORMAT{format:DXGI_FORMAT_B8G8R8A8_UNORM,alphaMode:D2D1_ALPHA_MODE_PREMULTIPLIED},dpiX:96.,dpiY:96.,bitmapOptions:D2D1_BITMAP_OPTIONS_NONE,colorContext:std::mem::ManuallyDrop::new(None)};self.artwork=self.context.CreateBitmap(D2D_SIZE_U{width:art.width,height:art.height},Some(art.pixels.as_ptr().cast()),art.width*4,&props).ok();}}
-        if let(Some(bitmap),Some(art))=(&self.artwork,art){
-            if glow{for i in (1..=14).rev(){let spread=i as f32*1.6;self.brush.SetColor(&color(art.accent,0.032));self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x-spread,y-spread,size+spread*2.,size+spread*2.),radiusX:14.+spread,radiusY:14.+spread},&self.brush);}}
-            let target=rect(x,y,size,size);
-            let _=self.context.DrawBitmap(bitmap,Some(&target),1.,D2D1_INTERPOLATION_MODE_LINEAR,None,None);true
-        }else{false}
+        if art.is_none() || key == 0 {
+            self.artwork = None;
+            self.artwork_key = 0;
+            return false;
+        }
+        if self.artwork_key != key || self.artwork.is_none() {
+            self.artwork = None;
+            self.artwork_key = key;
+            if let Some(art) = art {
+                let props = D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
+                    dpiX: 96., dpiY: 96., bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+                    colorContext: std::mem::ManuallyDrop::new(None),
+                };
+                self.artwork = self.context.CreateBitmap(D2D_SIZE_U { width: art.width, height: art.height }, Some(art.pixels.as_ptr().cast()), art.width * 4, &props).ok();
+            }
+        }
+        if let (Some(bitmap), Some(art)) = (&self.artwork, art) {
+            if glow {
+                for i in (1..=14).rev() {
+                    let spread = i as f32 * 1.6;
+                    self.brush.SetColor(&color(art.accent, 0.032));
+                    self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: rect(x - spread, y - spread, size + spread * 2., size + spread * 2.), radiusX: 14. + spread, radiusY: 14. + spread }, &self.brush);
+                }
+            }
+            let target = rect(x, y, size, size);
+            let _ = self.context.DrawBitmap(bitmap, Some(&target), 1., D2D1_INTERPOLATION_MODE_LINEAR, None, None);
+            true
+        } else {
+            false
+        }
+    }}
+    #[allow(dead_code)]
+    pub unsafe fn cover_rounded(&mut self, art: Option<&crate::artwork::Artwork>, key: u64, x: f32, y: f32, size: f32, radius: f32) -> bool { unsafe {
+        if art.is_none() || key == 0 {
+            self.artwork = None;
+            self.artwork_key = 0;
+            return false;
+        }
+        if self.artwork_key != key || self.artwork.is_none() {
+            self.artwork = None;
+            self.artwork_key = key;
+            if let Some(art) = art {
+                let props = D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    dpiX: 96.,
+                    dpiY: 96.,
+                    bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+                    colorContext: std::mem::ManuallyDrop::new(None),
+                };
+                self.artwork = self.context.CreateBitmap(
+                    D2D_SIZE_U { width: art.width, height: art.height },
+                    Some(art.pixels.as_ptr().cast()),
+                    art.width * 4,
+                    &props,
+                ).ok();
+            }
+        }
+        if let (Some(bitmap), Some(_art)) = (&self.artwork, art) {
+            let target = rect(x, y, size, size);
+            if radius > 0.0 {
+                let rounded = D2D1_ROUNDED_RECT { rect: target, radiusX: radius, radiusY: radius };
+                if let Ok(geom) = self.d2d.CreateRoundedRectangleGeometry(&rounded) {
+                    let depth = self.layers as usize;
+                    if depth < self.layer_pool.len() {
+                        if self.layer_pool[depth].is_none() {
+                            self.layer_pool[depth] = self.context.CreateLayer(None).ok();
+                        }
+                        if let Some(layer) = self.layer_pool[depth].clone() {
+                            let geom_base: ID2D1Geometry = geom.into();
+                            let params = D2D1_LAYER_PARAMETERS1 {
+                                contentBounds: target,
+                                geometricMask: std::mem::ManuallyDrop::new(Some(geom_base)),
+                                maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                maskTransform: windows_numerics::Matrix3x2 { M11: 1., M12: 0., M21: 0., M22: 1., M31: 0., M32: 0. },
+                                opacity: 1.,
+                                opacityBrush: std::mem::ManuallyDrop::new(None),
+                                layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+                            };
+                            self.context.PushLayer(&params, &layer);
+                            let _ = self.context.DrawBitmap(bitmap, Some(&target), 1., D2D1_INTERPOLATION_MODE_LINEAR, None, None);
+                            self.context.PopLayer();
+                            self.brush.SetColor(&color(0xffffff, 0.15));
+                            self.context.DrawRoundedRectangle(&rounded, &self.brush, 0.75, None);
+                            return true;
+                        }
+                    }
+                }
+            }
+            let _ = self.context.DrawBitmap(bitmap, Some(&target), 1., D2D1_INTERPOLATION_MODE_LINEAR, None, None);
+            true
+        } else {
+            false
+        }
     }}
     pub unsafe fn text(&mut self,text:&str,x:f32,y:f32,width:f32,height:f32,size:f32,rgb:u32,bold:bool){unsafe{
         let key=((size*10.)as u32,bold);

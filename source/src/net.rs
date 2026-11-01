@@ -188,7 +188,7 @@ fn winhttp_request(method: &str, url: &HttpsUrl, headers: &[(&str, &str)], body:
         match receiver.recv_timeout(Duration::from_millis(25)){Ok((0x200000,code))=>return Err(format!("Koneksi HTTPS gagal (Windows {code}).")),Ok((status,amount))if status==expected=>return Ok(amount),Ok(_)=>{},Err(mpsc::RecvTimeoutError::Timeout)=>{},Err(_)=>return Err("Koneksi HTTPS telah ditutup.".into())}
     }}
     unsafe {
-        let agent = wide("mynotch/0.0.2.1");
+        let agent = wide("mynotch/0.0.2.2");
         let session = Owned(WinHttpOpen(agent.as_ptr(), 4, ptr::null(), ptr::null(), 0x10000000));
         if session.0.is_null() { return Err(error("membuka sesi")); }
         if WinHttpSetTimeouts(session.0, 10000, 10000, 10000, 10000) == 0 { return Err(error("mengatur timeout")); }

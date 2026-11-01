@@ -44,6 +44,9 @@ pub struct LuaMetricItem {
     pub label: String,
     pub value: String,
     pub unit: Option<String>,
+    pub progress: Option<f32>,
+    pub percent: Option<f32>,
+    pub has_dropdown: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -453,7 +456,21 @@ pub fn run_lua_mod_source_capabilities(
                                     let value = value_to_string(item_tbl.get(ctx, "value"));
                                     let unit_val = item_tbl.get(ctx, "unit");
                                     let unit = if !unit_val.is_nil() { Some(value_to_string(unit_val)) } else { None };
-                                    items.push(LuaMetricItem { label, value, unit });
+                                    let progress = match item_tbl.get(ctx, "progress") {
+                                        Value::Number(n) => Some(n as f32),
+                                        Value::Integer(i) => Some(i as f32),
+                                        _ => None,
+                                    };
+                                    let percent = match item_tbl.get(ctx, "percent") {
+                                        Value::Number(n) => Some(n as f32),
+                                        Value::Integer(i) => Some(i as f32),
+                                        _ => None,
+                                    };
+                                    let has_dropdown = match item_tbl.get(ctx, "has_dropdown") {
+                                        Value::Boolean(b) => b,
+                                        _ => false,
+                                    };
+                                    items.push(LuaMetricItem { label, value, unit, progress, percent, has_dropdown });
                                 }
                             }
                         }
@@ -651,6 +668,7 @@ pub fn run_lua_mod_source_capabilities(
                                 };
                                 let _ = tbl.set(ctx, "source_kind", Value::String(ctx.intern(kind_str.as_bytes())));
                                 let _ = tbl.set(ctx, "quality", Value::String(ctx.intern(qual_str.as_bytes())));
+                                let _ = tbl.set(ctx, "language", Value::String(ctx.intern(snap.language.as_bytes())));
                                 if let Some(w) = snap.active_power_w {
                                     let clean = (w as f64 * 1000.0).round() / 1000.0;
                                     let _ = tbl.set(ctx, "active_power_w", Value::Number(clean));
@@ -676,7 +694,19 @@ pub fn run_lua_mod_source_capabilities(
                                     let _ = tbl.set(ctx, "monthly_cost_idr", Value::Number(clean));
                                 }
                                 for (key,value) in [("cpu_name",snap.cpu_name.as_deref()),("gpu_name",snap.gpu_name.as_deref()),("provider_note",snap.provider_note.as_deref())]{if let Some(v)=value{let _=tbl.set(ctx,key,Value::String(ctx.intern(v.as_bytes())));}}
-                                for (key,value) in [("cpu_watts",snap.cpu_watts),("gpu_watts",snap.gpu_watts),("today_kwh",snap.today_kwh)]{if let Some(v)=value{let _=tbl.set(ctx,key,Value::Number(v as f64));}}
+                                for (key,value) in [("cpu_watts",snap.cpu_watts),("gpu_watts",snap.gpu_watts),("today_kwh",snap.today_kwh),("cpu_usage",snap.cpu_usage),("gpu_usage",snap.gpu_usage),("ram_usage",snap.ram_usage),("ram_used_gb",snap.ram_used_gb),("ram_total_gb",snap.ram_total_gb),("storage_usage",snap.storage_usage),("storage_used_gb",snap.storage_used_gb),("storage_total_gb",snap.storage_total_gb)]{if let Some(v)=value{let _=tbl.set(ctx,key,Value::Number(v as f64));}}
+                                if !snap.storage_drives.is_empty() {
+                                    let drives_tbl = Table::new(&ctx);
+                                    for (idx, drive) in snap.storage_drives.iter().enumerate() {
+                                        let d_tbl = Table::new(&ctx);
+                                        let _ = d_tbl.set(ctx, "letter", Value::String(ctx.intern(drive.letter.as_bytes())));
+                                        let _ = d_tbl.set(ctx, "total_gb", Value::Number(drive.total_gb as f64));
+                                        let _ = d_tbl.set(ctx, "used_gb", Value::Number(drive.used_gb as f64));
+                                        let _ = d_tbl.set(ctx, "percent", Value::Number(drive.percent as f64));
+                                        let _ = drives_tbl.set(ctx, (idx + 1) as i64, Value::Table(d_tbl));
+                                    }
+                                    let _ = tbl.set(ctx, "storage_drives", Value::Table(drives_tbl));
+                                }
                                 let _=tbl.set(ctx,"current_year",Value::Integer(chrono::Datelike::year(&chrono::Local::now())as i64));
                                 let _ = tbl.set(ctx, "is_active", Value::Boolean(true));
                                 res = Value::Table(tbl);
@@ -690,6 +720,26 @@ pub fn run_lua_mod_source_capabilities(
             Ok(CallbackReturn::Return)
         });
         sys_table.set(ctx, "power_snapshot", cb_power_snapshot)?;
+
+        let cb_language = Callback::from_fn(&ctx, |ctx, _, mut stack| {
+            let state_val = ctx.get_global("__mod_state");
+            let mut res = Value::String(ctx.intern(b"id"));
+            if let Value::UserData(ud) = state_val {
+                if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
+                    if let Ok(st) = arc_state.lock() {
+                        if let Some(snap) = &st.power_snapshot {
+                            if !snap.language.is_empty() {
+                                res = Value::String(ctx.intern(snap.language.as_bytes()));
+                            }
+                        }
+                    }
+                }
+            }
+            stack.clear();
+            stack.push_back(res);
+            Ok(CallbackReturn::Return)
+        });
+        sys_table.set(ctx, "language", cb_language)?;
 
         // system.power_history(year) -> array table or nil (requires power.read)
         let cb_power_history = Callback::from_fn(&ctx, |ctx, _, mut stack| {

@@ -15,7 +15,8 @@ impl Shell {
 
             "Daya" => {
                 if !self.draw_mod_tab(p) {
-                    p.text("Pasang atau aktifkan Mod Daya dari Pengaturan → Mod & Ekstensi.",24.,76.,self.width-48.,66.,13.,render::TEXT,false);
+                    let msg = if self.settings.language == "en" { "Install or enable the Power mod from Settings → Mods & Extensions." } else { "Pasang atau aktifkan Mod Daya dari Pengaturan → Mod & Ekstensi." };
+                    p.text(msg, 24., 76., self.width - 48., 66., 13., render::TEXT, false);
                 }
             }
             _=>{
@@ -55,7 +56,7 @@ impl Shell {
         p.text_ellipsis(title,94.,44.,self.width-138.,18.,14.,0xffffff,true);
 
         // Media source app icon (Spotify, etc) placed at far right of title row
-        p.icon_media_app(self.width-28.,52.,&self.track.source_app,self.track.playing);
+        p.icon_media_app(self.width-28.,52.,&self.track.source_app,self.track_is_youtube,self.track.playing);
 
         // Artist (12px #9ea3a8)
         let default_artist = crate::i18n::t("music.no_artist", &lang);
@@ -163,7 +164,7 @@ impl Shell {
         let default_title = crate::i18n::t("music.no_music", &lang);
         let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
         p.text_ellipsis(title,94.,44.,120.,18.,14.,0xffffff,true);
-        p.icon_media_app(224.,52.,&self.track.source_app,self.track.playing);
+        p.icon_media_app(224.,52.,&self.track.source_app,self.track_is_youtube,self.track.playing);
 
         let default_artist = crate::i18n::t("music.no_artist", &lang);
         let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
@@ -928,7 +929,7 @@ impl Shell {
     }}
 
     pub(super) fn action(&mut self,action:Action){
-        let transient=matches!(&action,Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings);
+        let transient=matches!(&action,Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings|Action::ToggleStorageDropdown|Action::KeepStorageDropdown);
         match action{
 
             Action::VolumeStep(step)=>self.action(Action::MasterVolumeStep(step)),
@@ -972,6 +973,7 @@ impl Shell {
                 self.stage1_media_until=None;
                 self.reminder_menu=None;
                 self.mod_view=None;
+                self.storage_dropdown_open=false;
                 if self.tab == tab && self.hover_stage >= 2 {
                     self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
                     self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
@@ -1205,6 +1207,18 @@ impl Shell {
                 }
                 self.invalidate();
             },
+            Action::KeepStorageDropdown => {},
+            Action::ToggleStorageDropdown => {
+                self.storage_dropdown_open = !self.storage_dropdown_open;
+                if self.storage_dropdown_open && self.last_storage_tick.is_none_or(|t| t.elapsed() >= Duration::from_secs(5)) && !self.jobs.contains_key("Storage") {
+                    self.last_storage_tick = Some(Instant::now());
+                    self.job("Storage", || {
+                        let (st_pct, st_used, st_total, drives) = crate::system::sample_system_storage();
+                        super::Event::Storage(st_pct, st_used, st_total, drives)
+                    });
+                }
+                self.invalidate();
+            },
             Action::SettingsMenu(key,x,y,w)=>self.open_settings_menu(key,x,y,w),
             Action::SettingsValue(key,value)=>{self.apply_settings_value(key,value);self.settings_popup=None;},
             Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}self.mod_view=None;self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.retarget_morph();self.start_morph_timer();self.make_inputs();self.update_window_region();},
@@ -1413,6 +1427,7 @@ impl Shell {
                 if self.clip_search_open {
                     if let Some(&edit_hwnd) = self.inputs.get(&60) {
                         unsafe {
+                            let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(self.inputs_hwnd);
                             let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(edit_hwnd));
                         }
                     }
@@ -1929,6 +1944,7 @@ impl Shell {
         };
 
         if permissions.iter().any(|p|p=="power.read"){history.extend(self.power_energy.history(chrono::Local::now().year()));}
+        self.power_snapshot.language = self.settings.language.clone();
         let mut script_bytes = std::fs::read(&script).unwrap_or_default();
         let digest=crate::update::crypto::Sha256::digest_hex(&script_bytes);
         if use_bundled_daya(&manifest.id,&manifest.publisher,script_bytes.is_empty(),&digest){script_bytes=include_bytes!("../../assets/mods/daya/main.lua").to_vec();}
@@ -1996,7 +2012,8 @@ impl Shell {
         let lang = self.settings.language.clone();
         self.draw_button(p, crate::i18n::t("mods.back", &lang), 18., 12., 92., 26., Action::CloseModView);
         p.outline_icon(&manifest.icon, 122., 16., 18., 0x6ee7b7);
-        p.text_ellipsis(&manifest.name, 148., 9., self.width - 166., 18., 13., render::TEXT, true);
+        let mod_title = crate::i18n::mod_name(&manifest.id, &manifest.name, &lang);
+        p.text_ellipsis(mod_title, 148., 9., self.width - 166., 18., 13., render::TEXT, true);
         let kind = match manifest.mod_type {
             crate::mods::ModType::Lua => "Lua",
             crate::mods::ModType::Declarative => "JSON",
@@ -2015,8 +2032,9 @@ impl Shell {
         if !self.settings.mod_tabs.iter().any(|t| t == &tab) { return false }
         let Some(manifest) = self.mods().into_iter().find(|m| m.tab_name == tab) else { return false };
         p.outline_icon(&manifest.icon, 24., 38., 20., 0x6ee7b7);
-        p.text_ellipsis(&manifest.name, 52., 34., self.width - 76., 18., 13., render::TEXT, true);
-        let description=if manifest.id=="daya"&&manifest.publisher=="mynotch"{"Sensor CPU/GPU · energi komponen teramati"}else{&manifest.description};
+        let mod_title = crate::i18n::mod_name(&manifest.id, &manifest.name, &self.settings.language);
+        p.text_ellipsis(mod_title, 52., 34., self.width - 76., 18., 13., render::TEXT, true);
+        let description=if manifest.id=="daya"&&manifest.publisher=="mynotch"{if self.settings.language=="en"{"CPU/GPU sensors · observed component energy"}else{"Sensor CPU/GPU · energi komponen teramati"}}else{&manifest.description};
         p.text_ellipsis(description, 52., 53., if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{self.width-262.}else{self.width-76.}, 14., 9.5, MUTED, false);
         if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{
             let label=if self.settings.language=="en"{"Set up CPU sensor"}else{"Siapkan sensor CPU"};
@@ -2167,28 +2185,65 @@ impl Shell {
         // 2. Metrics (2x2 grid)
         if let Some(metrics) = &output.metrics {
             let col_w = (metrics_w - 10.) / 2.;
-            let row_h = 44.;
+            let row_h = 46.;
 
             for (i, item) in metrics.items.iter().take(4).enumerate() {
                 let col = i % 2;
                 let row = i / 2;
                 let x = metrics_x + col as f32 * (col_w + 10.);
-                let y = top_y + 8. + row as f32 * (row_h + 8.);
+                let y = top_y + 6. + row as f32 * (row_h + 8.);
 
-                p.text_ellipsis(&item.label, x, y, col_w, 14., 10., 0xa0a0ad, false);
+                let mut label_w = col_w;
+                if item.has_dropdown {
+                    label_w -= 20.;
+                    let btn_x = x + col_w - 18.;
+                    let btn_y = y - 1.;
+                    let hover = self.pointer.is_some_and(|(px, py)| px >= btn_x - 2. && px <= btn_x + 20. && py >= btn_y - 2. && py <= btn_y + 18.);
+                    let btn_bg = if self.storage_dropdown_open { 0x3d4452 } else if hover { 0x2a2a36 } else { 0x1e1e28 };
+                    p.fill(btn_x, btn_y, 18., 16., 4., btn_bg);
+                    p.stroke(btn_x, btn_y, 18., 16., 4., if hover { 0x69d2e5 } else { 0x48485a }, 1.);
+                    let sym = if self.storage_dropdown_open { "−" } else { "+" };
+                    p.text_centered(sym, btn_x, btn_y - 1., 18., 16., 11., 0xf3f3f5, 1.0, true);
+                    self.hit(btn_x - 2., btn_y - 2., 22., 20., Action::ToggleStorageDropdown);
+                }
 
-                let val_y = y + 16.;
-                let value_size=if p.measure_text(&item.value,18.,true)>col_w{12.}else{18.};
-                p.text_ellipsis(&item.value, x, val_y, col_w, 22., value_size, 0xf3f3f5, true);
+                if let Some(pct) = item.percent {
+                    let pct_str = format!("{:.0}%", pct);
+                    let pct_w = p.measure_text(&pct_str, 10., false) + 4.;
+                    let pct_x = if item.has_dropdown { x + col_w - 22. - pct_w } else { x + col_w - pct_w };
+                    p.text(&pct_str, pct_x, y, pct_w, 14., 10., 0x69d2e5, false);
+                    label_w -= pct_w + 4.;
+                }
+
+                p.text_ellipsis(&item.label, x, y, label_w.max(20.), 14., 10., 0xa0a0ad, false);
+
+                let val_y = y + 15.;
+                let value_size = if p.measure_text(&item.value, 16., true) > col_w { 12. } else { 16. };
+                p.text_ellipsis(&item.value, x, val_y, col_w, 20., value_size, 0xf3f3f5, true);
 
                 if let Some(ref unit) = item.unit {
-                    let text_w = p.measure_text(&item.value, 18., true);
-                    p.text(unit, x + text_w + 4., val_y + 4., 30., 16., 11., 0xa0a0ad, false);
+                    let text_w = p.measure_text(&item.value, value_size, true);
+                    p.text(unit, x + text_w + 4., val_y + 2., 30., 16., 10., 0xa0a0ad, false);
+                }
+
+                // Thin bar underneath nominal value showing usage percentage
+                if let Some(prog) = item.progress {
+                    let bar_y = val_y + 21.;
+                    let bar_h = 3.0;
+                    let bar_w = col_w;
+                    p.fill(x, bar_y, bar_w, bar_h, 1.5, 0x22222e);
+                    let fill_w = (bar_w * prog.clamp(0.0, 1.0)).max(0.0);
+                    if fill_w > 0.0 {
+                        let bar_color = if prog >= 0.90 { 0xf87171 } else { 0x69d2e5 };
+                        p.fill(x, bar_y, fill_w, bar_h, 1.5, bar_color);
+                    }
                 }
             }
 
             if let Some(ref note) = metrics.note {
-                for (i,line) in super::settings::wrap_lines(p,note,metrics_w,10.5,2).iter().enumerate(){p.text(line,metrics_x,top_y+100.+i as f32*16.,metrics_w,16.,10.5,0xc5cedd,false);}
+                for (i,line) in super::settings::wrap_lines(p,note,metrics_w,10.5,2).iter().enumerate(){
+                    p.text(line,metrics_x,top_y+104.+i as f32*16.,metrics_w,16.,10.5,0xc5cedd,false);
+                }
             }
         }
 
@@ -2231,6 +2286,71 @@ impl Shell {
                     }
                     let val_str = format!("{}  ›", item.value);
                     p.text_centered(&val_str, self.width - margin - 140., y, 140., 18., 11., 0xb9becb, 1.0, false);
+                }
+            }
+        }
+
+        // Storage drives dropdown overlay (rendered in front of everything)
+        if self.storage_dropdown_open {
+            let drives = self.power_snapshot.storage_drives.clone();
+            let show_more = drives.len() > 5;
+            let visible_count = if show_more { 4 } else { drives.len() };
+            let total_rows = if drives.is_empty() { 1 } else if show_more { visible_count + 1 } else { visible_count };
+            let drop_w = 210.0_f32.min(content_w);
+            let drop_x = (metrics_x + metrics_w - drop_w).max(margin);
+            let drop_y = top_y + 106.;
+            let item_h = 32.0;
+            let drop_h = 14.0 + total_rows as f32 * item_h;
+
+            // Opaque backdrop to fully cover anything underneath
+            p.fill(drop_x - 1., drop_y - 1., drop_w + 2., drop_h + 2., 9., 0x0a0a10);
+            p.fill(drop_x, drop_y, drop_w, drop_h, 8., 0x161622);
+            p.stroke(drop_x, drop_y, drop_w, drop_h, 8., 0x444458, 1.);
+            self.hit(drop_x, drop_y, drop_w, drop_h, Action::KeepStorageDropdown);
+
+            if drives.is_empty() {
+                p.text(
+                    if self.settings.language == "en" { "No drives detected" } else { "Drive tidak terdeteksi" },
+                    drop_x + 10.,
+                    drop_y + 8.,
+                    drop_w - 20.,
+                    18.,
+                    10.,
+                    0xa0a0ad,
+                    false,
+                );
+            } else {
+                for (idx, drive) in drives.iter().take(visible_count).enumerate() {
+                    let dy = drop_y + 8. + idx as f32 * item_h;
+                    let label_text = format!("Drive {}", drive.letter);
+                    p.text_ellipsis(&label_text, drop_x + 10., dy, drop_w - 105., 15., 10., 0xf3f3f5, true);
+
+                    let stat_text = format!("{:.0}/{:.0} GB ({:.0}%)", drive.used_gb, drive.total_gb, drive.percent);
+                    let tw = p.measure_text(&stat_text, 9., false);
+                    p.text(&stat_text, drop_x + drop_w - 10. - tw, dy, tw + 2., 15., 9., 0xa0a0ad, false);
+
+                    // Mini drive bar
+                    let bar_x = drop_x + 10.;
+                    let bar_y = dy + 17.;
+                    let bar_w = drop_w - 20.;
+                    let bar_h = 2.5;
+                    p.fill(bar_x, bar_y, bar_w, bar_h, 1.25, 0x262638);
+                    let prog = (drive.percent / 100.0).clamp(0.0, 1.0);
+                    let fill_w = bar_w * prog;
+                    if fill_w > 0.0 {
+                        let bar_color = if prog >= 0.90 { 0xf87171 } else { 0x69d2e5 };
+                        p.fill(bar_x, bar_y, fill_w, bar_h, 1.25, bar_color);
+                    }
+                }
+                if show_more {
+                    let dy = drop_y + 8. + visible_count as f32 * item_h;
+                    let remaining = drives.len() - visible_count;
+                    let more_label = if self.settings.language == "en" {
+                        format!("+{remaining} other drive{}", if remaining > 1 { "s" } else { "" })
+                    } else {
+                        format!("+{remaining} drive lainnya")
+                    };
+                    p.text_ellipsis(&more_label, drop_x + 10., dy + 4., drop_w - 20., 16., 9.5, 0x888898, false);
                 }
             }
         }
@@ -2334,7 +2454,7 @@ fn format_rupiah(amount: u32) -> String {
 }
 
 const CALENDAR_LEAVE_DOT_X:f32=140.;
-fn use_bundled_daya(id:&str,publisher:&str,empty:bool,digest:&str)->bool{id=="daya"&&publisher=="mynotch"&&(empty||matches!(digest,"b684e22620aecd8f4a83d0fc4b6c19385d251e77657b67357e2ab3bb4b29f6e2"|"e3ea02fb30d315af59655a22993563ddf660e21d4ad6447fbbca0f5eaf00851c"|"b7e3c112b5a885d703d8d0829bb7997718906a3d28d770c7004bb0ad6b3b5bd7"))}
+fn use_bundled_daya(id:&str,publisher:&str,empty:bool,digest:&str)->bool{id=="daya"&&publisher=="mynotch"&&(empty||matches!(digest,"b684e22620aecd8f4a83d0fc4b6c19385d251e77657b67357e2ab3bb4b29f6e2"|"e3ea02fb30d315af59655a22993563ddf660e21d4ad6447fbbca0f5eaf00851c"|"b7e3c112b5a885d703d8d0829bb7997718906a3d28d770c7004bb0ad6b3b5bd7"|"f747479d62ebb9191f220cee81265fc9026f4414e44adb85087248f4d6afc5d2"|"d078d4fd3cadce06053b8f58ca2e8226ed9a8fe8cbf5f01ddbdd965bce7d9262"))}
 const CALENDAR_LEAVE_TEXT_X:f32=148.;
 #[cfg(test)]mod calendar_legend_tests{
 #[test]fn official_legacy_daya_upgrades_but_custom_scripts_stay_intact(){

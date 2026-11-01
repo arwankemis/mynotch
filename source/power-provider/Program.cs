@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 
 namespace Mynotch.Power;
 internal record Sample(string Name,float? Watts);
-internal record Frame(int Schema,string Backend,string? CpuName,string? GpuName,float? CpuWatts,float? GpuWatts,bool DriverInstalled,bool Elevated,bool SetupRequired,string Status);
+internal record Frame(int Schema,string Backend,string? CpuName,string? GpuName,float? CpuWatts,float? GpuWatts,bool DriverInstalled,bool Elevated,bool SetupRequired,string Status,float? GpuUsage=null,float? CpuUsage=null);
 internal static class Program{
  static readonly JsonSerializerOptions Json=new(){PropertyNamingPolicy=JsonNamingPolicy.SnakeCaseLower};
  const string DriverSha="A3A46226C5E2824F4CDD42BE0EECBABFC672C86F7889710F5AB1E6AD385B47A0";
@@ -23,6 +23,21 @@ internal static class Program{
   int Rank(string name){name=name.ToLowerInvariant();if(name.Contains("core")||name.Contains("memory"))return 0;if(name.Contains("board"))return 4;if(name.Contains("total"))return 3;if(name.Contains("package"))return 2;return gpu&&name=="gpu power"?1:0;}
   return samples.Where(s=>Valid(s.Watts)&&Rank(s.Name)>0).OrderByDescending(s=>Rank(s.Name)).Select(s=>s.Watts).FirstOrDefault();
  }
+ internal static float? PickLoad(IEnumerable<Sample> samples,bool gpu,bool updated=true){
+  if(!updated)return null;
+  int Rank(string name){
+   name=name.ToLowerInvariant();
+   if(gpu){
+    if(name=="gpu core"||name.Contains("total"))return 3;
+    if(name.Contains("3d")||name.Contains("core"))return 2;
+    return 0;
+   }
+   if(name.Contains("total"))return 3;
+   if(name.Contains("core"))return 2;
+   return 0;
+  }
+  return samples.Where(s=>s.Watts is >=0 and <=100&&float.IsFinite(s.Watts.Value)&&Rank(s.Name)>0).OrderByDescending(s=>Rank(s.Name)).Select(s=>s.Watts).FirstOrDefault();
+ }
  static IEnumerable<IHardware> Walk(IHardware h){yield return h;foreach(var child in h.SubHardware)foreach(var v in Walk(child))yield return v;}
  static Frame Read(Computer computer,bool elevated){
   var updated=new HashSet<IHardware>();
@@ -31,8 +46,10 @@ internal static class Program{
   var cpu=all.FirstOrDefault(h=>h.HardwareType==HardwareType.Cpu);
   var gpu=all.FirstOrDefault(h=>h.HardwareType is HardwareType.GpuAmd or HardwareType.GpuNvidia or HardwareType.GpuIntel);
   static IEnumerable<Sample> Power(IHardware? h)=>h?.Sensors.Where(s=>s.SensorType==SensorType.Power).Select(s=>new Sample(s.Name,s.Value))??[];
+  static IEnumerable<Sample> Loads(IHardware? h)=>h?.Sensors.Where(s=>s.SensorType==SensorType.Load).Select(s=>new Sample(s.Name,s.Value))??[];
   var cw=Pick(Power(cpu),false,cpu is not null&&updated.Contains(cpu));var gw=Pick(Power(gpu),true,gpu is not null&&updated.Contains(gpu));
-  return new(1,"librehardwaremonitor-0.9.6",cpu?.Name,gpu?.Name,cw,gw,DriverReady,elevated,cw is null&&!elevated,cw is not null&&gw is not null?"ready":cw is not null||gw is not null?"partial":"unavailable");
+  var cl=PickLoad(Loads(cpu),false,cpu is not null&&updated.Contains(cpu));var gl=PickLoad(Loads(gpu),true,gpu is not null&&updated.Contains(gpu));
+  return new(1,"librehardwaremonitor-0.9.6",cpu?.Name,gpu?.Name,cw,gw,DriverReady,elevated,cw is null&&!elevated,cw is not null&&gw is not null?"ready":cw is not null||gw is not null?"partial":"unavailable",gl,cl);
  }
  static async Task ReadCommands(){
   try{while(!Stop.IsCancellationRequested){var line=await Console.In.ReadLineAsync(Stop.Token);if(line is null)break;if(line=="cpu-admin"&&!Stop.IsCancellationRequested&&(AdminTask is null||AdminTask.IsCompleted)){SetupError=null;Volatile.Write(ref AdminFrame,null);Interlocked.Exchange(ref AdminAt,0);AdminTask=Task.Run(ReadElevated);}}}catch(OperationCanceledException){}finally{Stop.Cancel();}
@@ -91,7 +108,9 @@ internal static class Program{
   var writer=new StreamWriter(client){AutoFlush=true};var setupCalls=0;
   try{await InLiveSession(writer,()=>{setupCalls++;return Task.FromResult(true);});}catch(IOException){}finally{try{writer.Dispose();}catch(IOException){}}
   Check(setupCalls==0,"closed parent must prevent driver setup");
-  Console.WriteLine("6 provider contract checks passed");
+  Check(PickLoad([new("CPU Core #1",95),new("CPU Total",25)],false)==25,"CPU total load precedence over single core");
+  Check(PickLoad([new("GPU Video Engine",10),new("GPU Core",40)],true)==40,"GPU core load precedence");
+  Console.WriteLine("8 provider contract checks passed");
  }
  static async Task<int> Main(string[] args){
   if(args.Contains("--self-test")){await Test();return 0;}
@@ -104,7 +123,7 @@ internal static class Program{
    computer.Open();Read(computer,elevated);await Task.Delay(500);
    while(!Stop.IsCancellationRequested){
     var f=Read(computer,elevated);var af=Volatile.Read(ref AdminFrame);var fresh=af is not null&&Environment.TickCount64-Interlocked.Read(ref AdminAt)<=6000;
-    if(fresh){f=f with{CpuName=af!.CpuName??f.CpuName,CpuWatts=af.CpuWatts,DriverInstalled=af.DriverInstalled,SetupRequired=af.SetupRequired};}
+    if(fresh){f=f with{CpuName=af!.CpuName??f.CpuName,CpuWatts=af.CpuWatts,DriverInstalled=af.DriverInstalled,SetupRequired=af.SetupRequired,CpuUsage=af.CpuUsage??f.CpuUsage};}
     if(f.CpuWatts is not null&&f.GpuWatts is not null)f=f with{Status="ready"};
     else if(fresh&&af!.Status is "driver_setup_pending" or "driver_setup_cancelled")f=f with{Status=af.Status};
     else if(AdminTask is {IsCompleted:false}&&!fresh)f=f with{SetupRequired=false,Status="cpu_setup_pending"};

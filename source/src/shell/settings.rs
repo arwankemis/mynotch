@@ -15,7 +15,7 @@ pub(super) fn prayer_lead_summary_i18n(city:&str,lead:u32,lang:&str)->String{
 }
 impl Shell{
     fn settings_content_bottom(&self)->f32{match self.settings_cat{
-        0=>if self.settings_subpage_privacy{400.}else{370.},
+        0=>if self.settings_subpage_privacy{280.}else{370.},
         1=>414.,2=>116.+self.settings.settings_tab_order().len()as f32*36.,
         3=>300.,4=>354.,5=>420.,_=>self.height-20.
     }}

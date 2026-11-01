@@ -1,4 +1,4 @@
-﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod app;
 mod core;
 mod ui;
@@ -10,6 +10,7 @@ mod online;
 mod weather;
 mod weather_icons;
 mod lyrics;
+pub mod youtube;
 mod ical;
 mod render;
 mod artwork;

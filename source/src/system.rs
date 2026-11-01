@@ -576,6 +576,21 @@ mod tests {
     }
 
     #[test]
+    fn test_sample_system_storage_safe() {
+        let (pct, used, total, drives) = sample_system_storage();
+        if let (Some(p), Some(u), Some(t)) = (pct, used, total) {
+            assert!(p >= 0.0 && p <= 100.0);
+            assert!(u <= t);
+            assert!(!drives.is_empty());
+            for d in drives {
+                assert!(d.percent >= 0.0 && d.percent <= 100.0);
+                assert!(d.used_gb <= d.total_gb);
+                assert!(d.letter.ends_with(':'));
+            }
+        }
+    }
+
+    #[test]
     fn test_open_browser_url_valid() {
         assert!(is_openable_browser_url("https://github.com/arwankemis/mynotch"));
         assert!(is_openable_browser_url("https://example.com/a?x=1"));
@@ -724,6 +739,16 @@ pub struct PowerSnapshot {
     pub hourly_cost_idr: Option<f32>,
     pub daily_cost_idr: Option<f32>,
     pub monthly_cost_idr: Option<f32>,
+    #[serde(default)] pub cpu_usage: Option<f32>,
+    #[serde(default)] pub gpu_usage: Option<f32>,
+    #[serde(default)] pub ram_usage: Option<f32>,
+    #[serde(default)] pub ram_used_gb: Option<f32>,
+    #[serde(default)] pub ram_total_gb: Option<f32>,
+    #[serde(default)] pub storage_usage: Option<f32>,
+    #[serde(default)] pub storage_used_gb: Option<f32>,
+    #[serde(default)] pub storage_total_gb: Option<f32>,
+    #[serde(default)] pub storage_drives: Vec<DriveInfo>,
+    #[serde(default)] pub language: String,
 }
 
 impl Default for PowerSnapshot {
@@ -745,6 +770,105 @@ impl Default for PowerSnapshot {
             hourly_cost_idr: None,
             daily_cost_idr: None,
             monthly_cost_idr: None,
+            cpu_usage: None,
+            gpu_usage: None,
+            ram_usage: None,
+            ram_used_gb: None,
+            ram_total_gb: None,
+            storage_usage: None,
+            storage_used_gb: None,
+            storage_total_gb: None,
+            storage_drives: Vec::new(),
+            language: "id".to_string(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DriveInfo {
+    pub letter: String,
+    pub used_gb: f32,
+    pub total_gb: f32,
+    pub percent: f32,
+}
+
+pub fn sample_system_memory() -> (Option<f32>, Option<f32>, Option<f32>) {
+    unsafe {
+        use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut mem = MEMORYSTATUSEX {
+            dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+            ..Default::default()
+        };
+        if GlobalMemoryStatusEx(&mut mem).is_ok() {
+            let total_gb = (mem.ullTotalPhys as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
+            let avail_gb = (mem.ullAvailPhys as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
+            let used_gb = (total_gb - avail_gb).max(0.0);
+            let percent = mem.dwMemoryLoad as f32;
+            (Some(percent), Some(used_gb), Some(total_gb))
+        } else {
+            (None, None, None)
+        }
+    }
+}
+
+pub fn sample_system_storage() -> (Option<f32>, Option<f32>, Option<f32>, Vec<DriveInfo>) {
+    unsafe {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn SetErrorMode(u_mode: u32) -> u32;
+        }
+        const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+        let prev_mode = SetErrorMode(SEM_FAILCRITICALERRORS);
+
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives};
+        let mask = GetLogicalDrives();
+        let mut drives = Vec::new();
+        let mut sum_used_bytes: u64 = 0;
+        let mut sum_total_bytes: u64 = 0;
+
+        for i in 0..26 {
+            if (mask & (1 << i)) != 0 {
+                let letter_char = (b'A' + i as u8) as char;
+                let path_str = format!("{}:\\\0", letter_char);
+                let wide: Vec<u16> = path_str.encode_utf16().collect();
+                let dtype = GetDriveTypeW(PCWSTR(wide.as_ptr()));
+                if dtype == 2 || dtype == 3 || dtype == 6 {
+                    let mut free_avail = 0u64;
+                    let mut total = 0u64;
+                    let mut total_free = 0u64;
+                    if GetDiskFreeSpaceExW(
+                        PCWSTR(wide.as_ptr()),
+                        Some(&mut free_avail),
+                        Some(&mut total),
+                        Some(&mut total_free),
+                    ).is_ok() && total > 0 {
+                        let used = total.saturating_sub(total_free);
+                        let total_gb = (total as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
+                        let used_gb = (used as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
+                        let pct = ((used as f64 / total as f64) * 100.0) as f32;
+                        sum_used_bytes += used;
+                        sum_total_bytes += total;
+                        drives.push(DriveInfo {
+                            letter: format!("{}:", letter_char),
+                            used_gb,
+                            total_gb,
+                            percent: pct,
+                        });
+                    }
+                }
+            }
+        }
+        SetErrorMode(prev_mode);
+
+        if sum_total_bytes > 0 {
+            let total_gb = (sum_total_bytes as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
+            let used_gb = (sum_used_bytes as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
+            let pct = ((sum_used_bytes as f64 / sum_total_bytes as f64) * 100.0) as f32;
+            (Some(pct), Some(used_gb), Some(total_gb), drives)
+        } else {
+            (None, None, None, drives)
         }
     }
 }
@@ -778,6 +902,7 @@ pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
         hourly_cost_idr: Some(hourly_cost),
         daily_cost_idr: Some(daily_cost),
         monthly_cost_idr: Some(monthly_cost),
+        ..Default::default()
     }
 }
 

@@ -117,6 +117,7 @@ enum Action {
     SelectMod(String),BackModsList,OpenMod(String),CloseModView,RefreshMods,ToggleModTab(String),ToggleModNetwork(String),
     SetModKind(crate::mods::package::PackageKind),SetModFilter(crate::mods::catalog::CatalogFilter),ToggleModActive(String),
     PrivacyDetail,PrivacyClose,OpenWindowsMicSettings,OpenWindowsCameraSettings,OpenPrivacySettings,ClosePrivacySettings,
+    ToggleStorageDropdown,KeepStorageDropdown,
 }
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -144,6 +145,7 @@ enum Event {
     UpdateStaged(Result<(String, std::path::PathBuf), String>),
     ModHttp(String,Result<String,String>),
     Tws(Result<Option<crate::system::TwsInfo>,String>),
+    Storage(Option<f32>, Option<f32>, Option<f32>, Vec<crate::system::DriveInfo>),
 }
 
 #[allow(dead_code)]
@@ -152,6 +154,7 @@ pub(super) struct Shell {
 
     power_sensors:Option<crate::system::power_sensor::PowerSensors>,power_integrator:crate::mods::power_broker::EnergyIntegrator,power_epoch:Instant,power_day:String,power_energy:crate::mods::power_broker::ObservedEnergy,power_flushed:Instant,
     cpu_sampler:crate::system::CpuSampler,power_snapshot:crate::system::PowerSnapshot,last_power_tick:Instant,session_energy_kwh:f32,
+    last_storage_tick:Option<Instant>,cached_storage:(Option<f32>,Option<f32>,Option<f32>,Vec<crate::system::DriveInfo>),
     render_ready:bool,
     cover:Option<crate::artwork::Artwork>,cover_key:u64,preview_silent:bool,
     online:OnlineService,
@@ -163,12 +166,12 @@ pub(super) struct Shell {
     media:Option<MediaService>,track:MediaSnapshot,visualizer:Option<Visualizer>,levels:Vec<f32>,
     lyrics:Vec<crate::lyrics::LyricLine>,plain_lyrics:String,lyrics_key:String,lyric_offset:usize,lyrics_error:Option<String>,
     focus:FocusClock,breathing:Option<Instant>,last_water:Instant,last_move:Instant,last_eye:Instant,
-    toast:Option<ToastNotification>,queue:Arc<Mutex<Vec<Event>>>,fullscreen:bool,toast_from_stage0:bool,
+    toast:Option<ToastNotification>,queue:Arc<Mutex<Vec<Event>>>,fullscreen:bool,fullscreen_hwnd:Option<HWND>,toast_from_stage0:bool,
     last_clipboard_seq:u32,selected_clip:usize,clip_offset:usize,
     year:i32,month:u32,day:u32,system_date:NaiveDate,holidays:Vec<HolidayRecord>,agenda:Vec<CalendarEvent>,weather:Option<WeatherReport>,
     ai_messages:Vec<crate::online::ChatMessage>,busy:bool,todo_offset:usize,
     prayer_schedule:Option<crate::online::PrayerSchedule>,prayer_attempt:Option<(String,Instant)>,prayer_error:Option<String>,reminder_menu:Option<&'static str>,reminder_menu_cursor:usize,
-    reminder_index:usize,reminder_anim:Option<(f32,Instant)>,stretch_deadline:Option<Instant>,toast_queue:std::collections::VecDeque<(ToastKind,String,u32)>,last_schedule:String,weather_updated:Option<Instant>,agenda_updated:Option<Instant>,preview:bool,
+    reminder_index:usize,reminder_anim:Option<(f32,Instant)>,stretch_deadline:Option<Instant>,toast_queue:std::collections::VecDeque<(ToastKind,String,u32)>,last_schedule:String,weather_updated:Option<Instant>,weather_fetched_time:Option<String>,agenda_updated:Option<Instant>,preview:bool,
     lyric_mode:bool,hover_stage:u8,pinned:bool,
     hover_blocked_until:Instant,
     last_lyric_line:String,lyric_anim:Option<LyricAnim>,
@@ -214,6 +217,8 @@ pub(super) struct Shell {
     pub privacy_monitor: Option<crate::privacy::PrivacyMonitorHandle>,
     pub privacy_detail_open: bool,
     pub settings_subpage_privacy: bool,
+    pub storage_dropdown_open: bool,
+    pub track_is_youtube: bool,
     glass: material::GlassRt,
 }
 #[derive(Clone,serde::Deserialize)]struct HolidayRecord{date:NaiveDate,name:String,#[serde(default)]collective_leave:bool}
@@ -264,7 +269,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
 
     let preview=live_preview||args.iter().any(|s|s=="--preview");
     let window_title:Vec<u16>=app_title().encode_utf16().chain(std::iter::once(0)).collect();
-    let hwnd=CreateWindowExW(if preview{WS_EX_NOREDIRECTIONBITMAP|WS_EX_APPWINDOW|WS_EX_TOPMOST}else{WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_TOPMOST},w!("mynotch.Native"),PCWSTR(window_title.as_ptr()),WS_POPUP,0,0,400,112,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
+    let hwnd=CreateWindowExW(if preview{WS_EX_NOREDIRECTIONBITMAP|WS_EX_APPWINDOW|WS_EX_TOPMOST}else{WS_EX_NOREDIRECTIONBITMAP|WS_EX_TOOLWINDOW|WS_EX_TOPMOST|WS_EX_NOACTIVATE},w!("mynotch.Native"),PCWSTR(window_title.as_ptr()),WS_POPUP,0,0,400,112,None,None,Some(module.into()),None).map_err(|e|e.to_string())?;
     SetWindowLongPtrW(inputs_hwnd,GWLP_HWNDPARENT,hwnd.0 as isize);
     let executable=std::env::current_exe().map_err(|_|"Lokasi aplikasi tidak ditemukan.")?;
     let root=crate::app::storage_root(&executable,preview)?;
@@ -311,11 +316,12 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         suspended:false,
         power_sensors:None,power_integrator:Default::default(),power_epoch:Instant::now(),power_day:now.format("%Y-%m-%d").to_string(),power_energy,power_flushed:Instant::now(),
         cpu_sampler:crate::system::CpuSampler::default(),power_snapshot:crate::system::PowerSnapshot::default(),last_power_tick:Instant::now(),session_energy_kwh:0.0,
+        last_storage_tick:None,cached_storage:(None,None,None,Vec::new()),
         render_ready:false,
         cover:None,cover_key:0,preview_silent:preview&&!live_preview,
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
-privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,privacy_detail_open:false,settings_subpage_privacy:false,glass:material::GlassRt::new(args),};
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:init_stage,pinned:false,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},last_lyric_line:String::new(),lyric_anim:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
+privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,track_is_youtube:false,glass:material::GlassRt::new(args),};
 
     app.tab=app.settings.default_tab.clone();
     if !app.settings.active_tab_order().contains(&app.tab){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
@@ -547,7 +553,7 @@ impl Shell {
             confirmed: false,
             confirmed_at: None,
         });
-        if kind!=ToastKind::Prayer||self.settings.prayer_sound{unsafe{let _=MessageBeep(0x00000040);}}
+        if (kind!=ToastKind::Prayer||self.settings.prayer_sound) && !(self.fullscreen && self.settings.hide_fullscreen){unsafe{let _=MessageBeep(0x00000040);}}
         if from_stage0 {
             self.set_hover_stage(1);
         } else {
@@ -616,18 +622,130 @@ impl Shell {
             self.notice(format!("{hint} ({label}+{})",(key as u8 as char).to_ascii_uppercase()));
         }
     }}
-    fn sync_foreground(&mut self){unsafe{
-        let foreground=GetForegroundWindow();
-        let mut window=RECT::default();
-        let full=if foreground==self.hwnd||foreground==self.inputs_hwnd||foreground.0.is_null()||foreground==GetShellWindow()||foreground==GetDesktopWindow()||IsIconic(foreground).as_bool(){false}else{
-            let my_monitor=MonitorFromWindow(self.hwnd,MONITOR_DEFAULTTONEAREST);
-            let monitor=MonitorFromWindow(foreground,MONITOR_DEFAULTTONEAREST);
-            let mut info=MONITORINFO{cbSize:std::mem::size_of::<MONITORINFO>()as u32,..Default::default()};
-            let covers=GetWindowRect(foreground,&mut window).is_ok()&&GetMonitorInfoW(monitor,&mut info).as_bool()&&covers_monitor(window,info.rcMonitor);
-            (monitor==my_monitor)&&covers
+    fn detect_fullscreen(&mut self)->bool{unsafe{
+        let my_monitor=MonitorFromWindow(self.hwnd,MONITOR_DEFAULTTONEAREST);
+        let mut info=MONITORINFO{cbSize:std::mem::size_of::<MONITORINFO>()as u32,..Default::default()};
+        if !GetMonitorInfoW(my_monitor,&mut info).as_bool(){
+            self.fullscreen_hwnd=None;
+            return false;
+        }
+        let raw_fg=GetForegroundWindow();
+        if raw_fg==self.inputs_hwnd && self.expanded {
+            return false;
+        }
+        let fg=if raw_fg.0.is_null()||raw_fg==self.hwnd||raw_fg==self.inputs_hwnd{
+            match top_standard_window_on_monitor(self.hwnd,self.inputs_hwnd,None,my_monitor){
+                Some(h)=>h,
+                None=>return self.fullscreen && self.fullscreen_hwnd.is_some_and(|h|IsWindowVisible(h).as_bool()&&!IsIconic(h).as_bool()),
+            }
+        }else{
+            raw_fg
         };
+        if is_shell_or_desktop_window(fg)||IsIconic(fg).as_bool(){
+            self.fullscreen_hwnd=None;
+            return false;
+        }
+        if check_hwnd_fullscreen(fg,my_monitor,&info){
+            self.fullscreen_hwnd=Some(fg);
+            return true;
+        }
+        for flag in [GA_ROOT,GA_ROOTOWNER]{
+            let anc=GetAncestor(fg,flag);
+            if !anc.0.is_null()&&anc!=fg&&check_hwnd_fullscreen(anc,my_monitor,&info){
+                self.fullscreen_hwnd=Some(anc);
+                return true;
+            }
+        }
+        if let Some(prev)=self.fullscreen_hwnd{
+            if prev==fg
+                && IsWindowVisible(prev).as_bool()
+                && !IsIconic(prev).as_bool()
+                && !is_window_cloaked(prev)
+                && MonitorFromWindow(prev,MONITOR_DEFAULTTONEAREST)==my_monitor
+            {
+                let mut r=RECT::default();
+                if GetWindowRect(prev,&mut r).is_ok()&&(r.right-r.left)>=800&&(r.bottom-r.top)>=600{
+                    return true;
+                }
+            }
+        }
+        let mut fg_pid:u32=0;
+        let _=GetWindowThreadProcessId(fg,Some(&mut fg_pid));
+        if fg_pid!=0&&fg_pid!=std::process::id(){
+            let mut cur=GetTopWindow(None).unwrap_or_default();
+            for _ in 0..256{
+                if cur.0.is_null(){break;}
+                if cur!=fg&&cur!=self.hwnd&&cur!=self.inputs_hwnd&&IsWindowVisible(cur).as_bool(){
+                    let mut pid:u32=0;
+                    let _=GetWindowThreadProcessId(cur,Some(&mut pid));
+                    if pid==fg_pid&&check_hwnd_fullscreen(cur,my_monitor,&info){
+                        self.fullscreen_hwnd=Some(cur);
+                        return true;
+                    }
+                }
+                cur=GetWindow(cur,GW_HWNDNEXT).unwrap_or_default();
+            }
+        }
+        let style=GetWindowLongW(fg,GWL_STYLE)as u32;
+        let ex_style=GetWindowLongW(fg,GWL_EXSTYLE)as u32;
+        let mut fg_rect=RECT::default();
+        let _=GetWindowRect(fg,&mut fg_rect);
+        let fg_w=fg_rect.right-fg_rect.left;
+        let fg_h=fg_rect.bottom-fg_rect.top;
+        let is_overlay=(ex_style&(WS_EX_TOOLWINDOW.0|WS_EX_TRANSPARENT.0|WS_EX_NOACTIVATE.0))!=0
+            ||((style&WS_CAPTION.0)!=WS_CAPTION.0&&(fg_w<640||fg_h<480));
+        if is_overlay{
+            if let Some(behind)=top_standard_window_on_monitor(self.hwnd,self.inputs_hwnd,Some(fg),my_monitor){
+                if check_hwnd_fullscreen(behind,my_monitor,&info){
+                    self.fullscreen_hwnd=Some(behind);
+                    return true;
+                }
+            }
+        }
+        self.fullscreen_hwnd=None;
+        false
+    }}
+    fn sync_foreground(&mut self){unsafe{
+        let full=self.detect_fullscreen();
         let changed=full!=self.fullscreen;
-        if changed{self.fullscreen=full;if full{self.cancel_jobs();self.morph=None;self.tab_fade=None;if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);self.morph_timer=0;}let _=KillTimer(Some(self.hwnd),2);let _=KillTimer(Some(self.hwnd),4);let _=KillTimer(Some(self.hwnd),10);}else{self.lyrics_key.clear();self.poster().send(Event::Media(MediaEvent::Changed(self.track.clone())));}self.sync_visualizer();self.clock_timer();self.layout();}
+        if changed{
+            self.fullscreen=full;
+            if full{
+                self.cancel_jobs();
+                self.morph=None;
+                self.tab_fade=None;
+                if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);self.morph_timer=0;}
+                for id in [2,4,6,10,12]{let _=KillTimer(Some(self.hwnd),id);}
+                self.pointer=None;
+                self.pressed=None;
+                self.tab_drag=None;
+                self.volume_hud=None;
+                if self.settings.hide_fullscreen{
+                    let target_stage=collapse_target_stage(self.settings.minimal);
+                    self.hover_stage=target_stage;
+                    self.expanded=false;
+                    self.settings_open=false;
+                    self.settings_popup=None;
+                    self.reminder_menu=None;
+                    self.focused=None;
+                    self.clip_search_open=false;
+                    self.clip_filter.clear();
+                    self.weather_custom_open=false;
+                    self.weather_menu_open=false;
+                    self.mod_view=None;
+                    let (w,h,_)=self.target_geometry();
+                    self.width=w;
+                    self.height=h;
+                    self.make_inputs();
+                }
+            }else{
+                self.lyrics_key.clear();
+                self.poster().send(Event::Media(MediaEvent::Changed(self.track.clone())));
+            }
+            self.sync_visualizer();
+            self.clock_timer();
+            self.layout();
+        }
         let privacy_fullscreen_override = self.settings.privacy_enabled
             && self.settings.privacy_show_fullscreen
             && self.privacy_snapshot.any_active();
@@ -671,7 +789,7 @@ impl Shell {
                 (540.,280.,24.)
             }else if self.tab=="Cuaca"{
                 (560.,if self.weather_custom_open{320.}else{240.},24.)
-            }else if self.tab=="Daya"{
+            }else if self.tab=="Daya" || self.tab=="Power"{
                 (560.,360.,24.)
             }else if self.settings.mod_tabs.iter().any(|t|t==&self.tab){
                 (520.,320.,24.)
@@ -698,8 +816,10 @@ impl Shell {
             let bat_extra = (if self.battery.as_ref().is_some_and(|b| b.has_battery) { 54. } else { 0. }) + (if self.tws.is_some() { 56. } else { 0. }) + privacy_extra;
             if self.volume_hud.is_some() {
                 (200. + bat_extra, 30., 15.)
-            } else if self.lyric_mode{
-                (300. + bat_extra * 0.4, 30., 15.)
+            } else if self.lyric_mode {
+                let char_count = self.active_lyric().map(|l| l.chars().count()).unwrap_or(20);
+                let w = (char_count as f32 * 7.2 + 84. + bat_extra * 0.4).clamp(240., 380.);
+                (w, 30., 15.)
             }else if self.should_revert_stage1_to_calendar() && !self.is_stage1_temporary_active() {
                 (168. + bat_extra, 30., 15.)
             }else if self.stage1_tab() == "Kalender" {
@@ -712,7 +832,7 @@ impl Shell {
                 (195. + bat_extra, 30., 15.)
             }else if self.stage1_tab() == "Catatan" {
                 (195. + bat_extra, 30., 15.)
-            }else if self.stage1_tab() == "Daya" {
+            }else if self.stage1_tab() == "Daya" || self.stage1_tab() == "Power" {
                 (168. + bat_extra, 30., 15.)
             }else if self.stage1_tab() == "Musik" {
                 if self.track.playing || !self.track.title.is_empty() {
@@ -790,9 +910,12 @@ impl Shell {
     }
 
     pub fn show_volume_hud(&mut self, vol: f32, muted: bool) {
+        self.last_known_volume = Some((vol, muted));
+        if self.fullscreen && self.settings.hide_fullscreen {
+            return;
+        }
         let is_new = self.volume_hud.is_none();
         self.volume_hud = Some((vol, muted, Instant::now()));
-        self.last_known_volume = Some((vol, muted));
         self.trigger_stage1_temporary(2);
         if self.hover_stage == 0 {
             self.set_hover_stage(1);
@@ -1138,7 +1261,13 @@ impl Shell {
             0x031D=>{self.sync_clipboard();return LRESULT(0)},
             WM_PAINT=>{let mut ps=PAINTSTRUCT::default();BeginPaint(self.hwnd,&mut ps);self.paint();let _=EndPaint(self.hwnd,&ps);return LRESULT(0)},
             WM_ERASEBKGND=>return LRESULT(1),
+            WM_MOUSEACTIVATE=>return LRESULT(MA_NOACTIVATE as isize),
             WM_NCHITTEST=>{
+                if (self.fullscreen && self.settings.hide_fullscreen)
+                    || (!self.preview && !self.expanded && !is_cursor_visible())
+                {
+                    return LRESULT(-1); // HTTRANSPARENT
+                }
                 let mut point=POINT{x:(lparam.0 as i16)as i32,y:((lparam.0>>16)as i16)as i32};
                 let _=ScreenToClient(self.hwnd,&mut point);
                 let px=point.x as f32/self.scale;let py=point.y as f32/self.scale;
@@ -1154,6 +1283,11 @@ impl Shell {
                 return LRESULT(-1) // HTTRANSPARENT
             },
             WM_MOUSEMOVE=>{
+                if (self.fullscreen && self.settings.hide_fullscreen)
+                    || (!self.preview && !self.expanded && !is_cursor_visible())
+                {
+                    return LRESULT(0);
+                }
                 let mut tracking=TRACKMOUSEEVENT{cbSize:std::mem::size_of::<TRACKMOUSEEVENT>()as u32,dwFlags:TME_LEAVE,hwndTrack:self.hwnd,dwHoverTime:0};
                 let _=TrackMouseEvent(&mut tracking);
                 let _=KillTimer(Some(self.hwnd),2);
@@ -1205,6 +1339,7 @@ impl Shell {
                 if self.weather_menu_open{let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::WeatherSetCity(..)|Action::WeatherToggleCustom|Action::WeatherToggleMenu));if !inside{self.weather_menu_open=false;self.pressed=None;self.invalidate();return LRESULT(0)}}
                 if self.settings_popup.is_some(){let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::SettingsMenu(..)|Action::SettingsValue(..)|Action::SettingsCategory(..)|Action::Back));if !inside{self.settings_popup=None;self.pressed=None;self.invalidate();return LRESULT(0)}}
                 if self.reminder_menu.is_some(){let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::ReminderValue(..)|Action::ReminderMenu(..)));if !inside{self.reminder_menu=None;self.pressed=None;self.invalidate();return LRESULT(0)}}
+                if self.storage_dropdown_open{let inside=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).is_some_and(|h|matches!(h.action,Action::ToggleStorageDropdown|Action::KeepStorageDropdown));if !inside{self.storage_dropdown_open=false;self.pressed=None;self.invalidate();return LRESULT(0)}}
                 if let Some(hit)=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).cloned(){
                     self.pressed=Some(hit.action.clone());
                     if let Action::Tab(ref tab_name) = hit.action {
@@ -1440,7 +1575,7 @@ impl Shell {
             }}
             WM_SETFOCUS|WM_KILLFOCUS=>{self.focused=None;self.invalidate();return LRESULT(0)},
             WM_HOTKEY=>{if !self.fullscreen{self.set_expanded(!self.expanded);}return LRESULT(0)},
-            WM_RBUTTONUP|TRAY=>{if msg==WM_RBUTTONUP||lparam.0 as u32==WM_RBUTTONUP{self.menu();}else if lparam.0 as u32==WM_LBUTTONUP{self.set_expanded(!self.expanded);}return LRESULT(0)},
+            WM_RBUTTONUP|TRAY=>{if msg==WM_RBUTTONUP&&self.fullscreen&&self.settings.hide_fullscreen{return LRESULT(0)}if msg==WM_RBUTTONUP||lparam.0 as u32==WM_RBUTTONUP{self.menu();}else if lparam.0 as u32==WM_LBUTTONUP{self.set_expanded(!self.expanded);}return LRESULT(0)},
             WAKE=>{self.events();return LRESULT(0)},
             WM_DPICHANGED|WM_DISPLAYCHANGE=>{self.layout();self.make_inputs();self.invalidate();return LRESULT(0)},
         // WM_SETTINGCHANGE / WM_THEMECHANGED / WM_DWMCOMPOSITIONCHANGED: transparency or High Contrast may have flipped.
@@ -1571,6 +1706,28 @@ impl Shell {
             if self.power_sensors.is_none(){self.power_sensors=Some(crate::system::power_sensor::PowerSensors::start());}else if let Some(sensors)=&self.power_sensors{sensors.set_active(true);}
             if self.last_power_tick.elapsed()>=Duration::from_millis(850){
                 self.last_power_tick=Instant::now();self.power_snapshot=self.power_sensors.as_ref().unwrap().snapshot();
+                self.power_snapshot.language = self.settings.language.clone();
+                if let Some(note) = &self.power_snapshot.provider_note {
+                    self.power_snapshot.provider_note = Some(crate::system::power_sensor::localize_provider_note(note, &self.settings.language));
+                }
+                if self.power_snapshot.cpu_usage.is_none() {
+                    self.power_snapshot.cpu_usage = Some(self.cpu_sampler.sample() * 100.0);
+                }
+                let (ram_pct, ram_used, ram_total) = crate::system::sample_system_memory();
+                self.power_snapshot.ram_usage = ram_pct;
+                self.power_snapshot.ram_used_gb = ram_used;
+                self.power_snapshot.ram_total_gb = ram_total;
+                self.power_snapshot.storage_usage = self.cached_storage.0;
+                self.power_snapshot.storage_used_gb = self.cached_storage.1;
+                self.power_snapshot.storage_total_gb = self.cached_storage.2;
+                self.power_snapshot.storage_drives = self.cached_storage.3.clone();
+                if self.last_storage_tick.is_none_or(|t| t.elapsed() >= Duration::from_secs(30)) && !self.jobs.contains_key("Storage") {
+                    self.last_storage_tick = Some(Instant::now());
+                    self.job("Storage", || {
+                        let (st_pct, st_used, st_total, drives) = crate::system::sample_system_storage();
+                        Event::Storage(st_pct, st_used, st_total, drives)
+                    });
+                }
                 let day=Local::now().format("%Y-%m-%d").to_string();
                 if day!=self.power_day{self.power_day=day.clone();self.power_integrator=Default::default();}
                 if let Some(w)=self.power_snapshot.active_power_w{
@@ -1613,7 +1770,24 @@ impl Shell {
                 self.stage1_media_until=Some(Instant::now()+Duration::from_secs(5));
                 if !self.lyric_mode{self.trigger_stage1_temporary(5);}
             }
-            self.track=track;if changed{self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;self.lyrics_error=None;if !self.track.title.is_empty(){let api=self.online.clone();let track=self.track.clone();self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));}}
+            let app_lower = track.source_app.to_lowercase();
+            let mut yt_hint = app_lower.contains("youtube")
+                || track.album.to_lowercase().contains("youtube")
+                || track.title.to_lowercase().contains("youtube")
+                || track.artist.to_lowercase().contains("youtube");
+            if !yt_hint && (app_lower.contains("chrome") || app_lower.contains("edge") || app_lower.contains("msedge") || app_lower.contains("firefox") || app_lower.contains("opera") || app_lower.contains("brave")) {
+                yt_hint = crate::youtube::is_youtube_window_present();
+            }
+            self.track_is_youtube = yt_hint;
+            self.track=track;if changed{
+                self.cancel_job("Musik");self.lyrics_key=key.clone();self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;self.lyrics_error=None;
+                if !self.track.title.is_empty(){
+                    let api=self.online.clone();let track=self.track.clone();
+                    let app_l=track.source_app.to_lowercase();
+                    let allow_yt=!app_l.contains("spotify")&&!app_l.contains("vlc");
+                    self.job("Musik",move||Event::Lyrics(key,api.lyrics_with_options(&track.title,&track.artist,&track.album,track.duration_seconds,allow_yt)));
+                }
+            }
             if self.hover_stage==1 && !self.lyric_mode {
                 let target=self.target_geometry();
                 if (self.width-target.0).abs()>2.0||(self.height-target.1).abs()>2.0{
@@ -1624,8 +1798,11 @@ impl Shell {
         Event::Prayers(city,date,result)=>{if city==self.settings.prayer_city&&date==reminder::jakarta_today(){match result{Ok(s)=>{self.prayer_schedule=Some(s);self.prayer_error=None;},Err(e)=>self.prayer_error=Some(e)}}},
         Event::Artwork(key,result)=>{if key==self.cover_key&&self.settings.enabled("Musik"){self.cover=result.ok();if self.preview{eprintln!("artwork ready={}",self.cover.is_some());}}},
         Event::Levels(levels)=>{if self.visualizer.is_some(){self.levels=levels;self.sync_active_lyric();}},
-        Event::Lyrics(key,result)=>{if key==self.lyrics_key&&self.settings.enabled("Musik"){match result{Ok(value)=>{self.lyrics_error=None;self.lyrics=crate::lyrics::parse_lrc_with_options(&value.synced_lyrics,self.settings.romanize_lyrics);self.plain_lyrics=if value.instrumental{"Instrumental · nikmati musiknya.".into()}else if value.plain_lyrics.is_empty()&&self.lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini.".into()}else if self.settings.romanize_lyrics{crate::lyrics::romanize_text(&value.plain_lyrics)}else{value.plain_lyrics};self.layout();},Err(_)=>{self.lyrics.clear();self.plain_lyrics.clear();self.lyrics_error=Some(crate::i18n::t("music.lyrics_error", &self.settings.language).to_string());self.layout();}}}},
-        Event::Weather(result, is_manual)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());self.weather_refresh.failed=false;if is_manual{self.notice(crate::i18n::t("notice.weather_updated",&self.settings.language));}},Err(_)=>{self.weather_refresh.failed=true;self.notice(crate::i18n::t("weather.fetch_failed",&self.settings.language));}}}},
+        Event::Lyrics(key,result)=>{if key==self.lyrics_key&&self.settings.enabled("Musik"){match result{Ok(value)=>{
+            self.lyrics_error=None;
+            let app_l=self.track.source_app.to_lowercase();
+            if value.is_youtube&&!app_l.contains("spotify")&&!app_l.contains("vlc"){self.track_is_youtube=true;}self.lyrics=crate::lyrics::parse_lrc_with_options(&value.synced_lyrics,self.settings.romanize_lyrics);self.plain_lyrics=if value.instrumental{"Instrumental · nikmati musiknya.".into()}else if value.plain_lyrics.is_empty()&&self.lyrics.is_empty(){"Lirik belum tersedia untuk lagu ini.".into()}else if self.settings.romanize_lyrics{crate::lyrics::romanize_text(&value.plain_lyrics)}else{value.plain_lyrics};self.layout();},Err(_)=>{self.lyrics.clear();self.plain_lyrics.clear();self.lyrics_error=Some(crate::i18n::t("music.lyrics_error", &self.settings.language).to_string());self.layout();}}}},
+        Event::Weather(result, is_manual)=>{if self.settings.enabled("Cuaca"){match result{Ok(value)=>{self.weather=Some(value);self.weather_updated=Some(Instant::now());self.weather_fetched_time=Some(chrono::Local::now().format("%H:%M").to_string());self.weather_refresh.failed=false;if is_manual{self.notice(crate::i18n::t("notice.weather_updated",&self.settings.language));}},Err(_)=>{self.weather_refresh.failed=true;self.notice(crate::i18n::t("weather.fetch_failed",&self.settings.language));}}}},
         Event::Agenda(result)=>{if self.settings.enabled("Kalender"){match result{Ok(value)=>{self.agenda=value;self.agenda_updated=Some(Instant::now());},Err(e)=>self.notice(e)}}},
         Event::Ai(result)=>{if self.settings.enabled("AI"){match result{Ok(text)=>self.ai_messages.push(crate::online::ChatMessage{role:"assistant".into(),content:text}),Err(e)=>self.notice(e)}}},
         Event::Update(result)=>{
@@ -1695,6 +1872,15 @@ impl Shell {
                 self.tws=next;
                 if changed&&self.hover_stage==1{self.layout();}
                 repaint=true;
+            }
+        },Event::Storage(pct, used, total, drives)=>{
+            self.cached_storage = (pct, used, total, drives.clone());
+            self.power_snapshot.storage_usage = pct;
+            self.power_snapshot.storage_used_gb = used;
+            self.power_snapshot.storage_total_gb = total;
+            self.power_snapshot.storage_drives = drives;
+            if self.active_mod_id().as_deref() == Some("daya") {
+                self.refresh_mod_output();
             }
         },Event::Notice(text)=>self.notice(text),
     }}if repaint{self.invalidate();}}
@@ -1989,8 +2175,8 @@ impl Shell {
             if self.lyric_mode{
                 p.clip(0.,0.,self.width,self.height);
 
-                // 1. Icon lirik speech bubble di kiri
-                p.icon_lyrics_bubble(18.,cy,0xffa46b,true);
+                // 1. Icon media player di kiri (Spotify, YouTube, VLC, Chrome, dsb)
+                p.icon_media_app(18.0, cy, &self.track.source_app, self.track_is_youtube, self.track.playing);
 
                 // 2. Synchronized live lyric line di tengah
                 let curr_text=self.active_lyric().unwrap_or_else(||{
@@ -2116,7 +2302,7 @@ impl Shell {
                             ("edit", text)
                         }
 
-                        "Daya" => {
+                        "Daya" | "Power" => {
                             let watt = self.power_snapshot.active_power_w
                                 .or(self.power_snapshot.total_dc_watts)
                                 .map(|w| format!("{:.0} W", w))
@@ -2169,7 +2355,11 @@ impl Shell {
                 // 3. Status tengah seragam: <info> | <jam> dengan pemisah "|" light & subtle
                 let time_str = Local::now().format("%H:%M").to_string();
                 let info_x=self.draw_stage1_status(p, &info_text, &time_str, status_right_x);
-                p.outline_icon(icon,info_x-22.,(self.height-14.)/2.,14.,0xd5d5dc);
+                if icon == "music" {
+                    p.icon_media_app(info_x - 15.0, self.height * 0.5, &self.track.source_app, self.track_is_youtube, self.track.playing);
+                } else {
+                    p.outline_icon(icon, info_x - 22., (self.height - 14.) / 2., 14., 0xd5d5dc);
+                }
 
                 p.unclip();
             }
@@ -2466,6 +2656,252 @@ impl Drop for PaintingGuard {
 
 fn covers_monitor(window:RECT,monitor:RECT)->bool{window.left<=monitor.left&&window.top<=monitor.top&&window.right>=monitor.right&&window.bottom>=monitor.bottom}
 
+fn covers_rect_tolerance(window:RECT,target:RECT,tol:i32)->bool{
+    window.left<=target.left+tol&&window.top<=target.top+tol&&window.right>=target.right-tol&&window.bottom>=target.bottom-tol
+}
+
+fn is_borderless_fullscreen_rect(
+    window:RECT,
+    client:Option<RECT>,
+    monitor:RECT,
+    work:RECT,
+    style:u32,
+    ex_style:u32,
+    is_zoomed:bool,
+)->bool{
+    if covers_monitor(window,monitor){
+        return true;
+    }
+    if (ex_style&WS_EX_TOOLWINDOW.0)!=0{
+        return false;
+    }
+    let has_caption=(style&WS_CAPTION.0)==WS_CAPTION.0;
+    let has_thickframe=(style&WS_THICKFRAME.0)!=0;
+    let is_normal_maximized=is_zoomed&&has_caption;
+
+    if !is_normal_maximized{
+        if covers_rect_tolerance(window,monitor,2){
+            return true;
+        }
+        if client.is_some_and(|c|covers_rect_tolerance(c,monitor,2)){
+            return true;
+        }
+    }
+
+    if !has_caption{
+        if covers_rect_tolerance(window,work,2)
+            ||client.is_some_and(|c|covers_rect_tolerance(c,work,2))
+        {
+            return true;
+        }
+        if !is_zoomed&&!has_thickframe{
+            let w=(window.right-window.left)as i64;
+            let h=(window.bottom-window.top)as i64;
+            let mon_w=(monitor.right-monitor.left).max(1)as i64;
+            let mon_h=(monitor.bottom-monitor.top).max(1)as i64;
+            let touches_top=window.top<=monitor.top+2&&window.bottom>monitor.top+48;
+            let covers_half=w*h*2>=mon_w*mon_h;
+            if w>=1024&&h>=720&&(touches_top||covers_half){
+                return true;
+            }
+        }
+    }else if !is_zoomed&&window.top<monitor.top-12{
+        if client.is_some_and(|c|covers_rect_tolerance(c,work,2)){
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_cursor_visible()->bool{
+    unsafe{
+        let mut ci=CURSORINFO{cbSize:std::mem::size_of::<CURSORINFO>()as u32,..Default::default()};
+        if GetCursorInfo(&mut ci).is_ok(){
+            (ci.flags.0&CURSOR_SHOWING.0)!=0&&!ci.hCursor.0.is_null()
+        }else{
+            true
+        }
+    }
+}
+
+fn is_window_cloaked(hwnd:HWND)->bool{
+    unsafe{
+        use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute,DWMWA_CLOAKED};
+        let mut cloaked:u32=0;
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            (&mut cloaked as *mut u32).cast(),
+            std::mem::size_of::<u32>()as u32,
+        )
+        .is_ok()
+            &&cloaked!=0
+    }
+}
+
+fn is_shell_or_desktop_window(hwnd:HWND)->bool{
+    unsafe{
+        if hwnd.0.is_null()||hwnd==GetShellWindow()||hwnd==GetDesktopWindow(){
+            return true;
+        }
+        let mut buf=[0u16;64];
+        let len=GetClassNameW(hwnd,&mut buf);
+        if len>0{
+            let class_name=String::from_utf16_lossy(&buf[..len as usize]);
+            matches!(
+                class_name.as_str(),
+                "Progman"|"WorkerW"|"Shell_TrayWnd"|"Shell_SecondaryTrayWnd"
+            )
+        }else{
+            false
+        }
+    }
+}
+
+fn client_screen_rect(hwnd:HWND)->Option<RECT>{
+    unsafe{
+        let mut client=RECT::default();
+        if GetClientRect(hwnd,&mut client).is_err(){
+            return None;
+        }
+        if client.right<=client.left||client.bottom<=client.top{
+            return None;
+        }
+        let mut tl=POINT{x:client.left,y:client.top};
+        let mut br=POINT{x:client.right,y:client.bottom};
+        if !ClientToScreen(hwnd,&mut tl).as_bool()||!ClientToScreen(hwnd,&mut br).as_bool(){
+            return None;
+        }
+        Some(RECT{left:tl.x,top:tl.y,right:br.x,bottom:br.y})
+    }
+}
+
+fn is_cursor_clipped_to_window(window:RECT,monitor:RECT)->bool{
+    unsafe{
+        let mut clip=RECT::default();
+        if GetClipCursor(&mut clip).is_err(){
+            return false;
+        }
+        let virt_l=GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let virt_t=GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let virt_r=virt_l+GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let virt_b=virt_t+GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        if clip.left<=virt_l&&clip.top<=virt_t&&clip.right>=virt_r&&clip.bottom>=virt_b{
+            return false;
+        }
+        let win_w=window.right-window.left;
+        let win_h=window.bottom-window.top;
+        if win_w<800||win_h<600{
+            return false;
+        }
+        let clip_w=clip.right-clip.left;
+        let clip_h=clip.bottom-clip.top;
+        if clip_w<=0||clip_h<=0{
+            return false;
+        }
+        let inside_window=clip.left>=window.left-16
+            &&clip.top>=window.top-16
+            &&clip.right<=window.right+16
+            &&clip.bottom<=window.bottom+16;
+        let matches_monitor=covers_rect_tolerance(clip,monitor,2)&&covers_rect_tolerance(monitor,clip,16);
+        inside_window||matches_monitor
+    }
+}
+
+fn is_d3d_fullscreen_notification_active()->bool{
+    unsafe{
+        use windows::Win32::UI::Shell::{SHQueryUserNotificationState,QUNS_RUNNING_D3D_FULL_SCREEN};
+        SHQueryUserNotificationState().is_ok_and(|state|state==QUNS_RUNNING_D3D_FULL_SCREEN)
+    }
+}
+
+fn check_hwnd_fullscreen(hwnd:HWND,my_monitor:HMONITOR,info:&MONITORINFO)->bool{
+    unsafe{
+        if hwnd.0.is_null()
+            ||!IsWindowVisible(hwnd).as_bool()
+            ||IsIconic(hwnd).as_bool()
+            ||is_shell_or_desktop_window(hwnd)
+            ||is_window_cloaked(hwnd)
+        {
+            return false;
+        }
+        let monitor=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST);
+        if monitor!=my_monitor{
+            return false;
+        }
+        let mut window=RECT::default();
+        if GetWindowRect(hwnd,&mut window).is_err(){
+            return false;
+        }
+        let client=client_screen_rect(hwnd);
+        let style=GetWindowLongW(hwnd,GWL_STYLE)as u32;
+        let ex_style=GetWindowLongW(hwnd,GWL_EXSTYLE)as u32;
+        let is_zoomed=IsZoomed(hwnd).as_bool();
+
+        if is_borderless_fullscreen_rect(
+            window,
+            client,
+            info.rcMonitor,
+            info.rcWork,
+            style,
+            ex_style,
+            is_zoomed,
+        ){
+            return true;
+        }
+        if is_cursor_clipped_to_window(window,info.rcMonitor){
+            return true;
+        }
+        let win_w=window.right-window.left;
+        let win_h=window.bottom-window.top;
+        if win_w>=800&&win_h>=600&&is_d3d_fullscreen_notification_active(){
+            return true;
+        }
+        false
+    }
+}
+
+fn top_standard_window_on_monitor(
+    self_hwnd:HWND,
+    inputs_hwnd:HWND,
+    skip_hwnd:Option<HWND>,
+    my_monitor:HMONITOR,
+)->Option<HWND>{
+    unsafe{
+        let mut cur=GetTopWindow(None).unwrap_or_default();
+        for _ in 0..256{
+            if cur.0.is_null(){
+                break;
+            }
+            if cur!=self_hwnd
+                &&cur!=inputs_hwnd
+                &&skip_hwnd!=Some(cur)
+                &&IsWindowVisible(cur).as_bool()
+                &&!IsIconic(cur).as_bool()
+                &&!is_shell_or_desktop_window(cur)
+                &&!is_window_cloaked(cur)
+                &&MonitorFromWindow(cur,MONITOR_DEFAULTTONEAREST)==my_monitor
+            {
+                let ex_style=GetWindowLongW(cur,GWL_EXSTYLE)as u32;
+                let mut r=RECT::default();
+                if GetWindowRect(cur,&mut r).is_ok(){
+                    let w=r.right-r.left;
+                    let h=r.bottom-r.top;
+                    if (ex_style&(WS_EX_TOOLWINDOW.0|WS_EX_TRANSPARENT.0|WS_EX_NOACTIVATE.0))==0
+                        &&w>=240
+                        &&h>=160
+                    {
+                        return Some(cur);
+                    }
+                }
+            }
+            cur=GetWindow(cur,GW_HWNDNEXT).unwrap_or_default();
+        }
+        None
+    }
+}
+
 pub(super) fn classify_notice_kind(msg:&str)->ToastKind{
     let lower = msg.to_lowercase();
     if msg.contains("💧")||lower.contains("minum")||lower.contains("drink")||lower.contains("hydration"){
@@ -2513,7 +2949,7 @@ pub(super) fn should_revert_stage1(tab: &str, reminder_index: usize, lyric_mode:
     if lyric_mode {
         return false;
     }
-    if tab == "Kalender" {
+    if tab == "Kalender" || tab == "Daya" || tab == "Power" {
         return false;
     }
     if tab == "Reminder" && reminder_index == 0 {
@@ -2570,6 +3006,49 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
         let expired = Some(Instant::now() - Duration::from_millis(10));
         assert!(!expired.is_some_and(|u| Instant::now() < u));
     }
+    #[test]
+    fn borderless_fullscreen_detects_game_windows_and_ignores_normal_desktop_windows() {
+        let monitor = RECT { left: 0, top: 0, right: 2560, bottom: 1440 };
+        let work = RECT { left: 0, top: 0, right: 2560, bottom: 1392 };
+        let popup_style = WS_POPUP.0 | WS_VISIBLE.0;
+        let overlapped_style = WS_OVERLAPPEDWINDOW.0 | WS_VISIBLE.0;
+
+        // 1. Exact monitor borderless or exclusive fullscreen
+        assert!(is_borderless_fullscreen_rect(monitor, Some(monitor), monitor, work, popup_style, 0, false));
+
+        // 2. 1-2px anti-DirectFlip borderless game windows (2560x1439, 2559x1440, top=1)
+        let anti_df_h = RECT { left: 0, top: 0, right: 2560, bottom: 1439 };
+        let anti_df_w = RECT { left: 0, top: 0, right: 2559, bottom: 1440 };
+        let anti_df_t = RECT { left: 0, top: 1, right: 2560, bottom: 1440 };
+        assert!(is_borderless_fullscreen_rect(anti_df_h, Some(anti_df_h), monitor, work, popup_style, 0, false));
+        assert!(is_borderless_fullscreen_rect(anti_df_w, Some(anti_df_w), monitor, work, popup_style, 0, false));
+        assert!(is_borderless_fullscreen_rect(anti_df_t, Some(anti_df_t), monitor, work, overlapped_style, 0, false));
+
+        // 3. Borderless WS_POPUP window covering work area (e.g. clamped above taskbar)
+        assert!(is_borderless_fullscreen_rect(work, Some(work), monitor, work, popup_style, 0, false));
+
+        // 4. Fixed-size borderless game window (1920x1080 on 2560x1440 monitor)
+        let game_1080p = RECT { left: 320, top: 180, right: 2240, bottom: 1260 };
+        assert!(is_borderless_fullscreen_rect(game_1080p, Some(game_1080p), monitor, work, popup_style, 0, false));
+
+        // 5. Off-screen captioned borderless window
+        let offscreen_win = RECT { left: -8, top: -31, right: 2568, bottom: 1400 };
+        assert!(is_borderless_fullscreen_rect(offscreen_win, Some(work), monitor, work, overlapped_style, 0, false));
+
+        // 6. Normal maximized desktop window (e.g. browser/editor) must NOT be treated as fullscreen
+        let max_win = RECT { left: -8, top: -8, right: 2568, bottom: 1400 };
+        assert!(!is_borderless_fullscreen_rect(max_win, Some(work), monitor, work, overlapped_style, 0, true));
+
+        // 7. Normal un-maximized desktop window covering work area must NOT be treated as fullscreen
+        assert!(!is_borderless_fullscreen_rect(work, Some(work), monitor, work, overlapped_style, 0, false));
+
+        // 8. Small borderless splash window (< 1024x720) must NOT be treated as fullscreen
+        let splash = RECT { left: 960, top: 520, right: 1600, bottom: 920 };
+        assert!(!is_borderless_fullscreen_rect(splash, Some(splash), monitor, work, popup_style, 0, false));
+
+        // 9. Toolwindow covering work area must NOT be treated as fullscreen
+        assert!(!is_borderless_fullscreen_rect(work, Some(work), monitor, work, popup_style, WS_EX_TOOLWINDOW.0, false));
+    }
 
 }
 
@@ -2620,7 +3099,8 @@ fn stage1_revert_rules_match_specification() {
         assert!(should_revert_stage1("Catatan", 0, false));
         assert!(should_revert_stage1("Cuaca", 0, false));
         assert!(should_revert_stage1("Musik", 0, false));
-        assert!(should_revert_stage1("Daya", 0, false));
+        assert!(!should_revert_stage1("Daya", 0, false));
+        assert!(!should_revert_stage1("Power", 0, false));
         assert!(should_revert_stage1("Sistem", 0, false));
     }
 }
