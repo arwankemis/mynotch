@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.0.2.3] - 2026-11-06
+
+This release stabilizes Stage 1 routing, adds the Stage 1 hardware monitor and weather preview, merges Clipboard and Notes into one Saved tab, and removes the custom theme system in favor of the three built-in looks.
+
+### Added
+- **Stage 1 hardware monitor:** CPU, RAM, and GPU metrics selectable individually, drawn as stable-width concentric gauges with per-metric colors and high/critical thresholds. Clicking the pill opens Stage 2.
+- **Stage 1 weather preview:** leaving the Weather tab keeps a weather pill on Stage 1 for about three seconds with a sky-matched gradient; clicking it reopens the Weather tab.
+- **Saved tab:** Clipboard, Notes, and Tasks now share one tab with sub-tabs, following the active language.
+- **Task deletion:** a Delete/Hapus button removes the selected task, persists the change, and never deletes the linked note.
+- **Export menu:** the note download icon opens a menu with `.txt` and Sticky Note (Markdown) exports.
+
+### Changed
+- **Stage 1 routing:** the calendar is the default idle state; track changes show a transient title/artist pill for about five seconds. Lyrics only appear after the user enables lyric mode from the Music tab.
+- **Media detection:** Auto now falls back to a session that is actually playing when Windows reports no current session.
+- **Stable layout:** fixed-width hardware value boxes, centered metrics, and a clamped Stage 1 layout prevent date trimming and pill resizing.
+- **Neutral UI:** tab, accent, slider, and control colors are neutral across Settings and all built-in themes.
+
+### Fixed
+- Lyric wrapping for long lines no longer stalls and 1-line/2-line transitions no longer flicker.
+- Hovering note editor fields no longer collapses Stage 2; the panel closes only after the pointer leaves the notch.
+- Empty-note timestamp no longer overlaps the empty-state hint.
+- Clipboard/Notes text and task actions stay consistent with the selected language.
+- **Reminder action buttons:** Stage 1 activity pills drew the literal icon names ("cl…", "ri…", "ch…") instead of glyphs. Close, open, and confirm now render proper outline icons for Focus, Stretch, hydration, prayer, and task-due reminders.
+- **Clipboard glyphs:** the clear (broom) and pin buttons now render icons instead of clipped text.
+
+### Removed
+- **Custom themes:** Cyberpunk Neon, OLED Pure Black, and Retro Classic examples and the theme loader are removed. Only Solid, Glass Lite, and Glass Adaptive remain, plus the light/dark switch.
+- Separate `.md`/`.txt`/PopOut export buttons in the Notes header.
+
+---
+
 ## [0.0.2.2] - 2026-11-01
 
 This release delivers borderless fullscreen gaming focus protections, YouTube timedtext caption fallback for synchronized lyrics with intelligent line wrapping, extended hardware telemetry (CPU, GPU, RAM, multi-drive storage) in the Power mod, custom media player iconography, and bilingual UI refinements.

@@ -83,6 +83,30 @@ pub fn run_helper_with_timeout(
         return Err(err);
     }
 
+    // Validate journal paths safety
+    for m in &journal.managed_files {
+        if m.relative_path.is_absolute()
+            || m.relative_path.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::Prefix(_)))
+        {
+            let err = format!("Path tidak aman di jurnal transaksi: {:?}", m.relative_path);
+            journal.record_error(tx_dir, err.clone())?;
+            return Err(err);
+        }
+    }
+
+    // Verify staging file hashes before any swap
+    let expected_hashes: Vec<(std::path::PathBuf, String)> = journal
+        .managed_files
+        .iter()
+        .filter_map(|m| m.stage_sha256.as_ref().map(|h| (m.relative_path.clone(), h.clone())))
+        .collect();
+    if !expected_hashes.is_empty() {
+        if let Err(e) = crate::update::archive::verify_file_hashes(&journal.stage_dir, &expected_hashes) {
+            journal.record_error(tx_dir, format!("Verifikasi hash berkas staging gagal: {e}"))?;
+            return Err(e);
+        }
+    }
+
     // Step 2: Backup files if not yet done
     if journal.phase == TransactionPhase::Prepared {
         if let Err(e) = execute_backup(&mut journal, tx_dir) {
@@ -94,8 +118,11 @@ pub fn run_helper_with_timeout(
     // Step 3: Swap files
     if let Err(e) = execute_swap(&mut journal, tx_dir) {
         journal.record_error(tx_dir, format!("Swap gagal: {e}. Menjalankan rollback..."))?;
-        let _ = execute_rollback(&mut journal, tx_dir);
+        let rb_res = execute_rollback(&mut journal, tx_dir);
         let _ = relaunch_binary(&journal.target_exe, &journal.install_dir, None);
+        if let Err(rb_err) = rb_res {
+            return Err(format!("Swap gagal ({e}) dan pemulihan (rollback) gagal: {rb_err}"));
+        }
         return Ok(TransactionPhase::RolledBack);
     }
 
@@ -118,8 +145,11 @@ pub fn run_helper_with_timeout(
                 tx_dir,
                 format!("Gagal meluncurkan binary baru: {e}. Menjalankan rollback..."),
             )?;
-            let _ = execute_rollback(&mut journal, tx_dir);
+            let rb_res = execute_rollback(&mut journal, tx_dir);
             let _ = relaunch_binary(&journal.target_exe, &journal.install_dir, None);
+            if let Err(rb_err) = rb_res {
+                return Err(format!("Gagal meluncurkan binary ({e}) dan rollback gagal: {rb_err}"));
+            }
             return Ok(TransactionPhase::RolledBack);
         }
     };
@@ -160,10 +190,13 @@ pub fn run_helper_with_timeout(
         let _ = child.wait();
 
         // Rollback managed files
-        let _ = execute_rollback(&mut journal, tx_dir);
+        let rb_res = execute_rollback(&mut journal, tx_dir);
 
         // Relaunch old version
         let _ = relaunch_binary(&journal.target_exe, &journal.install_dir, None);
+        if let Err(rb_err) = rb_res {
+            return Err(format!("Healthcheck gagal dan rollback gagal: {rb_err}"));
+        }
         return Ok(TransactionPhase::RolledBack);
     }
 
@@ -175,9 +208,8 @@ pub fn run_helper_with_timeout(
         &journal.target_profile,
     );
 
-    // Clean up temporary stage and backup directories
+    // Clean up temporary stage directory, keep backup until verified
     let _ = fs::remove_dir_all(&journal.stage_dir);
-    let _ = fs::remove_dir_all(&journal.backup_dir);
     let _ = fs::remove_file(&ack_path);
 
     Ok(TransactionPhase::Committed)

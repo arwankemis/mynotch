@@ -6,7 +6,7 @@ use windows::{core::{BSTR,PCWSTR,Result},Win32::System::{Com::*,Wmi::*,Variant::
 mod bundled;
 enum Control{Active(bool),Setup,Stop}
 fn fresh_snapshot(mut snapshot:PowerSnapshot,age:Duration)->PowerSnapshot{
-    if age>Duration::from_secs(6){snapshot.cpu_setup_required=false;snapshot.active_power_w=None;snapshot.cpu_watts=None;snapshot.gpu_watts=None;snapshot.total_dc_watts=None;snapshot.source_kind=SourceKind::Unavailable;snapshot.quality=Quality::Stale;snapshot.provider_note=Some("Sensor belum memberikan data baru; pencatatan energi dijeda.".into());}snapshot
+    if age>Duration::from_secs(6){snapshot.cpu_setup_required=false;snapshot.active_power_w=None;snapshot.cpu_watts=None;snapshot.gpu_watts=None;snapshot.total_dc_watts=None;snapshot.cpu_usage=None;snapshot.gpu_usage=None;snapshot.source_kind=SourceKind::Unavailable;snapshot.quality=Quality::Stale;snapshot.provider_note=Some("Sensor belum memberikan data baru; pencatatan energi dijeda.".into());}snapshot
 }
 pub struct PowerSensors{state:Arc<Mutex<(PowerSnapshot,Instant)>>,stop:mpsc::Sender<Control>,stopped:mpsc::Receiver<()>,active:std::sync::atomic::AtomicBool}
 impl PowerSensors{

@@ -1,5 +1,7 @@
+use crate::note_editors::{Lease,EditorError,native::NativeSnapshots};
+use std::{rc::Rc,cell::RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+#[cfg(test)]use std::sync::Mutex;
 use windows::core::{w, PCWSTR};
 use windows::Win32::{
     Foundation::*,
@@ -7,6 +9,8 @@ use windows::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::*,
 };
+
+struct FloatBinding {lease:Lease,source:Rc<RefCell<NativeSnapshots>>,shell:HWND}
 
 static CLASS_REGISTERED: AtomicBool = AtomicBool::new(false);
 
@@ -18,15 +22,15 @@ pub const NOTE_SAVED: u32 = WM_APP + 56;
 /// A pop-out window lives on the same thread but has its own wndproc, so edited notes are handed
 /// over through this queue instead of borrowing the shell state directly. A queue (not a single
 /// slot) keeps every edit when two floats close before the shell pumps its messages.
-static PENDING_EDITS: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
+#[cfg(test)]static PENDING_EDITS: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
 
-pub fn take_pending_note_edits() -> Vec<(u64, String)> {
+#[cfg(test)]pub fn take_pending_note_edits() -> Vec<(u64, String)> {
     PENDING_EDITS.lock().map(|mut queue| std::mem::take(&mut *queue)).unwrap_or_default()
 }
 
 /// Merges a pop-out edit back into the note list. Returns false when the note was deleted while
 /// the floating window was open.
-pub fn apply_popout_content(notes: &mut [crate::sticky::StickyNote], id: u64, content: &str) -> bool {
+#[cfg(test)]pub fn apply_popout_content(notes: &mut [crate::sticky::StickyNote], id: u64, content: &str) -> bool {
     match notes.iter_mut().find(|n| n.id == id) {
         Some(note) => {
             if note.content != content {
@@ -109,26 +113,22 @@ unsafe extern "system" fn sticky_wndproc(
                 let _ = FillRect(dc, &rc, HBRUSH(brush.0));
                 LRESULT(1)
             }
-            WM_CLOSE => {
-                // Push the edited text back to the shell before the window disappears.
-                if let Ok(edit) = GetDlgItem(Some(hwnd), EDIT_ID as i32) {
-                    let len = GetWindowTextLengthW(edit).max(0) as usize;
-                    let mut buf = vec![0u16; len + 1];
-                    let copied = GetWindowTextW(edit, &mut buf).max(0) as usize;
-                    let content = String::from_utf16_lossy(&buf[..copied]);
-                    let note_id = GetPropW(hwnd, w!("NOTE_ID")).0 as usize as u64;
-                    let shell = HWND(GetPropW(hwnd, w!("SHELL_HWND")).0);
-                    if !shell.0.is_null() {
-                        if let Ok(mut queue) = PENDING_EDITS.lock() {
-                            queue.push((note_id, content));
-                        }
-                        let _ = PostMessageW(Some(shell), NOTE_SAVED, WPARAM(0), LPARAM(0));
-                    }
-                }
-                let _ = DestroyWindow(hwnd);
+            WM_COMMAND if (wparam.0>>16) as u16==0x0300=>{
+                let ptr=GetWindowLongPtrW(hwnd,GWLP_USERDATA) as *mut FloatBinding;
+                if !ptr.is_null(){let context=&*ptr;let _=context.source.borrow_mut().mark_changed(context.lease);}
                 LRESULT(0)
             }
+            WM_CLOSE=>{
+                let ptr=GetWindowLongPtrW(hwnd,GWLP_USERDATA) as *mut FloatBinding;
+                if !ptr.is_null(){
+                    let context=&*ptr;
+                    if context.source.borrow_mut().capture_close(context.lease).is_err(){return LRESULT(0);}
+                    let _=PostMessageW(Some(context.shell),NOTE_SAVED,WPARAM(0),LPARAM(0));
+                }
+                let _=DestroyWindow(hwnd);LRESULT(0)
+            }
             WM_NCDESTROY => {
+                let ptr=SetWindowLongPtrW(hwnd,GWLP_USERDATA,0) as *mut FloatBinding;if !ptr.is_null(){drop(Box::from_raw(ptr));}
                 let _ = RemovePropW(hwnd, w!("COLOR_IDX"));
                 let _ = RemovePropW(hwnd, w!("NOTE_ID"));
                 let _ = RemovePropW(hwnd, w!("SHELL_HWND"));
@@ -161,11 +161,12 @@ fn clamp_to_work_area(x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
     }
 }
 
-pub fn spawn_floating_sticky_note(note_id: u64, title: &str, content: &str, color_idx: u8, shell: HWND) {
+pub fn spawn_owned_note(note:&crate::sticky::StickyNote,lease:Lease,source:Rc<RefCell<NativeSnapshots>>,shell:HWND)->Result<HWND,EditorError>{
+    let (note_id,title,content,color_idx)=(note.id,note.title.as_str(),note.content.as_str(),note.color_idx);
     unsafe {
         let instance = match GetModuleHandleW(None) {
             Ok(h) => h,
-            Err(_) => return,
+            Err(_) => return Err(EditorError::Unavailable),
         };
 
         let class_name = w!("mynotch.FloatingStickyNote");
@@ -216,9 +217,14 @@ pub fn spawn_floating_sticky_note(note_id: u64, title: &str, content: &str, colo
             let _ = SetPropW(h, w!("COLOR_IDX"), Some(HANDLE(color_idx as isize as *mut _)));
             let _ = SetPropW(h, w!("NOTE_ID"), Some(HANDLE(note_id as isize as *mut _)));
             let _ = SetPropW(h, w!("SHELL_HWND"), Some(HANDLE(shell.0)));
+            let edit=match GetDlgItem(Some(h),EDIT_ID as i32){Ok(edit)=>edit,Err(_)=>{let _=DestroyWindow(h);return Err(EditorError::Unavailable);}};
+            if let Err(error)=source.borrow_mut().register(lease,None,edit){let _=DestroyWindow(h);return Err(error);}
+            let binding=Box::new(FloatBinding{lease,source,shell});
+            SetWindowLongPtrW(h,GWLP_USERDATA,Box::into_raw(binding) as isize);
             let _ = ShowWindow(h, SW_SHOW);
             let _ = UpdateWindow(h);
-        }
+            Ok(h)
+        }else{Err(EditorError::Unavailable)}
     }
 }
 

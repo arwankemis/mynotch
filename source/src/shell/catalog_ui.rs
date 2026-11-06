@@ -1,7 +1,7 @@
 use super::*;
 use crate::i18n::t;
 use super::settings::wrap_lines;
-const FG:u32=0xf3f6fc;const MUTED:u32=0xb9c5d5;const ACCENT:u32=0x69d2e5;
+const FG:u32=0xf3f6fc;const MUTED:u32=0xb9c5d5;const ACCENT:u32=0xd8d8de;
 fn can_open(entry:&crate::mods::catalog::CatalogEntry)->bool{entry.is_active&&(entry.manifest.mod_type!=crate::mods::ModType::Builtin||entry.is_tab_enabled)}
 pub(super) struct CatalogLayout{
     pub kinds:[render::D2D_RECT_F;2],pub filters:[render::D2D_RECT_F;2],pub refresh:render::D2D_RECT_F,
@@ -27,7 +27,7 @@ impl Shell{
 
     unsafe fn catalog_segment(&mut self,p:&mut Painter,r:render::D2D_RECT_F,label:&str,on:bool,action:Action){unsafe{
         let hover=self.pointer.is_some_and(|(x,y)|x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom);
-        p.fill_alpha(r.left,r.top,r.right-r.left,r.bottom-r.top,8.,if on{0x69d2e5}else{0xffffff},if on{0.16}else if hover{0.12}else{0.05});
+        p.fill_alpha(r.left,r.top,r.right-r.left,r.bottom-r.top,8.,if on{0xd8d8de}else{0xffffff},if on{0.16}else if hover{0.12}else{0.05});
         if on{p.stroke(r.left,r.top,r.right-r.left,r.bottom-r.top,8.,ACCENT,0.7);}
         p.text_centered(label,r.left,r.top,r.right-r.left,r.bottom-r.top,11.5,if on{FG}else{MUTED},1.,on);
         if self.focused.as_ref()==Some(&action){p.stroke(r.left-1.,r.top-1.,r.right-r.left+2.,r.bottom-r.top+2.,9.,ACCENT,1.);}

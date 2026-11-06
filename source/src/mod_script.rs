@@ -6,6 +6,20 @@ use piccolo::{
     Table, UserData, Value,
 };
 
+/// Validate browser actions independently of the HTTP endpoint allowlist.
+/// Reject ambiguous shell input before asking the Windows URI parser.
+pub fn valid_action_url(url: &str) -> bool {
+    if url.len() > 16384 || !url.starts_with("https://")
+        || url.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '\\' | '"' | '<' | '>')) {
+        return false;
+    }
+    let Ok(uri) = windows::Foundation::Uri::CreateUri(&windows::core::HSTRING::from(url)) else { return false };
+    uri.SchemeName().is_ok_and(|s| s == "https")
+        && uri.Host().is_ok_and(|h| !h.is_empty())
+        && uri.UserName().is_ok_and(|s| s.is_empty())
+        && uri.Password().is_ok_and(|s| s.is_empty())
+}
+
 #[cfg(test)]
 mod widget_tests;
 
@@ -561,7 +575,9 @@ pub fn run_lua_mod_source_capabilities(
                 if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
                     let url = value_to_string(stack.get(0));
                     if let Ok(mut st) = arc_state.lock() {
-                        st.output.urls_to_open.push(url);
+                        if st.last_clicked_button.is_some() && valid_action_url(&url) {
+                            st.output.urls_to_open.push(url);
+                        }
                     }
                 }
             }
@@ -576,7 +592,9 @@ pub fn run_lua_mod_source_capabilities(
                 if let Ok(arc_state) = ud.downcast_static::<Arc<Mutex<LuaModState>>>() {
                     let text = value_to_string(stack.get(0));
                     if let Ok(mut st) = arc_state.lock() {
-                        st.output.clipboard_copies.push(text);
+                        if st.last_clicked_button.is_some() {
+                            st.output.clipboard_copies.push(text);
+                        }
                     }
                 }
             }
@@ -968,6 +986,32 @@ mod tests {
         assert_eq!(output.buttons.len(), 1);
         assert_eq!(output.buttons[0].id, "btn_open");
         assert_eq!(output.buttons[0].label, "Buka Web");
+    }
+
+    #[test]
+    fn action_urls_reject_shell_targets_and_invalid_uris() {
+        for url in ["file:///C:/test.exe", "javascript:alert(1)", "custom:run", "cmd.exe /c test", "C:\\test.exe", "http://example.com", "https://", "https://user:pass@example.com", "https://example.com/\r\n", "https://example.com/\\test", "https://example.com/\"test"] {
+            assert!(!valid_action_url(url), "accepted {url:?}");
+        }
+        for url in ["https://example.com", "https://example.com/path?q=test#part", "https://example.com:8443/a%20b"] {
+            assert!(valid_action_url(url), "rejected {url:?}");
+        }
+    }
+
+    #[test]
+    fn automatic_actions_are_dropped_and_click_is_not_replayed() {
+        let script = br#"system.copy("test"); system.open_url("https://example.com"); system.open_url("file:///C:/test.exe")"#;
+        for _ in 0..2 { // first run and timer refresh
+            let output = run_lua_mod_source(script, None).unwrap();
+            assert!(output.clipboard_copies.is_empty());
+            assert!(output.urls_to_open.is_empty());
+        }
+        let clicked = run_lua_mod_source(script, Some("button")).unwrap();
+        assert_eq!(clicked.clipboard_copies, vec!["test"]);
+        assert_eq!(clicked.urls_to_open, vec!["https://example.com"]);
+        let refresh = run_lua_mod_source(script, None).unwrap();
+        assert!(refresh.clipboard_copies.is_empty());
+        assert!(refresh.urls_to_open.is_empty());
     }
 
     #[test]

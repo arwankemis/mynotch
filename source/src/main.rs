@@ -1,5 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod app;
+mod activity;
+mod presets;
+mod note_editors;
+mod todo_notes;
 mod core;
 mod ui;
 mod secrets;
@@ -10,6 +14,7 @@ mod online;
 mod weather;
 mod weather_icons;
 mod lyrics;
+mod lyrics_gate;
 pub mod youtube;
 mod ical;
 mod render;
@@ -17,12 +22,14 @@ mod artwork;
 mod clipboard;
 mod mods;
 mod sticky;
+pub mod theme;
 pub mod i18n;
 pub mod mod_script;
 
 mod system;
 pub mod update;
 pub mod privacy;
+pub mod quick_controls;
 pub mod motion;
 pub mod glass;
 mod shell;
@@ -38,7 +45,11 @@ fn main(){
 
     // 1. Helper mode dispatch BEFORE UI/tray/single-instance mutex initialization!
     if let Some(tx_dir) = update::helper::is_helper_invocation(&args) {
-        let _ = update::helper::run_helper(&tx_dir);
+        let res = update::helper::run_helper(&tx_dir);
+        if let Err(e) = res {
+            eprintln!("Helper gagal: {e}");
+            std::process::exit(1);
+        }
         std::process::exit(0);
     }
 
@@ -61,8 +72,15 @@ fn main(){
                                             std::process::exit(0);
                                         }
                                     }
-                                } else if matches!(journal.phase, update::transaction::TransactionPhase::Swapping | update::transaction::TransactionPhase::BackingUp | update::transaction::TransactionPhase::Relaunching) {
-                                    let _ = update::transaction::execute_rollback(&mut journal, &pending.tx_dir);
+                                } else if matches!(journal.phase, update::transaction::TransactionPhase::Swapping | update::transaction::TransactionPhase::BackingUp | update::transaction::TransactionPhase::Relaunching | update::transaction::TransactionPhase::RollbackFailed) {
+                                    if let Err(err) = update::transaction::execute_rollback(&mut journal, &pending.tx_dir) {
+                                        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+                                        let title: Vec<u16> = "mynotch - Pemulihan Gagal\0".encode_utf16().collect();
+                                        let msg: Vec<u16> = format!("Pembaruan mynotch mengalami kegagalan dan pemulihan otomatis tidak lengkap: {err}\n\nSilakan unduh atau instal ulang mynotch secara manual.\0").encode_utf16().collect();
+                                        unsafe {
+                                            MessageBoxW(None, windows::core::PCWSTR(msg.as_ptr()), windows::core::PCWSTR(title.as_ptr()), MB_ICONERROR | MB_OK);
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -40,25 +40,25 @@ fn menu_values(key:&str, lang: &str)->Vec<(u32,String)>{
 impl Shell{
     pub(super) fn select_reminder(&mut self,index:usize){
         let index=index.min(3);if index==self.reminder_index{return}
-        let from=self.geometry();let current=self.reminder_position();self.reminder_index=index;self.reminder_menu=None;
+        let from=self.geometry();let current=self.reminder_position();self.reminder_index=index;self.reminder_menu=None;self.reminder_menu_scroll=0;
         if self.hover_stage == 1 && self.should_revert_stage1_to_calendar() {
             self.trigger_stage1_temporary(5);
         }
-        self.reminder_anim=Some((current,Instant::now()));self.focused=None;
+        self.reminder_anim=if self.settings.effective_presentation().reduced_motion{None}else{Some((current,Instant::now()))};self.focused=None;
         if (from.1-self.target_geometry().1).abs()>0.1{self.retarget_morph();self.layout();self.update_window_region();}
         self.make_inputs();self.start_morph_timer();if index==3{self.refresh_prayers(false);}self.invalidate();
     }
     fn reminder_position(&self)->f32{match self.reminder_anim{Some((from,t))=>{let x=(t.elapsed().as_secs_f32()/0.18).min(1.);from+(self.reminder_index as f32-from)*(1.-(1.-x).powi(3))},None=>self.reminder_index as f32}}
     fn reminder_enabled(&self)->bool{match self.reminder_index{0=>self.settings.focus_enabled,1=>self.settings.water_reminder,2=>self.settings.move_reminder,_=>self.settings.prayer_enabled}}
     pub(super) fn open_reminder_menu(&mut self,key:&'static str){
-        if self.reminder_menu==Some(key){self.reminder_menu=None;return}
+        if self.reminder_menu==Some(key){self.reminder_menu=None;self.reminder_menu_scroll=0;return}
         let current=match key{"focus"=>self.settings.focus_minutes,"break"=>self.settings.break_minutes,"water_interval"=>self.settings.water_interval,"target"=>self.settings.water_target,"serving"=>self.settings.water_serving,"move_interval"=>self.settings.move_interval,"stretch_duration"=>self.settings.stretch_seconds,"lead"=>self.settings.prayer_lead,"city"=>["Jakarta","Bandung","Surabaya"].iter().position(|c|*c==self.settings.prayer_city).unwrap_or(0)as u32,_=>0};
-        self.reminder_menu_cursor=menu_values(key, &self.settings.language).iter().position(|(v,_)|*v==current).unwrap_or(0);self.reminder_menu=Some(key);
+        self.reminder_menu_cursor=menu_values(key, &self.settings.language).iter().position(|(v,_)|*v==current).unwrap_or(0);self.reminder_menu_scroll=0;self.reminder_menu=Some(key);
     }
     pub(super) fn handle_reminder_menu_key(&mut self,key:u16)->bool{
         let Some(menu)=self.reminder_menu else{return false};let values=menu_values(menu, &self.settings.language);let end=values.len().saturating_sub(1);
-        match key{0x26=>self.reminder_menu_cursor=self.reminder_menu_cursor.saturating_sub(1),0x28=>self.reminder_menu_cursor=(self.reminder_menu_cursor+1).min(end),0x24=>self.reminder_menu_cursor=0,0x23=>self.reminder_menu_cursor=end,
-            0x0d|0x20=>{if let Some((v,_))=values.get(self.reminder_menu_cursor){self.action(Action::ReminderValue(menu,*v));}},0x1b=>self.reminder_menu=None,0x09=>{self.reminder_menu=None;self.invalidate();return false},_=>return false}
+        match key{0x26=>self.reminder_menu_cursor=self.reminder_menu_cursor.saturating_sub(1),0x28=>self.reminder_menu_cursor=(self.reminder_menu_cursor+1).min(end),0x21=>self.reminder_menu_cursor=self.reminder_menu_cursor.saturating_sub(3),0x22=>self.reminder_menu_cursor=(self.reminder_menu_cursor+3).min(end),0x24=>self.reminder_menu_cursor=0,0x23=>self.reminder_menu_cursor=end,
+            0x0d|0x20=>{if let Some((v,_))=values.get(self.reminder_menu_cursor){self.action(Action::ReminderValue(menu,*v));}},0x1b=>{self.reminder_menu=None;self.reminder_menu_scroll=0;},0x09=>{self.reminder_menu=None;self.reminder_menu_scroll=0;self.invalidate();return false},_=>return false}
         self.invalidate();true
     }
     pub(super) fn apply_reminder_value(&mut self,key:&str,value:u32){
@@ -83,26 +83,19 @@ impl Shell{
         let api=self.online.clone();self.job("Reminder",move||{let result=api.prayers(&city,&date);Event::Prayers(city,date,result)});
     }
     pub(super) fn tick_reminder(&mut self){
-        if self.stretch_deadline.is_some_and(|d|Instant::now()>=d){self.stretch_deadline=None;self.last_move=Instant::now();self.show_toast(ToastKind::Stretch,crate::i18n::t("toast.stretch_done", &self.settings.language),8000);}
+        if self.stretch_deadline.is_some_and(|d|Instant::now()>=d){self.stretch_deadline=None;self.last_move=Instant::now();self.complete_activity_run(true);}
         if !self.settings.enabled("Reminder"){return}
         if self.settings.prayer_enabled||(self.tab=="Reminder"&&self.reminder_index==3){self.refresh_prayers(false);}
         if !self.settings.prayer_enabled{return}
         let now=jakarta_now();let Some(schedule)=self.prayer_schedule.as_ref().filter(|s|s.date==jakarta_today()&&s.city==self.settings.prayer_city)else{return};
-        let mut messages=vec![];
+        let mut occurrences=vec![];
         for (i,time) in schedule.times.iter().enumerate(){
             if let Some(key)=due_key(now,time,self.settings.prayer_lead){
-                let key=format!("{} {key}",schedule.city);
-                if !self.state.prayer_delivered.contains(&key){
-                    self.state.prayer_delivered.push(key);
-                    let p_name = crate::i18n::prayer_name(i, &self.settings.language);
-                    let at_word = if self.settings.language == "en" { "at" } else { "pukul" };
-                    messages.push(format!("{p_name} {at_word} {time} WIB · {}", schedule.city));
-                }
+                let latch=format!("{} {key}",schedule.city);
+                if !self.state.prayer_delivered.contains(&latch){occurrences.push(crate::activity::ActivityId::Prayer{city:schedule.city.clone(),date:schedule.date.clone(),slot:i as u8,time:time.clone(),lead:self.settings.prayer_lead,latch});}
             }
         }
-        if self.state.prayer_delivered.len()>30{let date=jakarta_today();self.state.prayer_delivered.retain(|k|k.contains(&date));}
-        if !messages.is_empty(){self.save();}
-        for msg in messages{self.show_toast(ToastKind::Prayer,msg,12000);}
+        for id in occurrences{self.enqueue_activity(id);}
     }
     fn rw_hit(&mut self,x:f32,y:f32,w:f32,h:f32,action:Action,enabled:bool){if self.hit_enabled&&enabled{self.hits.push(Hit{rect:render::rect(x,y,w,h),action});}}
     unsafe fn rw_button(&mut self,p:&mut Painter,label:&str,x:f32,y:f32,w:f32,action:Action,primary:bool,enabled:bool){unsafe{
@@ -139,6 +132,7 @@ impl Shell{
     }}
     pub(super) fn reminder_page(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
+        self.button_h(p,if lang=="en"{"Held reminders"}else{"Pengingat tertahan"},24.,44.,155.,24.,Action::BacklogOpen,false);
         if self.width<440.{
             // The page layout needs 440 px; a narrow notch used to render a blank page
             // with no explanation. Say so instead of silently skipping.
@@ -319,12 +313,304 @@ impl Shell{
     fn reminder_dropdown(&mut self,p:&mut Painter,key:&'static str){unsafe{
         let lang = self.settings.language.clone();
         let (x,y,w)=match key{"break"|"target"|"stretch_duration"=>(386.,224.,146.),"serving"=>(446.,276.,86.),"lead"=>(386.,191.,146.),"city"=>(229.,191.,146.),_=>(229.,224.,146.)};
-        let items=menu_values(key, &lang);let h=items.len()as f32*29.+8.;let top=if y+34.+h>340.{y-h-4.}else{y+34.};
-        p.fill(x-3.,top-3.,w+6.,h+6.,10.,0x09090c);p.fill(x,top,w,h,7.,0x1c1c23);p.stroke(x,top,w,h,7.,0x3a3a45,1.);
-        for (i,(v,label)) in items.iter().enumerate(){let ry=top+4.+i as f32*29.;let hover=self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=ry&&b<=ry+29.);if hover||i==self.reminder_menu_cursor{p.fill(x+3.,ry,w-6.,28.,4.,0x30303b);}p.text(label,x+8.,ry+6.,w-16.,18.,10.5,WHITE,false);self.rw_hit(x+2.,ry,w-4.,29.,Action::ReminderValue(key,*v),true);}
+        let items=menu_values(key, &lang);
+        let layout=DropdownLayout::compute(x,y,w,items.len(),self.reminder_menu_cursor,self.reminder_menu_scroll,self.height);
+        self.reminder_menu_scroll=layout.scroll;
+        p.fill(layout.x-3.,layout.top-3.,layout.width+6.,layout.height+6.,10.,0x09090c);
+        p.fill(layout.x,layout.top,layout.width,layout.height,7.,0x1c1c23);
+        p.stroke(layout.x,layout.top,layout.width,layout.height,7.,0x3a3a45,1.);
+        p.clip(layout.x,layout.top+2.,layout.width,layout.height-4.);
+        let has_scrollbar=items.len()>layout.visible_count;
+        let text_w=layout.width-if has_scrollbar{24.}else{16.};
+        for (row_idx,(v,label)) in items.iter().skip(layout.scroll).take(layout.visible_count).enumerate(){
+            let item_idx=layout.scroll+row_idx;
+            let ry=layout.top+4.+row_idx as f32*DropdownLayout::ITEM_HEIGHT;
+            let hover=self.pointer.is_some_and(|(a,b)|a>=layout.x&&a<=layout.x+layout.width&&b>=ry&&b<=ry+29.&&b>=layout.top&&b<=layout.top+layout.height);
+            if hover||item_idx==self.reminder_menu_cursor{p.fill(layout.x+3.,ry,layout.width-6.,28.,4.,0x30303b);}
+            p.text(label.as_str(),layout.x+8.,ry+6.,text_w,18.,10.5,WHITE,false);
+            if let Some(rect)=layout.item_rect(item_idx){
+                self.rw_hit(rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top,Action::ReminderValue(key,*v),true);
+            }
+        }
+        p.unclip();
+        if has_scrollbar{
+            let track_x=layout.x+layout.width-7.;
+            let track_y=layout.top+4.;
+            let track_h=layout.height-8.;
+            let thumb_h=(track_h*layout.visible_count as f32/items.len() as f32).max(16.);
+            let max_scroll=(items.len()-layout.visible_count)as f32;
+            let thumb_y=track_y+(track_h-thumb_h)*(layout.scroll as f32/max_scroll.max(1.));
+            p.fill(track_x,track_y,3.,track_h,1.5,0x26262c);
+            p.fill(track_x,thumb_y,3.,thumb_h,1.5,0x5a5a66);
+        }
     }}
 }
+
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub struct DropdownLayout {
+    pub x: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+    pub visible_count: usize,
+    pub scroll: usize,
+    pub opens_upward: bool,
+}
+
+#[allow(dead_code)]
+impl DropdownLayout {
+    pub const ITEM_HEIGHT: f32 = 29.0;
+    pub const PADDING_V: f32 = 8.0;
+    pub const TRIGGER_GAP: f32 = 4.0;
+    pub const TRIGGER_HEIGHT: f32 = 30.0;
+    pub const VIEWPORT_MARGIN_TOP: f32 = 8.0;
+    pub const VIEWPORT_MARGIN_BOTTOM: f32 = 8.0;
+
+    pub fn compute(
+        x: f32,
+        y: f32,
+        width: f32,
+        total_items: usize,
+        cursor: usize,
+        preferred_scroll: usize,
+        viewport_height: f32,
+    ) -> Self {
+        if total_items == 0 {
+            return Self {
+                x,
+                top: y + Self::TRIGGER_HEIGHT + Self::TRIGGER_GAP,
+                width,
+                height: Self::PADDING_V,
+                visible_count: 0,
+                scroll: 0,
+                opens_upward: false,
+            };
+        }
+
+        let full_height = total_items as f32 * Self::ITEM_HEIGHT + Self::PADDING_V;
+        let min_y = Self::VIEWPORT_MARGIN_TOP;
+        let max_y = (viewport_height - Self::VIEWPORT_MARGIN_BOTTOM).max(min_y + Self::ITEM_HEIGHT + Self::PADDING_V);
+
+        let down_top = y + Self::TRIGGER_HEIGHT + Self::TRIGGER_GAP;
+        let space_down = (max_y - down_top).max(0.0);
+
+        let up_bottom = y - Self::TRIGGER_GAP;
+        let space_up = (up_bottom - min_y).max(0.0);
+
+        // Direction decision:
+        // 1. Fits downwards completely -> open downwards.
+        // 2. Fits upwards completely -> open upwards.
+        // 3. Otherwise, pick direction with larger available space.
+        let (opens_upward, available_space, base_top) = if space_down >= full_height {
+            (false, space_down, down_top)
+        } else if space_up >= full_height {
+            (true, space_up, up_bottom)
+        } else if space_up >= space_down {
+            (true, space_up, up_bottom)
+        } else {
+            (false, space_down, down_top)
+        };
+
+        let (top, height, visible_count) = if available_space >= Self::ITEM_HEIGHT + Self::PADDING_V {
+            let max_visible = ((available_space - Self::PADDING_V) / Self::ITEM_HEIGHT).floor() as usize;
+            let visible = max_visible.clamp(1, total_items);
+            let h = visible as f32 * Self::ITEM_HEIGHT + Self::PADDING_V;
+            let t = if opens_upward {
+                (base_top - h).max(min_y)
+            } else {
+                base_top
+            };
+            (t, h, visible)
+        } else {
+            let max_viewport_space = (max_y - min_y).max(Self::ITEM_HEIGHT + Self::PADDING_V);
+            let max_visible = ((max_viewport_space - Self::PADDING_V) / Self::ITEM_HEIGHT).floor() as usize;
+            let visible = max_visible.clamp(1, total_items);
+            let h = visible as f32 * Self::ITEM_HEIGHT + Self::PADDING_V;
+            let t = if opens_upward {
+                (base_top - h).clamp(min_y, max_y - h)
+            } else {
+                base_top.clamp(min_y, max_y - h)
+            };
+            (t, h, visible)
+        };
+
+        let max_scroll = total_items.saturating_sub(visible_count);
+        let mut scroll = preferred_scroll.min(max_scroll);
+        if cursor < scroll {
+            scroll = cursor;
+        } else if cursor >= scroll + visible_count {
+            scroll = (cursor + 1 - visible_count).min(max_scroll);
+        }
+
+        Self {
+            x,
+            top,
+            width,
+            height,
+            visible_count,
+            scroll,
+            opens_upward,
+        }
+    }
+
+    pub fn item_rect(&self, item_index: usize) -> Option<render::D2D_RECT_F> {
+        if item_index < self.scroll || item_index >= self.scroll + self.visible_count {
+            return None;
+        }
+        let rel_idx = item_index - self.scroll;
+        let ry = self.top + 4.0 + rel_idx as f32 * Self::ITEM_HEIGHT;
+        let hit_top = ry.max(self.top);
+        let hit_bottom = (ry + Self::ITEM_HEIGHT).min(self.top + self.height);
+        if hit_bottom <= hit_top {
+            return None;
+        }
+        Some(render::rect(self.x + 2.0, hit_top, self.width - 4.0, hit_bottom - hit_top))
+    }
+
+    pub fn contains_point(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px <= self.x + self.width && py >= self.top && py <= self.top + self.height
+    }
+
+    pub fn is_within_viewport(&self, viewport_h: f32) -> bool {
+        self.top >= Self::VIEWPORT_MARGIN_TOP
+            && self.top + self.height <= (viewport_h - Self::VIEWPORT_MARGIN_BOTTOM) + 0.001
+    }
+
+    pub fn physical_bounds(&self, scale: f32) -> (f32, f32, f32, f32) {
+        (self.x * scale, self.top * scale, self.width * scale, self.height * scale)
+    }
+}
+
 #[cfg(test)]mod tests{
+    #[test]
+    fn test_reminder_dropdown_clamping_short_downward() {
+        // city at y=191 with 3 items fits downwards in prayer tab (viewport 362)
+        let layout = DropdownLayout::compute(229.0, 191.0, 146.0, 3, 0, 0, 362.0);
+        assert!(!layout.opens_upward, "short list below y=191 should open downwards");
+        assert_eq!(layout.top, 191.0 + 30.0 + 4.0);
+        assert_eq!(layout.visible_count, 3);
+        assert_eq!(layout.scroll, 0);
+        assert!(layout.is_within_viewport(362.0));
+        assert!(layout.item_rect(0).is_some());
+        assert!(layout.item_rect(2).is_some());
+        assert!(layout.item_rect(3).is_none());
+    }
+
+    #[test]
+    fn test_reminder_dropdown_clamping_short_upward() {
+        // serving at y=276 with 4 items does not fit downwards in viewport 346, opens upwards
+        let layout = DropdownLayout::compute(446.0, 276.0, 86.0, 4, 0, 0, 346.0);
+        assert!(layout.opens_upward, "serving at y=276 must open upwards");
+        assert_eq!(layout.visible_count, 4);
+        assert_eq!(layout.scroll, 0);
+        assert_eq!(layout.top, 276.0 - 4.0 - layout.height);
+        assert!(layout.is_within_viewport(346.0));
+        assert!(layout.top >= DropdownLayout::VIEWPORT_MARGIN_TOP);
+        assert!(layout.top + layout.height <= 346.0 - DropdownLayout::VIEWPORT_MARGIN_BOTTOM);
+    }
+
+    #[test]
+    fn test_reminder_dropdown_clamping_long_list_and_viewport_boundaries() {
+        // water_interval at y=224 with 20 items (height would be 20*29+8 = 588px)
+        let layout = DropdownLayout::compute(229.0, 224.0, 146.0, 20, 0, 0, 346.0);
+        assert!(layout.is_within_viewport(346.0), "must not exceed viewport");
+        assert!(layout.top >= DropdownLayout::VIEWPORT_MARGIN_TOP);
+        assert!(layout.top + layout.height <= 346.0 - DropdownLayout::VIEWPORT_MARGIN_BOTTOM);
+        assert!(layout.visible_count < 20, "must be clamped to visible count");
+        assert!(layout.visible_count >= 5, "must show at least available items");
+        // Verify no hit rect escapes viewport
+        for i in 0..20 {
+            if let Some(rect) = layout.item_rect(i) {
+                assert!(rect.top >= layout.top);
+                assert!(rect.bottom <= layout.top + layout.height);
+                assert!(rect.top >= DropdownLayout::VIEWPORT_MARGIN_TOP);
+                assert!(rect.bottom <= 346.0 - DropdownLayout::VIEWPORT_MARGIN_BOTTOM);
+            }
+        }
+    }
+
+    #[test]
+    fn test_reminder_dropdown_scroll_reaches_first_and_last_option() {
+        let total = 15;
+        // At cursor 0, first item must be visible
+        let layout_first = DropdownLayout::compute(229.0, 224.0, 146.0, total, 0, 0, 346.0);
+        assert_eq!(layout_first.scroll, 0);
+        let first_rect = layout_first.item_rect(0);
+        assert!(first_rect.is_some(), "first item must have hit rect when cursor=0");
+        assert!(layout_first.item_rect(total - 1).is_none(), "last item not visible initially");
+
+        // At cursor total - 1 (End key), last item must be visible
+        let layout_last = DropdownLayout::compute(229.0, 224.0, 146.0, total, total - 1, 0, 346.0);
+        let last_rect = layout_last.item_rect(total - 1);
+        assert!(last_rect.is_some(), "last item must have hit rect when scrolled to end");
+        assert!(layout_last.scroll > 0, "scroll offset must advance");
+        assert_eq!(layout_last.scroll + layout_last.visible_count, total);
+    }
+
+    #[test]
+    fn test_reminder_dropdown_hit_targets_strictly_contained() {
+        let layout = DropdownLayout::compute(386.0, 224.0, 146.0, 12, 5, 0, 346.0);
+        let mut hit_count = 0;
+        for i in 0..12 {
+            if let Some(rect) = layout.item_rect(i) {
+                hit_count += 1;
+                assert!(rect.left >= layout.x);
+                assert!(rect.right <= layout.x + layout.width);
+                assert!(rect.top >= layout.top);
+                assert!(rect.bottom <= layout.top + layout.height);
+            }
+        }
+        assert_eq!(hit_count, layout.visible_count);
+    }
+
+    #[test]
+    fn test_reminder_dropdown_dpi_invariance() {
+        let layout = DropdownLayout::compute(229.0, 191.0, 146.0, 10, 2, 0, 362.0);
+        assert!(layout.is_within_viewport(362.0));
+
+        // Test DPI 100%, 150%, 200%
+        for scale in [1.0f32, 1.5f32, 2.0f32] {
+            let (px, py, pw, ph) = layout.physical_bounds(scale);
+            let phys_viewport_h = 362.0 * scale;
+            assert!(py >= DropdownLayout::VIEWPORT_MARGIN_TOP * scale);
+            assert!(py + ph <= (phys_viewport_h - DropdownLayout::VIEWPORT_MARGIN_BOTTOM * scale) + 0.01);
+            assert_eq!(px, 229.0 * scale);
+            assert_eq!(pw, 146.0 * scale);
+
+            // Cursor conversion roundtrip
+            let phys_cursor_y = (layout.top + 10.0) * scale;
+            let logical_cursor_y = phys_cursor_y / scale;
+            assert!(layout.contains_point(layout.x + 10.0, logical_cursor_y));
+        }
+    }
+
+    #[test]
+    fn test_reminder_dropdown_click_outside_points() {
+        let layout = DropdownLayout::compute(229.0, 191.0, 146.0, 3, 0, 0, 362.0);
+        // Points clearly outside
+        assert!(!layout.contains_point(layout.x - 10.0, layout.top));
+        assert!(!layout.contains_point(layout.x + layout.width + 10.0, layout.top));
+        assert!(!layout.contains_point(layout.x + 10.0, layout.top - 5.0));
+        assert!(!layout.contains_point(layout.x + 10.0, layout.top + layout.height + 5.0));
+        // Point inside
+        assert!(layout.contains_point(layout.x + 10.0, layout.top + 10.0));
+    }
+
+    #[test]
+    fn test_reminder_dropdown_clamping_tiny_constrained_viewport() {
+        // Small/tight viewport of 80px where neither full downwards nor upwards fits
+        let layout = DropdownLayout::compute(229.0, 40.0, 146.0, 5, 0, 0, 80.0);
+        assert!(layout.is_within_viewport(80.0), "tiny viewport must clamp within boundaries");
+        assert!(layout.top >= DropdownLayout::VIEWPORT_MARGIN_TOP);
+        assert!(layout.top + layout.height <= 80.0 - DropdownLayout::VIEWPORT_MARGIN_BOTTOM + 0.01);
+        assert!(layout.visible_count >= 1, "must show at least 1 item");
+        if let Some(rect) = layout.item_rect(0) {
+            assert!(rect.top >= layout.top);
+            assert!(rect.bottom <= layout.top + layout.height);
+        }
+    }
+
     use super::*;
     #[test]fn prayer_window_uses_wib_and_handles_midnight(){use chrono::TimeZone;let tz=chrono::FixedOffset::east_opt(7*3600).unwrap();let now=tz.with_ymd_and_hms(2026,10,26,23,56,0).single().unwrap();assert!(due_key(now,"00:01",5).unwrap().starts_with("2026-10-27"));assert!(due_key(now,"23:56",0).is_some());assert!(due_key(now,"23:54",0).is_none());assert!(due_key(now,"23:57",0).is_none());}
 }

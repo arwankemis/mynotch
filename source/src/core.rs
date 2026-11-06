@@ -19,11 +19,34 @@ pub fn clamp_list_scroll(scroll: usize, total: usize, visible: usize) -> usize {
     scroll.min(max)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HwMetric {
+    Ram,
+    Cpu,
+    Gpu,
+}
+
+fn default_hw_metrics() -> Vec<HwMetric> {
+    vec![HwMetric::Ram, HwMetric::Cpu]
+}
+
+fn default_u8_80() -> u8 {
+    80
+}
+
+fn default_u8_90() -> u8 {
+    90
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub bottom: bool, pub edge_gap: i32, pub scale: f32, pub opacity: u8, pub minimal: bool,
     pub hide_fullscreen: bool, pub lyrics_below: bool, pub glow: bool, pub visualizer: bool, pub romanize_lyrics: bool,
+    pub lyrics_online: bool, pub lyrics_youtube_fallback: bool,
+    #[serde(default)] pub quiet_mode: bool,
+    #[serde(default)] pub power_saver_mode: bool,
     pub default_tab: String, pub modules: BTreeMap<String,bool>,
     pub tab_order: Vec<String>,
     #[serde(default)] pub installed_mods: Vec<String>,
@@ -64,6 +87,16 @@ pub struct Settings {
     /// "dark" (Gelap, default) or "light" (Terang). Shared by every material.
     #[serde(default = "default_theme_color")]
     pub theme_color: String,
+    #[serde(default)]
+    pub active_theme: String,
+    #[serde(default)]
+    pub hw_monitor_enabled: bool,
+    #[serde(default = "default_hw_metrics")]
+    pub hw_metrics: Vec<HwMetric>,
+    #[serde(default = "default_u8_80")]
+    pub hw_threshold_high: u8,
+    #[serde(default = "default_u8_90")]
+    pub hw_threshold_critical: u8,
 }
 fn default_true() -> bool {
     true
@@ -76,7 +109,8 @@ fn default_theme_material() -> String {
 }
 impl Default for Settings {
     fn default()->Self { Self {
-        bottom:false,edge_gap:0,scale:1.,opacity:250,minimal:false,hide_fullscreen:true,lyrics_below:true,glow:true,visualizer:true,romanize_lyrics:true,
+        quiet_mode:false,power_saver_mode:false,
+        bottom:false,edge_gap:0,scale:1.,opacity:250,minimal:false,hide_fullscreen:true,lyrics_below:true,glow:true,visualizer:true,romanize_lyrics:true,lyrics_online:false,lyrics_youtube_fallback:false,
         default_tab:"Musik".into(), modules: MODULES.iter().map(|&m|(m.to_owned(),m!="Clipboard")).collect(),
         tab_order: MODULES.iter().map(|&m| m.to_string()).collect(),
         installed_mods: vec![],
@@ -94,6 +128,11 @@ impl Default for Settings {
         motion_reduced: false,
         theme_material: "solid".into(),
         theme_color: "dark".into(),
+        active_theme: String::new(),
+        hw_monitor_enabled: false,
+        hw_metrics: vec![HwMetric::Ram, HwMetric::Cpu],
+        hw_threshold_high: 80,
+        hw_threshold_critical: 90,
         focus_minutes:25,break_minutes:5,focus_enabled:true,stretch_after_focus:true,prayer_city:"Jakarta".into(),prayer_sound:false,auto_break:false,stretch_seconds:60,prayer_enabled:false,prayer_lead:5,prayer_times:vec![String::new();5],prayer_date:String::new(),water_target:2000,water_serving:250,water_interval:45,move_interval:45,eye_interval:25,
         water_reminder:true,move_reminder:true,eye_reminder:false,
         latitude:-6.2088,longitude:106.8456,weather_city:"Jakarta".into(),weather_configured:false,
@@ -144,6 +183,8 @@ impl Settings {
             }
         }
         order.retain(|m| (MODULES.contains(&m.as_str()) || BUILTIN_MOD_TABS.contains(&m.as_str()) || self.mod_tabs.iter().any(|t| t == m)) && self.enabled(m));
+        // Clipboard is merged into the Saved (Catatan) tab as a sub-view.
+        order.retain(|m| m != "Clipboard");
         order
     }
     /// Opts a community mod's page into (or out of) the Stage 2 tab strip. The slot stays in
@@ -259,6 +300,27 @@ impl Settings {
         true
     }
     pub fn normalize(&mut self) {
+        // Task 035: Normalize hw_metrics and thresholds
+        if self.hw_metrics.is_empty() || self.hw_metrics.len() > 3 {
+            self.hw_metrics = vec![HwMetric::Ram, HwMetric::Cpu];
+        } else {
+            let mut unique = Vec::new();
+            for m in &self.hw_metrics {
+                if !unique.contains(m) {
+                    unique.push(*m);
+                }
+            }
+            if unique.is_empty() {
+                self.hw_metrics = vec![HwMetric::Ram, HwMetric::Cpu];
+            } else {
+                self.hw_metrics = unique;
+            }
+        }
+        if self.hw_threshold_high >= self.hw_threshold_critical || self.hw_threshold_critical > 100 {
+            self.hw_threshold_high = 80;
+            self.hw_threshold_critical = 90;
+        }
+
         self.edge_gap=self.edge_gap.clamp(0,160); self.scale=if self.scale.is_finite(){self.scale.clamp(0.8,1.35)}else{1.};
         // A saved 0 would make the whole notch invisible while its click region stayed active.
         self.opacity=self.opacity.clamp(MIN_OPACITY,255);
@@ -304,7 +366,7 @@ impl Settings {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Todo { pub id:u64,pub text:String,pub done:bool,pub due:Option<DateTime<Local>>,#[serde(default)]pub reminded:bool }
+pub struct Todo { pub id:u64,pub text:String,pub done:bool,pub due:Option<DateTime<Local>>,#[serde(default)]pub reminded:bool,#[serde(default)]pub note_id:Option<u64> }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Drink {pub date:NaiveDate,pub ml:u32}
 
@@ -312,6 +374,13 @@ pub struct Drink {pub date:NaiveDate,pub ml:u32}
 #[serde(default)]
 pub struct State {
     pub todos: Vec<Todo>,
+    #[serde(default)] pub next_note_id: u64,
+    #[serde(default)] pub next_todo_id: u64,
+    #[serde(default)] pub quiet_backlog_remaining_ms: u32,
+    #[serde(default)] pub pending_local_reminders: Vec<crate::activity::PendingReminder>,
+    #[serde(default = "crate::activity::initial_sequence")] pub next_activity_sequence: u64,
+    #[serde(default)] pub local_reminder_latches: std::collections::BTreeSet<crate::activity::ActivityId>,
+    #[serde(default)] pub local_recurring_high_water: BTreeMap<crate::activity::ReminderKind,u64>,
     pub notes: String,
     pub water: Vec<Drink>,
     pub clipboard_history: Vec<crate::clipboard::ClipItem>,
@@ -451,6 +520,65 @@ pub struct WorkPolicy {pub enabled:bool,pub visible:bool,pub fullscreen:bool,pub
 impl WorkPolicy {pub fn visualize(&self)->bool{self.enabled&&self.visible&&!self.fullscreen&&self.playing}}
 
 #[cfg(test)] mod tests {
+
+    #[test]
+    fn test_hw_metrics_serialization_and_defaults() {
+        let s = Settings::default();
+        assert!(!s.hw_monitor_enabled);
+        assert_eq!(s.hw_metrics, vec![HwMetric::Ram, HwMetric::Cpu]);
+        assert_eq!(s.hw_threshold_high, 80);
+        assert_eq!(s.hw_threshold_critical, 90);
+
+        // Serialization roundtrip
+        let json = serde_json::to_string(&s).unwrap();
+        let s2: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(s2.hw_metrics, vec![HwMetric::Ram, HwMetric::Cpu]);
+
+        // Legacy json without hw fields deserializes with defaults
+        let legacy_json = "{}";
+        let s_legacy: Settings = serde_json::from_str(legacy_json).unwrap();
+        assert!(!s_legacy.hw_monitor_enabled);
+        assert_eq!(s_legacy.hw_metrics, vec![HwMetric::Ram, HwMetric::Cpu]);
+        assert_eq!(s_legacy.hw_threshold_high, 80);
+        assert_eq!(s_legacy.hw_threshold_critical, 90);
+
+        // Custom combinations
+        let custom_json = r#"{"hw_monitor_enabled":true,"hw_metrics":["gpu","ram"],"hw_threshold_high":75,"hw_threshold_critical":85}"#;
+        let s_custom: Settings = serde_json::from_str(custom_json).unwrap();
+        assert!(s_custom.hw_monitor_enabled);
+        assert_eq!(s_custom.hw_metrics, vec![HwMetric::Gpu, HwMetric::Ram]);
+        assert_eq!(s_custom.hw_threshold_high, 75);
+        assert_eq!(s_custom.hw_threshold_critical, 85);
+    }
+
+    #[test]
+    fn test_hw_metrics_normalize_validation() {
+        let mut s = Settings::default();
+
+        // Empty metrics fall back to default
+        s.hw_metrics.clear();
+        s.normalize();
+        assert_eq!(s.hw_metrics, vec![HwMetric::Ram, HwMetric::Cpu]);
+
+        // Duplicate metrics are deduplicated
+        s.hw_metrics = vec![HwMetric::Ram, HwMetric::Ram, HwMetric::Cpu];
+        s.normalize();
+        assert_eq!(s.hw_metrics, vec![HwMetric::Ram, HwMetric::Cpu]);
+
+        // Invalid threshold resets to 80/90
+        s.hw_threshold_high = 95;
+        s.hw_threshold_critical = 90;
+        s.normalize();
+        assert_eq!(s.hw_threshold_high, 80);
+        assert_eq!(s.hw_threshold_critical, 90);
+
+        s.hw_threshold_high = 80;
+        s.hw_threshold_critical = 105;
+        s.normalize();
+        assert_eq!(s.hw_threshold_high, 80);
+        assert_eq!(s.hw_threshold_critical, 90);
+    }
+
  use super::*;
 
  #[test]fn settings_keep_default_visible_and_reject_disabling_last_tab(){let mut s=Settings::default();s.default_tab="Musik".into();assert!(s.set_module_enabled("Musik",false));assert!(s.enabled(&s.default_tab));let order=s.active_tab_order();for tab in &order[1..]{assert!(s.set_module_enabled(tab,false));}assert_eq!(s.active_tab_order().len(),1);assert!(!s.set_module_enabled(&order[0],false));assert!(!s.set_module_enabled("invalid",true));}
@@ -559,9 +687,11 @@ impl WorkPolicy {pub fn visualize(&self)->bool{self.enabled&&self.visible&&!self
         let mut s = Settings::default();
         s.installed_mods = vec!["sticky_notes".into(), "weather".into()];
         s.normalize();
+        let before = s.settings_tab_order().iter().position(|t| t == "Cuaca").unwrap();
         s.move_tab("Cuaca", -3);
+        let after = s.settings_tab_order().iter().position(|t| t == "Cuaca").unwrap();
+        assert!(after < before, "test setup should move Cuaca ahead of the defaults");
         let pos = s.tab_order.iter().position(|t| t == "Cuaca").unwrap();
-        assert_eq!(pos, 2, "test setup should move Cuaca ahead of the defaults");
 
         s.installed_mods.retain(|m| m != "weather");
         s.modules.remove("Cuaca");

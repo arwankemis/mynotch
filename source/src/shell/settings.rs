@@ -1,6 +1,6 @@
 use super::*;
 use crate::i18n::t;
-const FG:u32=0xf3f3f5;const MUTED:u32=0xb2bac8;const ACCENT:u32=0x69d2e5;
+const FG:u32=0xf3f3f5;const MUTED:u32=0xb2bac8;const ACCENT:u32=0xd8d8de;
 #[derive(Clone)]pub(super) struct SettingsPopup{pub key:&'static str,pub x:f32,pub y:f32,pub width:f32,pub cursor:usize}
 #[allow(dead_code)]
 pub(super) fn prayer_lead_summary(city:&str,lead:u32)->String{
@@ -15,9 +15,9 @@ pub(super) fn prayer_lead_summary_i18n(city:&str,lead:u32,lang:&str)->String{
 }
 impl Shell{
     fn settings_content_bottom(&self)->f32{match self.settings_cat{
-        0=>if self.settings_subpage_privacy{280.}else{370.},
-        1=>414.,2=>116.+self.settings.settings_tab_order().len()as f32*36.,
-        3=>300.,4=>354.,5=>420.,_=>self.height-20.
+        0=>if self.settings_subpage_privacy{280.}else{526.},
+        1=>if self.settings.hw_monitor_enabled{610.}else{466.},2=>116.+self.settings.settings_tab_order().len()as f32*36.,
+        3=>570.,4=>354.,5=>420.,_=>self.height-20.
     }}
     pub(super) fn scroll_settings(&mut self,delta:f32){
         if self.settings_cat==5{self.scroll_catalog(delta.signum()as i32);return}
@@ -68,7 +68,7 @@ impl Shell{
     }}
     pub(super) fn draw_settings(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
-        p.outline_icon("settings",18.,18.,18.,0xc5c5ce);p.text(t("settings.title", &lang),44.,15.,200.,25.,17.,FG,false);p.text(t("settings.auto_saved", &lang),44.,40.,250.,14.,10.,0x777781,false);
+        p.outline_icon("settings",18.,18.,18.,0xc5c5ce);p.text(t("settings.title", &lang),44.,15.,200.,25.,17.,FG,false);p.text(if self.editors.unsaved||self.preset_host.settings_unsaved{if lang=="en"{"Not saved — retry an action"}else{"Belum tersimpan — coba simpan lagi"}}else{t("settings.auto_saved", &lang)},44.,40.,320.,14.,10.,0x777781,false);
         self.st_button(p,t("settings.back", &lang),462.,15.,80.,Action::Back,true);p.outline_icon("left",447.,24.,13.,MUTED);
         p.fill(176.,65.,1.,279.,0.,0x26262c);
         let cats = self.categories();
@@ -91,6 +91,7 @@ impl Shell{
             p.text(cats[category].0, 196., 66., 346., 25., 17., FG, false);
             p.text(cats[category].2, 196., 92., 346., 16., 10.5, MUTED, false);
         }
+        if self.settings.quiet_mode&&matches!(category,2|4|5){self.quiet_placeholder(p);return;}
         if category==5{self.draw_catalog(p);return;}
         let layout=super::settings_layout::SettingsLayout::compute(self.width,self.height.min(360.),self.settings_content_bottom(),self.settings_scroll[category]);
         self.settings_scroll[category]=layout.scroll_y;
@@ -133,23 +134,31 @@ impl Shell{
 
     fn settings_general(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
-        self.st_row_compact(p,116.,t("general.language",&lang),t("general.language.desc",&lang));
-        self.st_select(p,"language",crate::i18n::language_name(&lang),418.,122.,124.,true);
-        self.st_row_compact(p,158.,t("general.fullscreen",&lang),t("general.fullscreen.desc",&lang));
-        self.st_toggle(p,512.,169.,self.settings.hide_fullscreen,Action::Toggle("fullscreen"),true);
-        self.st_row_compact(p,200.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
-        self.st_toggle(p,512.,211.,self.settings.minimal,Action::Minimal,true);
-        self.st_row_compact(p,242.,t("general.startup",&lang),t("general.startup.desc",&lang));
-        self.st_toggle(p,512.,253.,self.settings.run_at_startup,Action::Toggle("startup"),true);
-        self.st_row_compact(p,284.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
+        let en=lang=="en";
+        self.st_row_compact(p,116.,if en{"Quiet"}else{"Tenang"},if en{"Hide content; hold reminders"}else{"Sembunyikan isi; tahan pengingat"});
+        self.st_toggle(p,512.,127.,self.settings.quiet_mode,Action::Preset(crate::presets::PresetAction::SetQuiet(!self.settings.quiet_mode)),true);
+        self.st_row_compact(p,162.,if en{"Power saver"}else{"Hemat Daya"},if en{"Solid material; reduce motion"}else{"Material Solid; kurangi animasi"});
+        self.st_toggle(p,512.,173.,self.settings.power_saver_mode,Action::Preset(crate::presets::PresetAction::SetPowerSaver(!self.settings.power_saver_mode)),true);
+        self.st_button(p,if en{"Turn presets off"}else{"Matikan preset"},196.,211.,155.,Action::Preset(crate::presets::PresetAction::Reset),true);
+
+        self.st_row_compact(p,272.,t("general.language",&lang),t("general.language.desc",&lang));
+        self.st_select(p,"language",crate::i18n::language_name(&lang),418.,278.,124.,true);
+        self.st_row_compact(p,314.,t("general.fullscreen",&lang),t("general.fullscreen.desc",&lang));
+        self.st_toggle(p,512.,325.,self.settings.hide_fullscreen,Action::Toggle("fullscreen"),true);
+        self.st_row_compact(p,356.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
+        self.st_toggle(p,512.,367.,self.settings.minimal,Action::Minimal,true);
+        self.st_row_compact(p,398.,t("general.startup",&lang),t("general.startup.desc",&lang));
+        self.st_toggle(p,512.,409.,self.settings.run_at_startup,Action::Toggle("startup"),true);
+        self.st_row_compact(p,440.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
         let current=crate::i18n::tab_name(&self.settings.default_tab, &lang).to_string();
         let has_tabs = !self.settings.active_tab_order().is_empty();
-        self.st_select(p,"default_tab",&current,418.,290.,124.,has_tabs);
-        self.st_row_compact(p,326.,t("general.privacy",&lang),t("general.privacy.desc",&lang));
-        self.st_button(p,t("general.privacy_open",&lang),448.,330.,94.,Action::OpenPrivacySettings,true);
+        self.st_select(p,"default_tab",&current,418.,446.,124.,has_tabs);
+        self.st_row_compact(p,482.,t("general.privacy",&lang),t("general.privacy.desc",&lang));
+        self.st_button(p,t("general.privacy_open",&lang),448.,486.,94.,Action::OpenPrivacySettings,true);
     }}
     fn settings_appearance(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
+        let en = lang == "en";
         self.st_row_compact(p,116.,t("appearance.position",&lang),t("appearance.position.desc",&lang));
         for (label,x,bottom) in [(t("appearance.top",&lang),418.,false),(t("appearance.bottom",&lang),482.,true)]{
             let selected=self.settings.bottom==bottom;
@@ -174,7 +183,7 @@ impl Shell{
             crate::glass::Fallback::NoBackdrop=>Some(t("material.fallback.unavailable",&lang)),
             _=>None,
         };
-        self.st_row_compact(p,284.,t("appearance.material",&lang),fallback.unwrap_or(t("appearance.material.desc",&lang)));
+        self.st_row_compact(p,284.,t("appearance.material",&lang),if self.settings.power_saver_mode{if lang=="en"{"Effective: Solid during Power saver"}else{"Efektif: Solid selama Hemat"}}else{fallback.unwrap_or(t("appearance.material.desc",&lang))});
         let mode=crate::glass::MaterialMode::from_str(&self.settings.theme_material);
         let material_label=match mode{crate::glass::MaterialMode::Solid=>t("material.solid",&lang),crate::glass::MaterialMode::Lite=>t("material.lite",&lang),crate::glass::MaterialMode::Adaptive=>t("material.adaptive",&lang)};
         self.st_select(p,"material",material_label,418.,290.,124.,true);
@@ -183,6 +192,26 @@ impl Shell{
         self.st_select(p,"theme_color",color_label,418.,332.,124.,true);
         self.st_row_compact(p,368.,if lang=="en"{"Software renderer (WARP)"}else{"Renderer software (WARP)"},if lang=="en"{"CPU rendering. Restart required."}else{"Render melalui CPU. Perlu mulai ulang."});
         self.st_toggle(p,512.,379.,self.settings.software_renderer,Action::Toggle("software_renderer"),true);
+        // Hardware monitor (Stage 1): any combination of CPU / RAM / GPU.
+        p.fill(196.,414.,346.,1.,0.,0x222229);
+        let hw_on=self.settings.hw_monitor_enabled;
+        p.text(if en{"Hardware monitor"}else{"Pemantau hardware"},196.,424.,210.,18.,12.,FG,true);
+        p.text_ellipsis(if en{"Show CPU / RAM / GPU in Stage 1"}else{"Tampilkan CPU / RAM / GPU di Stage 1"},196.,444.,300.,16.,10.,MUTED,false);
+        self.st_toggle(p,512.,428.,hw_on,Action::Toggle("hw_monitor"),true);
+        if hw_on {
+            for (i,(key,label)) in [
+                ("hw_cpu",if en{"CPU usage"}else{"Penggunaan CPU"}),
+                ("hw_ram",if en{"RAM usage"}else{"Penggunaan RAM"}),
+                ("hw_gpu",if en{"GPU usage"}else{"Penggunaan GPU"}),
+            ].into_iter().enumerate(){
+                let y=478.+ i as f32*38.;
+                let metric=match key{"hw_cpu"=>crate::core::HwMetric::Cpu,"hw_ram"=>crate::core::HwMetric::Ram,_=>crate::core::HwMetric::Gpu};
+                let on=self.settings.hw_metrics.contains(&metric);
+                p.text(label,196.,y+3.,210.,18.,11.5,FG,false);
+                self.st_toggle(p,512.,y+4.,on,Action::Toggle(key),true);
+                p.fill(196.,y+34.,346.,1.,0.,0x222229);
+            }
+        }
     }}
     fn settings_tabs(&mut self,p:&mut Painter){unsafe{
         let order=self.settings.settings_tab_order();
@@ -207,14 +236,25 @@ impl Shell{
 
     fn settings_audio(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
-        self.st_row_compact(p,116.,t("audio.visualizer",&lang),t("audio.visualizer.desc",&lang));
-        self.st_toggle(p,512.,127.,self.settings.visualizer,Action::Toggle("visualizer"),true);
-        self.st_row_compact(p,162.,t("audio.glow",&lang),t("audio.glow.desc",&lang));
-        self.st_toggle(p,512.,173.,self.settings.glow,Action::Toggle("glow"),true);
-        self.st_row_compact(p,208.,t("audio.romanize",&lang),t("audio.romanize.desc",&lang));
-        self.st_toggle(p,512.,219.,self.settings.romanize_lyrics,Action::Toggle("romanize_lyrics"),true);
-        self.st_row_compact(p,254.,t("audio.player_lyrics",&lang),t("audio.player_lyrics.desc",&lang));
-        self.st_button(p,t("audio.open_music",&lang),418.,260.,124.,Action::SettingsOpenTab("Musik".into(),0),self.settings.enabled("Musik"));
+        p.text(t("audio.lyrics_online",&lang),196.,118.,300.,20.,12.,FG,false);
+        p.text(t("audio.lyrics_online.desc",&lang),196.,141.,300.,62.,11.,MUTED,false);
+        self.st_toggle(p,512.,127.,self.settings.lyrics_online,Action::Toggle("lyrics_online"),true);
+        p.fill(196.,208.,346.,1.,0.,0x222229);
+        if !self.settings.lyrics_online { p.push_alpha(0.5); }
+        p.text(t("audio.youtube_fallback",&lang),196.,218.,300.,20.,12.,FG,false);
+        p.text(t("audio.youtube_fallback.desc",&lang),196.,241.,300.,64.,11.,MUTED,false);
+        if !self.settings.lyrics_online { p.pop_alpha(); }
+        self.st_toggle(p,512.,227.,self.settings.lyrics_youtube_fallback,Action::Toggle("lyrics_youtube_fallback"),self.settings.lyrics_online);
+        if !self.settings.lyrics_online { p.text(t("audio.youtube_blocked",&lang),196.,310.,340.,30.,10.,MUTED,false); }
+        p.text(t("audio.consent_sent",&lang),196.,344.,340.,30.,10.,MUTED,false);
+        self.st_row_compact(p,380.,t("audio.visualizer",&lang),if self.settings.power_saver_mode{if lang=="en"{"Effective: Off during Power saver"}else{"Efektif: Nonaktif selama Hemat"}}else{t("audio.visualizer.desc",&lang)});
+        self.st_toggle(p,512.,391.,self.settings.visualizer,Action::Toggle("visualizer"),true);
+        self.st_row_compact(p,426.,t("audio.glow",&lang),t("audio.glow.desc",&lang));
+        self.st_toggle(p,512.,437.,self.settings.glow,Action::Toggle("glow"),true);
+        self.st_row_compact(p,472.,t("audio.romanize",&lang),t("audio.romanize.desc",&lang));
+        self.st_toggle(p,512.,483.,self.settings.romanize_lyrics,Action::Toggle("romanize_lyrics"),true);
+        self.st_row_compact(p,518.,t("audio.player_lyrics",&lang),t("audio.player_lyrics.desc",&lang));
+        self.st_button(p,t("audio.open_music",&lang),418.,524.,124.,Action::SettingsOpenTab("Musik".into(),0),self.settings.enabled("Musik"));
     }}
     fn settings_reminders(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
@@ -325,7 +365,7 @@ impl Shell{
         };
         let is_checking = matches!(self.update_status, super::UpdateStatus::Checking);
         self.st_button(p, btn_label, 400., 120., 142., Action::CheckUpdate, !is_checking);
-        p.text_ellipsis(&version_str,196.,142.,196.,18.,11.5,0x38bdf8,true);
+        p.text_ellipsis(&version_str,196.,142.,196.,18.,11.5,0xd8d8de,true);
 
         // Row 2: Status Card (168..248, h = 80)
         let card_x = 196.;
@@ -342,9 +382,9 @@ impl Shell{
             },
             super::UpdateStatus::Checking => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.08);
-                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.6);
-                p.outline_icon("download", card_x + 14., card_y + 16., 20., 0x38bdf8);
-                p.text(t("update.checking", &lang), card_x + 44., card_y + 28., card_w - 56., 24., 11.5, 0x38bdf8, true);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0xd8d8de, 0.6);
+                p.outline_icon("download", card_x + 14., card_y + 16., 20., 0xd8d8de);
+                p.text(t("update.checking", &lang), card_x + 44., card_y + 28., card_w - 56., 24., 11.5, 0xd8d8de, true);
             },
             super::UpdateStatus::UpToDate(time) => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x10b981, 0.10);
@@ -356,9 +396,9 @@ impl Shell{
             },
             super::UpdateStatus::Available(update) => {
                 p.fill_alpha(card_x, card_y, card_w, card_h + 12., 8., 0x0284c7, 0.16);
-                p.stroke(card_x, card_y, card_w, card_h + 12., 8., 0x38bdf8, 1.2);
+                p.stroke(card_x, card_y, card_w, card_h + 12., 8., 0xd8d8de, 1.2);
                 let title = format!("{} ({})", t("update.available", &lang), update.version);
-                p.text(&title, card_x + 14., card_y + 10., card_w - 28., 20., 12.5, 0x38bdf8, true);
+                p.text(&title, card_x + 14., card_y + 10., card_w - 28., 20., 12.5, 0xd8d8de, true);
                 let rel_desc = &update.display_name;
                 p.text_ellipsis(rel_desc, card_x + 14., card_y + 32., card_w - 28., 16., 10.5, 0xe0f2fe, false);
 
@@ -367,26 +407,26 @@ impl Shell{
             },
             super::UpdateStatus::Downloading { percent, .. } => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
-                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0xd8d8de, 0.8);
                 let label = format!("{} ({}%)", t("update.downloading", &lang), percent);
-                p.text(&label, card_x + 14., card_y + 16., card_w - 28., 20., 12.0, 0x38bdf8, true);
+                p.text(&label, card_x + 14., card_y + 16., card_w - 28., 20., 12.0, 0xd8d8de, true);
 
                 let bar_w = card_w - 28.;
                 let fill_w = bar_w * (*percent as f32 / 100.0).clamp(0.0, 1.0);
                 p.fill_alpha(card_x + 14., card_y + 44., bar_w, 6., 3., 0xffffff, 0.1);
                 if fill_w > 0.0 {
-                    p.fill_alpha(card_x + 14., card_y + 44., fill_w, 6., 3., 0x38bdf8, 0.9);
+                    p.fill_alpha(card_x + 14., card_y + 44., fill_w, 6., 3., 0xd8d8de, 0.9);
                 }
             },
             super::UpdateStatus::Verifying => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
-                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
-                p.text(t("update.verifying", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x38bdf8, true);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0xd8d8de, 0.8);
+                p.text(t("update.verifying", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0xd8d8de, true);
             },
             super::UpdateStatus::Staging => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
-                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
-                p.text(t("update.staging", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x38bdf8, true);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0xd8d8de, 0.8);
+                p.text(t("update.staging", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0xd8d8de, true);
             },
             super::UpdateStatus::AwaitingRestart { version, .. } => {
                 p.fill_alpha(card_x, card_y, card_w, card_h + 12., 8., 0x10b981, 0.14);
@@ -400,8 +440,8 @@ impl Shell{
             },
             super::UpdateStatus::Applying => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x0284c7, 0.12);
-                p.stroke(card_x, card_y, card_w, card_h, 8., 0x38bdf8, 0.8);
-                p.text(t("update.restarting", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0x38bdf8, true);
+                p.stroke(card_x, card_y, card_w, card_h, 8., 0xd8d8de, 0.8);
+                p.text(t("update.restarting", &lang), card_x + 14., card_y + 28., card_w - 28., 20., 12.0, 0xd8d8de, true);
             },
             super::UpdateStatus::SuccessToast(version) => {
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0x10b981, 0.10);
@@ -413,7 +453,7 @@ impl Shell{
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0xef4444, 0.10);
                 p.stroke(card_x, card_y, card_w, card_h, 8., 0xef4444, 0.6);
                 p.text(t("update.error", &lang), card_x + 14., card_y + 16., card_w - 28., 20., 12.0, 0xf87171, true);
-                p.text_ellipsis(e, card_x + 14., card_y + 38., card_w - 28., 30., 10.0, 0xfca5a5, false);
+                p.text_ellipsis(settings_error_text(self.settings.quiet_mode,e), card_x + 14., card_y + 38., card_w - 28., 30., 10.0, 0xfca5a5, false);
             },
         }
 
@@ -475,4 +515,13 @@ fn settings_menu_has_focus(focused:Option<&Action>,key:&'static str,_x:f32,_y:f3
         assert!(!settings_menu_has_focus(Some(&focused),"theme_color",418.,332.,124.));
     }
 
+}
+
+fn settings_error_text(quiet:bool,error:&str)->&str{if quiet{"Pembaruan gagal"}else{error}}
+#[cfg(test)]mod error_sink_r1_tests{
+ use super::*;
+ #[test]fn settings_painter_error_payload_hides_private_path(){
+  let sentinel="PRIVATE-path/token";assert!(!settings_error_text(true,sentinel).contains(sentinel));assert_eq!(settings_error_text(false,sentinel),sentinel);
+  let source=include_str!("settings.rs");assert!(source.contains("p.text_ellipsis(settings_error_text(self.settings.quiet_mode,e),"));
+ }
 }

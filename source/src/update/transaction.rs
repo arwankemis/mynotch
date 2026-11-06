@@ -14,6 +14,7 @@ pub enum TransactionPhase {
     Relaunching,
     Committed,
     RolledBack,
+    RollbackFailed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -246,11 +247,12 @@ pub fn execute_rollback(
         }
     }
 
-    let _ = journal.set_phase(tx_dir, TransactionPhase::RolledBack);
     if let Some(err) = first_error {
+        let _ = journal.set_phase(tx_dir, TransactionPhase::RollbackFailed);
         let _ = journal.record_error(tx_dir, format!("Rollback tidak lengkap: {err}"));
         return Err(err);
     }
+    let _ = journal.set_phase(tx_dir, TransactionPhase::RolledBack);
     Ok(())
 }
 

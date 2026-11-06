@@ -3,23 +3,90 @@ use std::time::Duration;
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HANDLE, HWND};
 
-/// One clipboard history entry. History is stored **plaintext** in `state.json` (no DPAPI
-/// encryption yet); retention is bounded by a per-item size cap and
-/// by TTL expiry in [`expire_history`], not by encryption.
-#[derive(Clone, Serialize, Deserialize)]
+/// Plaintext exists only in memory; the persisted text is a per-user DPAPI blob.
+#[derive(Clone)]
 pub struct ClipItem {
     pub id: u64,
     pub text: String,
     pub time: String,
     pub chars: usize,
     pub lines: usize,
-    #[serde(default)]
     pub pinned: bool,
-    /// Unix seconds when this entry was captured. `0` means "captured before timestamps
-    /// existed"; [`expire_history`] stamps such legacy entries with "now" instead of
-    /// deleting them, so upgrading never wipes the history.
-    #[serde(default)]
+    /// Keep the dev state format: Unix seconds, not milliseconds.
     pub captured_at: u64,
+    pub pinned_at: u64,
+    /// Preserve ciphertext that cannot be opened on this Windows account.
+    pub locked: Option<String>,
+    needs_sealing: bool,
+}
+
+pub const SEALED_PREFIX: &str = "dpapi:v1:";
+
+impl Serialize for ClipItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let sealed = match &self.locked {
+            Some(payload) => payload.clone(),
+            None => {
+                let hex = crate::secrets::protect(&self.text).map_err(serde::ser::Error::custom)?;
+                format!("{SEALED_PREFIX}{hex}")
+            }
+        };
+        let mut item = serializer.serialize_struct("ClipItem", 8)?;
+        item.serialize_field("id", &self.id)?;
+        item.serialize_field("text", &sealed)?;
+        item.serialize_field("time", &self.time)?;
+        item.serialize_field("chars", &self.chars)?;
+        item.serialize_field("lines", &self.lines)?;
+        item.serialize_field("pinned", &self.pinned)?;
+        item.serialize_field("captured_at", &self.captured_at)?;
+        item.serialize_field("pinned_at", &self.pinned_at)?;
+        item.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Stored {
+            id: u64,
+            #[serde(default)] text: String,
+            #[serde(default)] time: String,
+            #[serde(default)] chars: usize,
+            #[serde(default)] lines: usize,
+            #[serde(default)] pinned: bool,
+            #[serde(default)] captured_at: u64,
+            #[serde(default)] pinned_at: u64,
+        }
+        let stored = Stored::deserialize(deserializer)?;
+        let needs_sealing = !stored.text.starts_with(SEALED_PREFIX);
+        let (text, locked) = match stored.text.strip_prefix(SEALED_PREFIX) {
+            Some(hex) => match crate::secrets::unprotect(hex) {
+                Ok(text) => (text, None),
+                Err(_) => (String::new(), Some(stored.text.clone())),
+            },
+            None => (stored.text, None),
+        };
+        Ok(Self { id: stored.id, text, time: stored.time, chars: stored.chars,
+            lines: stored.lines, pinned: stored.pinned, captured_at: stored.captured_at,
+            pinned_at: stored.pinned_at, locked, needs_sealing })
+    }
+}
+
+impl ClipItem {
+    pub fn captured(id: u64, text: String, time: String, captured_at: u64) -> Self {
+        Self { id, chars: text.chars().count(), lines: text.lines().count().max(1),
+            text, time, pinned: false, captured_at, pinned_at: 0, locked: None, needs_sealing: false }
+    }
+}
+
+/// Returns whether startup must save state, including plaintext entries already timestamped.
+pub fn migrate(items: &mut Vec<ClipItem>, now: u64) -> bool {
+    let before = items.len();
+    let changed = items.iter().any(|i| i.needs_sealing || i.captured_at == 0 || (i.pinned && i.pinned_at == 0));
+    expire_history(items, now);
+    for item in items.iter_mut() { item.needs_sealing = false; }
+    changed || before != items.len()
 }
 
 #[link(name = "user32")]
@@ -102,18 +169,20 @@ pub fn truncate_to_bytes(mut text: String, max_bytes: usize) -> String {
     text
 }
 
-/// Drops entries older than their TTL. Legacy entries (`captured_at == 0`) are stamped
-/// with `now` and kept, so the first run after upgrading grants them a fresh TTL window
-/// instead of deleting the whole history.
+/// Apply the 003 retention policy using dev's seconds-based timestamps.
 pub fn expire_history(items: &mut Vec<ClipItem>, now: u64) {
     for item in items.iter_mut() {
         if item.captured_at == 0 {
-            item.captured_at = now;
+            // Historical IDs were Unix milliseconds. Unknown IDs receive a fresh anchor.
+            item.captured_at = if item.id >= 1_000_000_000_000 { item.id / 1000 } else { now };
         }
+        if item.pinned && item.pinned_at == 0 { item.pinned_at = item.captured_at; }
     }
     items.retain(|item| {
-        let ttl = if item.pinned { PINNED_TTL_SECS } else { UNPINNED_TTL_SECS };
-        now.saturating_sub(item.captured_at) < ttl
+        if item.locked.is_none() && item.text.len() > MAX_CLIP_BYTES { return false; }
+        let ttl = if item.pinned || item.locked.is_some() { PINNED_TTL_SECS } else { UNPINNED_TTL_SECS };
+        let anchor = if item.pinned { item.pinned_at } else { item.captured_at };
+        now.saturating_sub(anchor) < ttl
     });
 }
 
@@ -215,6 +284,84 @@ pub fn unlisten_clipboard(hwnd: HWND) -> bool {
 mod tests {
     use super::*;
 
+    const NOW: u64 = 1_800_000_000;
+
+    #[test]
+    fn dpapi_roundtrip_preserves_dev_seconds_and_max_size() {
+        let text = "k".repeat(MAX_CLIP_BYTES);
+        let item = ClipItem::captured(NOW * 1000, text.clone(), "12:00".into(), NOW);
+        let raw = serde_json::to_string(&item).unwrap();
+        assert!(!raw.contains(&text));
+        assert!(raw.contains(SEALED_PREFIX));
+        let restored: ClipItem = serde_json::from_str(&raw).unwrap();
+        assert_eq!(restored.text, text);
+        assert_eq!(restored.captured_at, NOW);
+        assert!(restored.locked.is_none());
+    }
+
+    #[test]
+    fn migration_prunes_old_ids_and_reseals_already_timestamped_plaintext() {
+        let raw = format!(r#"[{{"id":{},"text":"old"}},{{"id":2,"text":"new","captured_at":{NOW}}}]"#, (NOW - UNPINNED_TTL_SECS) * 1000);
+        let mut items: Vec<ClipItem> = serde_json::from_str(&raw).unwrap();
+        assert!(migrate(&mut items, NOW));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "new");
+        let saved = serde_json::to_string(&items).unwrap();
+        assert!(!saved.contains("\"new\""));
+        let mut reopened: Vec<ClipItem> = serde_json::from_str(&saved).unwrap();
+        assert!(!migrate(&mut reopened, NOW));
+        assert_eq!(reopened[0].captured_at, NOW);
+    }
+
+    #[test]
+    fn locked_ciphertext_survives_save_until_retention_limit() {
+        let payload = format!("{SEALED_PREFIX}00112233445566778899aabbccddeeff");
+        let raw = format!(r#"[{{"id":1,"text":"{payload}","captured_at":{NOW}}}]"#);
+        let mut items: Vec<ClipItem> = serde_json::from_str(&raw).unwrap();
+        assert!(items[0].text.is_empty());
+        assert_eq!(items[0].locked.as_deref(), Some(payload.as_str()));
+        expire_history(&mut items, NOW + UNPINNED_TTL_SECS);
+        assert_eq!(items.len(), 1);
+        assert!(serde_json::to_string(&items).unwrap().contains(&payload));
+        expire_history(&mut items, NOW + PINNED_TTL_SECS);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn pin_time_extends_retention_and_size_limit_applies_to_loaded_history() {
+        let mut pin = ClipItem::captured(1, "test".into(), "12:00".into(), NOW - 3600);
+        pin.pinned = true;
+        pin.pinned_at = NOW;
+        let mut items = vec![pin];
+        expire_history(&mut items, NOW + PINNED_TTL_SECS - 1);
+        assert_eq!(items.len(), 1);
+        expire_history(&mut items, NOW + PINNED_TTL_SECS);
+        assert!(items.is_empty());
+        items.push(ClipItem::captured(2, "k".repeat(MAX_CLIP_BYTES + 1), "12:00".into(), NOW));
+        expire_history(&mut items, NOW);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn migration_store_roundtrip_preserves_other_dev_state_fields() {
+        let root = std::env::temp_dir().join(format!("mynotch-012-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut store = crate::core::Store::new(root.clone()).unwrap();
+        let legacy = format!(r#"{{"notes":"synthetic-note","power_month":"2026-11","monthly_kwh":1.5,"monthly_cost_idr":2167,"power_days_active":["2026-11-04"],"clipboard_history":[{{"id":1,"text":"synthetic-012-secret","captured_at":{NOW}}}]}}"#);
+        std::fs::write(root.join("state.json"), legacy).unwrap();
+        let mut state: crate::core::State = store.load("state.json");
+        assert!(migrate(&mut state.clipboard_history, NOW));
+        store.save("state.json", &state).unwrap();
+        let raw = std::fs::read_to_string(root.join("state.json")).unwrap();
+        assert!(!raw.contains("synthetic-012-secret"));
+        let reopened: crate::core::State = store.load("state.json");
+        assert_eq!(reopened.clipboard_history[0].text, "synthetic-012-secret");
+        assert_eq!(reopened.notes, "synthetic-note");
+        assert_eq!(reopened.monthly_kwh, 1.5);
+        assert_eq!(reopened.monthly_cost_idr, 2167);
+        assert_eq!(reopened.power_days_active, vec!["2026-11-04"]);
+        // Keep only synthetic fixtures under the isolated test root; no user files.
+    }
+
     #[test]
     fn clip_item_fields_work() {
         let item = ClipItem {
@@ -224,7 +371,7 @@ mod tests {
             chars: 11,
             lines: 1,
             pinned: true,
-            captured_at: 0,
+            captured_at: 0, pinned_at: 0, locked: None, needs_sealing: false,
         };
         assert_eq!(item.chars, 11);
         assert_eq!(item.lines, 1);
@@ -233,7 +380,7 @@ mod tests {
     }
 
     fn clip(id: u64, pinned: bool) -> ClipItem {
-        ClipItem { id, text: format!("item {id}"), time: "12:00".into(), chars: 1, lines: 1, pinned, captured_at: 0 }
+        ClipItem { id, text: format!("item {id}"), time: "12:00".into(), chars: 1, lines: 1, pinned, captured_at: 0, pinned_at: 0, locked: None, needs_sealing: false }
     }
 
     #[test]

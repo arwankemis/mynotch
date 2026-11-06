@@ -3,6 +3,7 @@ pub mod crypto;
 pub mod download;
 pub mod helper;
 pub mod model;
+pub mod provider_download;
 pub mod transaction;
 pub mod ui;
 

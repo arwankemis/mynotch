@@ -4,7 +4,7 @@ A portable notch for Windows that keeps music controls, your calendar, reminders
 
 Built with Rust, Direct2D, and DirectWrite. The interface uses native Windows APIs and does not need an Electron or Chromium runtime.
 
-**Current release: v0.0.2.2 (preview)** · [Download for Windows x64](https://github.com/arwankemis/mynotch/releases/tag/v0.0.2.2) · [Changelog](CHANGELOG.md)
+**Current release: v0.0.2.3 (preview)** · [Download for Windows x64](https://github.com/arwankemis/mynotch/releases/tag/v0.0.2.3) · [Changelog](CHANGELOG.md)
 
 ## Three stages
 
@@ -88,7 +88,7 @@ mynotch also has microphone and camera activity indicators. These reflect activi
 
 ## Download and run
 
-1. Download `mynotch-0.0.2.2-windows-x64.zip` from [Releases](https://github.com/arwankemis/mynotch/releases).
+1. Download `mynotch-update-public-windows-x64-0.0.2.3.zip` from [Releases](https://github.com/arwankemis/mynotch/releases).
 2. Extract it to a folder you can write to. Keep `mynotch.exe` and `libunwind.dll` together.
 3. Run `mynotch.exe`.
 
@@ -98,7 +98,7 @@ Windows 10 or 11, 64-bit, is required. Rendering uses Direct3D 11 and Direct2D, 
 
 ### Updating
 
-**Settings > Updates** checks GitHub releases, downloads the public update package over HTTPS, and validates its SHA-256 checksum before replacement. The updater includes rollback handling if an update fails.
+**Settings > Updates** checks GitHub releases, downloads the public update package over HTTPS, and validates its SHA-256 checksum against the official GitHub release digest before replacement. The updater includes automated rollback handling if an update fails. Because mynotch is an independent open-source project without a commercial Authenticode code-signing certificate, Windows SmartScreen warnings on newly published binaries are expected; binary integrity is verified through official GitHub release digests.
 
 If you are upgrading from **v0.0.1.4 or earlier**, download and extract v0.0.2 manually once. Older versions cannot discover the required checksum reliably. In-app updating is supported from v0.0.2 onward.
 

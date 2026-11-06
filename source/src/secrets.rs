@@ -21,7 +21,7 @@ pub fn protect(value: &str) -> Result<String, String> {
 
 pub fn unprotect(value: &str) -> Result<String, String> {
     if value.is_empty() { return Ok(String::new()); }
-    if value.len() > 131072 || value.len() % 2 != 0 || !value.is_ascii() { return Err("Format secret tidak valid".into()); }
+    if value.len() > 262144 || value.len() % 2 != 0 || !value.is_ascii() { return Err("Format secret tidak valid".into()); }
     let mut data = (0..value.len()).step_by(2).map(|i| u8::from_str_radix(&value[i..i+2],16))
         .collect::<Result<Vec<_>, _>>().map_err(|_| "Format secret tidak valid".to_owned())?;
     let blob = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_mut_ptr() };

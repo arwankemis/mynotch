@@ -12,6 +12,7 @@
 /dist/
 /dist-test/
 /power-provider/
+/releases/
 
 # Untracked runtime binaries and driver artifacts
 /vendor/power/PawnIO_setup.exe

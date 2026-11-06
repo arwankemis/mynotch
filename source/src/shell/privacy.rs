@@ -198,7 +198,7 @@ impl Shell {
             let card_border = 0x25252d;
 
             // Header: Shield Icon, Title, and Subtitle
-            p.outline_icon("shield", 24.0, 20.0, 20.0, 0x69d2e5);
+            p.outline_icon("shield", 24.0, 20.0, 20.0, 0xd8d8de);
             p.text(t("privacy.title", &lang), 52.0, 18.0, 200.0, 24.0, 16.0, fg, false);
             p.text(t("privacy.subtitle", &lang), 52.0, 42.0, 360.0, 16.0, 10.0, muted, false);
 
@@ -282,7 +282,7 @@ impl Shell {
                 p.text(title_text, 74.0, y + 8.0, 240.0, 18.0, 12.0, fg, false);
 
                 // Applications / Note line
-                let sub_text = if is_active && self.settings.privacy_show_app_names && !state.applications.is_empty() {
+                let sub_text = if is_active && self.settings.effective_presentation().privacy_app_names && !state.applications.is_empty() {
                     state.applications.join(", ")
                 } else if is_active && state.applications.is_empty() {
                     t("privacy.app_unknown", &lang).to_string()
@@ -347,7 +347,7 @@ impl Shell {
             let muted = 0x92929d;
 
             // Subpage Header
-            p.outline_icon("shield", 196.0, 68.0, 18.0, 0x69d2e5);
+            p.outline_icon("shield", 196.0, 68.0, 18.0, 0xd8d8de);
             p.text(t("privacy.settings_title", &lang), 222.0, 66.0, 240.0, 25.0, 16.0, fg, false);
             p.text(t("privacy.settings_desc", &lang), 196.0, 92.0, 346.0, 16.0, 10.5, muted, false);
 

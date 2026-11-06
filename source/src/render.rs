@@ -28,7 +28,7 @@ pub const BG:u32=0x000000;
 #[allow(dead_code)] pub const CARD:u32=0x12141a;
 pub const TEXT:u32=0xffffff;
 pub const MUTED:u32=0x9ca3af;
-pub const ACCENT:u32=0x2fd4a3;
+#[allow(dead_code)] pub const ACCENT:u32=0xd8d8de;
 pub const DIM:u32=0x1e2129;
 /// Interactive surfaces. Kept next to DIM so the two states read as one family.
 pub const HOVER:u32=0x2a2f3a;
@@ -182,14 +182,18 @@ impl Painter {
     }}
     /// One device-owned brush, rebuilt only when weather/daylight changes. No bitmap or blur.
     pub unsafe fn weather_background(&mut self,width:f32,height:f32,mid:u32,bottom:u32){unsafe{
+        // Short Stage 1 pill: gradient runs top->bottom; tall page keeps the 44 DIP offset.
+        let top = if height <= 60. { 0.0 } else { 44.0 };
+        let end = height.max(top + 1.0);
+        let radius = if height <= 40. { height * 0.5 } else { 24.0 };
         if self.weather_gradient.as_ref().is_none_or(|(m,b,_)|*m!=mid||*b!=bottom){
             let stops=[D2D1_GRADIENT_STOP{position:0.,color:color(BG,1.)},D2D1_GRADIENT_STOP{position:0.28,color:color(mid,1.)},D2D1_GRADIENT_STOP{position:1.,color:color(bottom,1.)}];
             let rt:Result<ID2D1RenderTarget>=self.context.cast();
-            self.weather_gradient=rt.and_then(|rt|rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP).and_then(|stops|rt.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{startPoint:pt(0.,44.),endPoint:pt(0.,height)},None,&stops))).ok().map(|brush|(mid,bottom,brush));
+            self.weather_gradient=rt.and_then(|rt|rt.CreateGradientStopCollection(&stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP).and_then(|stops|rt.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{startPoint:pt(0.,top),endPoint:pt(0.,end)},None,&stops))).ok().map(|brush|(mid,bottom,brush));
         }
         if let Some((_,_,brush))=&self.weather_gradient{
-            brush.SetStartPoint(pt(0.,44.));brush.SetEndPoint(pt(0.,height.max(45.)));
-            self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(0.,0.,width,height),radiusX:24.,radiusY:24.},brush);
+            brush.SetStartPoint(pt(0.,top));brush.SetEndPoint(pt(0.,end));
+            self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(0.,0.,width,height),radiusX:radius,radiusY:radius},brush);
         }
     }}
     pub unsafe fn text_light(&mut self,text:&str,x:f32,y:f32,width:f32,height:f32,size:f32,rgb:u32){unsafe{
@@ -427,6 +431,15 @@ impl Painter {
                 }
             }
         }
+    }}
+    pub unsafe fn icon_media_source(&mut self,cx:f32,cy:f32,size:f32,source_app:&str,playing:bool){unsafe{
+        // Reuse the native app artwork, preserving the caller's morph/DPI transform.
+        let mut saved=windows_numerics::Matrix3x2::default();self.context.GetTransform(&mut saved);
+        let scale=size/16.;
+        let local=windows_numerics::Matrix3x2{M11:scale,M12:0.,M21:0.,M22:scale,M31:cx,M32:cy};
+        self.context.SetTransform(&(local*saved));
+        self.icon_media_app(0.,0.,source_app,false,playing);
+        self.context.SetTransform(&saved);
     }}
     pub unsafe fn icon_media_app(&mut self,cx:f32,cy:f32,source_app:&str,is_youtube:bool,playing:bool){unsafe{
         let app=source_app.to_lowercase();
@@ -780,6 +793,26 @@ impl Painter {
             self.text(text,x,y,width,height,size,rgb,bold);
         }
     }}
+    /// Scroll long lyrics in presentation space without altering their source timestamps.
+    pub unsafe fn text_scrolling(&mut self,text:&str,x:f32,y:f32,width:f32,height:f32,size:f32,rgb:u32,bold:bool,elapsed:f64,center:bool){unsafe{
+        if width <= 0. || height <= 0. { return; }
+        let measured=self.measure_text(text,size,bold);
+        let layout_width=measured.max(width)+2.;
+        let key=((size*10.)as u32,bold);
+        let Some(format)=self.formats.get(&key) else { return; };
+        let utf16:Vec<u16>=text.encode_utf16().collect();
+        if let Ok(layout)=self.factory.CreateTextLayout(&utf16,format,layout_width,height){
+            let _=layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            let _=layout.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            let overflow=(measured-width).max(0.);
+            let offset=crate::lyrics::scroll_offset(overflow,elapsed);
+            let align=if center && overflow==0. {(width-measured)*0.5}else{0.};
+            self.clip(x,y,width,height);
+            self.brush.SetColor(&color(rgb,1.));
+            self.context.DrawTextLayout(windows_numerics::Vector2{X:x+align-offset,Y:y},&layout,&self.brush,D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+            self.unclip();
+        }
+    }}
     pub unsafe fn text_ellipsis_vcenter(&mut self,text:&str,x:f32,y:f32,width:f32,height:f32,size:f32,rgb:u32,bold:bool){unsafe{
         let key=((size*10.)as u32,bold);
         if !self.formats.contains_key(&key){
@@ -922,6 +955,15 @@ impl Painter {
         self.polyline(&points,rgb,4.,false);
         for &(cx,cy) in [points[0],points[n]].iter(){self.fill(cx-2.,cy-2.,4.,4.,2.,rgb);}
     }}
+    /// Thin concentric arc used by the Stage 1 multi-level hardware gauge.
+    /// Draws a faint full track then a coloured arc for `ratio` (0..1).
+    pub unsafe fn ring_arc(&self,cx:f32,cy:f32,r:f32,ratio:f32,track_rgb:u32,rgb:u32,width:f32){unsafe{
+        self.circle_outline(cx,cy,r,track_rgb,width);
+        let ratio=ratio.clamp(0.,1.);if ratio<=0.001{return}
+        let n=((ratio*44.).ceil()as usize).max(2);
+        let points:Vec<_>=(0..=n).map(|i|{let a=-std::f32::consts::FRAC_PI_2+std::f32::consts::TAU*ratio*i as f32/n as f32;(cx+a.cos()*r,cy+a.sin()*r)}).collect();
+        self.polyline(&points,rgb,width,false);
+    }}
     pub unsafe fn draw_gauge_arc(&self, cx: f32, cy: f32, r: f32, ratio: f32, track_rgb: u32, fill_rgb: u32, thickness: f32) { unsafe {
         use std::f32::consts::PI;
         let start_a = 135.0 * PI / 180.0;
@@ -968,6 +1010,7 @@ impl Painter {
             "reset"|"undo"=>{line(&[(4.,9.),(8.,5.),(14.,5.),(19.,9.),(20.,14.),(17.,19.),(11.,20.),(7.,18.)]);line(&[(4.,3.),(4.,9.),(10.,9.)]);},
             "check"=>line(&[(5.,12.),(10.,17.),(20.,7.)]),
             "pin"=>{line(&[(8.,3.),(18.,3.),(16.,8.),(19.,13.),(7.,13.),(10.,8.),(8.,3.)]);line(&[(13.,13.),(10.,21.)]);},
+            "broom"=>{line(&[(20.,4.),(13.,11.)]);line(&[(13.,11.),(10.,8.)]);line(&[(14.,12.),(7.,15.),(4.,20.),(12.,17.),(16.,14.),(14.,12.)]);line(&[(7.,15.),(5.,21.)]);line(&[(9.,16.),(7.,22.)]);line(&[(11.,17.),(9.,23.)]);},
             "edit"=>{line(&[(18.,2.),(22.,6.),(7.,21.),(3.,21.),(3.,17.),(18.,2.)]);line(&[(15.,5.),(19.,9.)]);},
             "package"=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
             "cloud"=>{line(&[(6.,19.),(18.,19.)]);circle(15.,15.,4.);circle(9.,15.,3.5);circle(12.,11.,4.);},
@@ -985,6 +1028,27 @@ impl Painter {
             "screen_share"|"share"=>{line(&[(3.,4.),(21.,4.),(21.,16.),(3.,16.),(3.,4.)]);line(&[(12.,16.),(12.,20.)]);line(&[(8.,20.),(16.,20.)]);circle(12.,10.,2.);},
             "record"=>{circle(12.,12.,6.);},
             "shield"|"privacy"=>{line(&[(12.,2.),(20.,5.),(20.,11.),(12.,21.),(4.,11.),(4.,5.),(12.,2.)]);},
+            "wifi"=>{
+                line(&[(4.,8.),(8.,5.),(12.,4.),(16.,5.),(20.,8.)]);
+                line(&[(7.,12.),(12.,9.),(17.,12.)]);
+                circle(12.,18.,1.8);
+            },
+            "bluetooth"=>{
+                line(&[(12.,2.),(12.,22.)]);
+                line(&[(12.,2.),(17.,7.),(7.,17.)]);
+                line(&[(7.,7.),(17.,17.),(12.,22.)]);
+            },
+            "sun"=>{
+                circle(12.,12.,4.5);
+                line(&[(12.,2.),(12.,5.)]);
+                line(&[(12.,19.),(12.,22.)]);
+                line(&[(2.,12.),(5.,12.)]);
+                line(&[(19.,12.),(22.,12.)]);
+                line(&[(5.,5.),(7.5,7.5)]);
+                line(&[(16.5,16.5),(19.,19.)]);
+                line(&[(5.,19.),(7.5,16.5)]);
+                line(&[(16.5,7.5),(19.,5.)]);
+            },
             // Unknown manifest icons still need an affordance instead of an empty slot.
             _=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
         }

@@ -23,7 +23,7 @@ impl Shell {
         if !self.settings.enabled("Cuaca") { self.reset_weather_location();self.weather_custom_open=false; }
     }
     pub(super) fn poll_weather(&mut self){
-        let reverted=self.hover_stage==1&&self.should_revert_stage1_to_calendar()&&!self.is_stage1_temporary_active();
+        let reverted=self.hover_stage==1&&self.should_revert_stage1_to_calendar()&&!self.is_stage1_temporary_active()&&!self.weather_stage1_window();
         let visible=self.tab=="Cuaca"&&!self.settings_open&&self.hover_stage>=1&&!reverted&&!self.fullscreen&&!self.suspended;
         if weather::refresh_due(self.settings.enabled("Cuaca"),visible,self.jobs.contains_key("Cuaca"),self.weather_refresh.failed,self.weather_refresh.attempt.map(|at|at.elapsed())){self.refresh_weather(false);}
     }
@@ -109,14 +109,19 @@ impl Shell {
         p.text_centered(t("weather.location_hint"),x+10.,y+138.,320.,16.,10.,0xb9cbd9,1.,false);
         for(index,(label,action))in [(t("weather.cancel"),Action::WeatherToggleCustom),(t("weather.save_btn"),Action::WeatherSave)].into_iter().enumerate(){let xx=x+20.+index as f32*160.;p.fill(xx,y+170.,140.,34.,8.,if index==0{0x223344}else{0x3b5d78});p.text_centered(label,xx,y+170.,140.,34.,12.,0xffffff,1.,false);self.hit(xx,y+170.,140.,34.,action);}
     }}
-    pub(super) fn draw_weather_stage1(&mut self,p:&mut Painter,right:f32){unsafe{
+    pub(super) fn draw_weather_stage1(&mut self,p:&mut Painter,_right:f32){unsafe{
         let(code,is_day,temp)=self.weather.as_ref().map(|w|(w.weather_code,w.is_day,format!("{:.0}°",w.temperature))).unwrap_or((3,true,"—°".into()));
-
+        // Sky-matched gradient so the Stage 1 pill reads like the Weather page background.
+        let (mid,bottom)=self.weather.as_ref().map(|w|weather::sky(w.weather_code,w.is_day)).unwrap_or(weather::Sky::Cloud).colors();
+        p.weather_background(self.width,self.height,mid,bottom);
         let city=if self.settings.weather_city.is_empty(){"Jakarta"}else{&self.settings.weather_city};
         let info=format!("{temp} {city}");
         let time=Local::now().format("%H:%M").to_string();
-        let info_x=self.draw_stage1_status(p,&info,&time,right+4.);
+        let btn_up_x=self.width-24.;
+        let info_x=self.draw_stage1_status(p,&info,&time,btn_up_x);
         p.weather_icon(code,is_day,true,info_x-28.,(self.height-20.)/2.,20.);
+        self.button_chevron_up(p,btn_up_x,(self.height-20.)*0.5,20.,20.,Action::ToStage0,0xe6eef5);
+        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(8.,0.,(btn_up_x-8.).max(10.),self.height),action:Action::ExpandWeather});}
     }}
 }
 unsafe fn weather_card(p:&Painter,x:f32,y:f32,w:f32,h:f32){unsafe{p.fill_alpha(x,y,w,h,11.,0x142636,0.48);p.stroke(x,y,w,h,11.,0x516a7e,0.6);}}

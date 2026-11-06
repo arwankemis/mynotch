@@ -99,47 +99,33 @@ impl OnlineService {
         Ok(report)
     }
 
-    pub fn lyrics(&self, title: &str, artist: &str, album: &str, duration: f64) -> Result<LyricsResult, String> {
-        self.lyrics_with_options(title, artist, album, duration, true)
+    #[allow(dead_code)]
+    pub fn lyrics(&self, title: &str, artist: &str, album: &str, duration: f64, permission: crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+        self.lyrics_with_options(title, artist, album, duration, false, permission)
     }
 
-    pub fn lyrics_with_options(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool) -> Result<LyricsResult, String> {
-        net::check_cancel()?;
+    pub fn lyrics_with_options(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool, permission: crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+        self.lyrics_lookup(title, artist, album, duration, allow_youtube, false, permission)
+    }
+
+    pub fn lyrics_lookup(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool, force: bool, permission: crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+        permission.check()?;
+        let allow_youtube = allow_youtube && permission.youtube();
         if title.trim().is_empty() { return Ok(LyricsResult::default()); }
         if [title, artist, album].iter().any(|v| v.len() > 4096) || !duration.is_finite() || !(0.0..=86400.0).contains(&duration) { return Err("Metadata lagu tidak valid.".into()); }
         let duration = duration.round() as u64;
-        let raw_key = serde_json::to_string(&(title.trim(), artist.trim(), album.trim(), duration)).map_err(|_| "Metadata lagu tidak valid.")?;
+        // Version the matching policy so older unverified results cannot be reused.
+        let raw_key = serde_json::to_string(&("consent-v3", permission.revision(), title.trim(), artist.trim(), album.trim(), duration, allow_youtube)).map_err(|_| "Metadata lagu tidak valid.")?;
         let mut hasher = crate::update::crypto::Sha256::new();
         hasher.update(raw_key.as_bytes());
         let key = hasher.finish().iter().map(|b| format!("{b:02x}")).collect::<String>();
-        if let Some(result) = self.read_cache::<LyricsResult>("lyrics", &key, 7 * 86400) {
+        if let Some(result) = (!force).then(|| self.read_cache::<LyricsResult>("lyrics", &key, 7 * 86400)).flatten() {
             // A negative lookup has a shorter TTL, so newly published lyrics can appear.
-            if result.instrumental || !result.plain_lyrics.is_empty() || !result.synced_lyrics.is_empty() || self.read_cache::<LyricsResult>("lyrics", &key, 30 * 60).is_some() { return Ok(result); }
+            if result.instrumental || !result.plain_lyrics.is_empty() || !result.synced_lyrics.is_empty() || self.read_cache::<LyricsResult>("lyrics", &key, 30 * 60).is_some() { permission.check()?; return Ok(result); }
         }
-        // Step 1: Exact query on LRCLIB
-        let url = format!("https://lrclib.net/api/get?track_name={}&artist_name={}&album_name={}&duration={duration}", encode(title.trim()), encode(artist.trim()), encode(album.trim()));
-        let mut result = match net::get(&url) {
-            Ok(body) => parse_lyrics(&body).unwrap_or_default(),
-            Err(_) => LyricsResult::default(),
-        };
-        // Step 2: Search LRCLIB without strict duration/album constraint
-        if result.synced_lyrics.is_empty() && result.plain_lyrics.is_empty() && !result.instrumental {
-            let search_url = format!("https://lrclib.net/api/search?track_name={}&artist_name={}", encode(title.trim()), encode(artist.trim()));
-            if let Ok(search_body) = net::get(&search_url) {
-                if let Some(search_res) = parse_lyrics_search(&search_body) {
-                    result = search_res;
-                }
-            }
-        }
-        // Step 3: YouTube captions fallback only if allowed (browser / YouTube media)
-        if allow_youtube && result.synced_lyrics.is_empty() && result.plain_lyrics.is_empty() && !result.instrumental {
-            if let Ok(yt_res) = crate::youtube::fetch_captions(title.trim(), artist.trim(), duration as f64) {
-                if !yt_res.synced_lyrics.is_empty() || !yt_res.plain_lyrics.is_empty() {
-                    result = yt_res;
-                }
-            }
-        }
-        net::check_cancel()?;let _ = self.write_cache("lyrics", &key, &result);
+        let result = guarded_lyrics(&permission, title.trim(), artist.trim(), album.trim(), duration as f64, allow_youtube,
+            net::get, |t,a,d| crate::youtube::fetch_captions(t,a,d,&permission))?;
+        permission.check()?;let _ = self.write_cache("lyrics", &key, &result);
         Ok(result)
     }
 
@@ -271,35 +257,116 @@ fn parse_lyrics(body: &[u8]) -> Result<LyricsResult, String> {
     if !value.is_object() { return Err("Respons lirik tidak valid.".into()); }
     let result = LyricsResult { plain_lyrics: value["plainLyrics"].as_str().unwrap_or("").to_owned(), synced_lyrics: value["syncedLyrics"].as_str().unwrap_or("").to_owned(), instrumental: value["instrumental"].as_bool().unwrap_or(false), is_youtube: false };
     if result.plain_lyrics.len() > 1024 * 1024 || result.synced_lyrics.len() > 1024 * 1024 { return Err("Lirik melebihi batas ukuran.".into()); }
+    if !result.synced_lyrics.is_empty() && crate::lyrics::parse_lrc_checked_with_options(&result.synced_lyrics, false)?.is_empty() {
+        return Err("Timestamp lirik tidak valid.".into());
+    }
     Ok(result)
 }
 
-fn parse_lyrics_search(body: &[u8]) -> Option<LyricsResult> {
-    let value = json_response(body).ok()?;
-    let items = value.as_array()?;
-    let mut candidate = None;
+pub(crate) fn normalize_track_text(text: &str) -> String {
+    text.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn has_lyrics(result: &LyricsResult) -> bool {
+    result.instrumental || !result.plain_lyrics.is_empty() || !result.synced_lyrics.is_empty()
+}
+
+fn lyric_candidate_score(item: &Value, title: &str, artist: &str, album: &str, duration: f64) -> Option<i32> {
+    let title = normalize_track_text(title);
+    let artist = normalize_track_text(artist);
+    if title.is_empty() || artist.is_empty()
+        || normalize_track_text(item["trackName"].as_str()?) != title
+        || normalize_track_text(item["artistName"].as_str()?) != artist { return None; }
+    let album = normalize_track_text(album);
+    let candidate_album = normalize_track_text(item["albumName"].as_str().unwrap_or(""));
+    // Album qualifiers can distinguish a live/cover version even when trackName does not.
+    for qualifier in ["live", "remix", "cover", "acoustic", "instrumental", "karaoke", "remastered", "remaster", "sped", "slowed"] {
+        if album.split_whitespace().any(|w| w == qualifier) != candidate_album.split_whitespace().any(|w| w == qualifier) { return None; }
+    }
+    let same_album = !album.is_empty() && album == candidate_album;
+    let delta = if duration > 0.0 {
+        let candidate_duration = item["duration"].as_f64().filter(|d| d.is_finite() && *d > 0.)?;
+        let delta = (candidate_duration - duration).abs();
+        if delta > 2.0 { return None; }
+        delta
+    } else {
+        if !same_album { return None; }
+        0.0
+    };
+    Some((if same_album { 100 } else { 0 }) + ((2.0 - delta) * 10.0).round() as i32)
+}
+
+fn parse_lyrics_search(body: &[u8], title: &str, artist: &str, album: &str, duration: f64) -> Result<Option<LyricsResult>, String> {
+    let value = json_response(body)?;
+    let items = value.as_array().ok_or("Respons pencarian lirik tidak valid.")?;
+    let mut best: Option<(i32, LyricsResult)> = None;
+    let mut ambiguous = false;
     for item in items {
-        let synced = item["syncedLyrics"].as_str().unwrap_or("").to_owned();
-        let plain = item["plainLyrics"].as_str().unwrap_or("").to_owned();
-        let instrumental = item["instrumental"].as_bool().unwrap_or(false);
-        if !synced.is_empty() {
-            return Some(LyricsResult {
-                plain_lyrics: plain,
-                synced_lyrics: synced,
-                instrumental,
-                is_youtube: false,
-            });
-        }
-        if candidate.is_none() && (!plain.is_empty() || instrumental) {
-            candidate = Some(LyricsResult {
-                plain_lyrics: plain,
-                synced_lyrics: synced,
-                instrumental,
-                is_youtube: false,
-            });
+        let Some(score) = lyric_candidate_score(item, title, artist, album, duration) else { continue; };
+        let result = parse_lyrics(&serde_json::to_vec(item).map_err(|e| e.to_string())?)?;
+        if !has_lyrics(&result) { continue; }
+        let score = score * 2 + i32::from(!result.synced_lyrics.is_empty());
+        match &best {
+            Some((old_score, _)) if *old_score > score => {},
+            Some((old_score, old)) if *old_score == score => {
+                if old.synced_lyrics != result.synced_lyrics || old.plain_lyrics != result.plain_lyrics || old.instrumental != result.instrumental { ambiguous = true; }
+            },
+            _ => { best = Some((score, result)); ambiguous = false; }
         }
     }
-    candidate
+    Ok(if ambiguous { None } else { best.map(|(_, result)| result) })
+}
+
+fn guarded_lyrics(
+    permission: &crate::lyrics_gate::LyricsPermission,
+    title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool,
+    mut get: impl FnMut(&str) -> Result<Vec<u8>, String>,
+    mut captions: impl FnMut(&str, &str, f64) -> Result<LyricsResult, String>,
+) -> Result<LyricsResult, String> {
+    permission.check()?;
+    let result = lookup_lyrics(title, artist, album, duration, allow_youtube && permission.youtube(),
+        |url| { permission.check()?; get(url) },
+        |title, artist, duration| { permission.check()?; if !permission.youtube() { return Err("YouTube consent disabled".into()); } captions(title, artist, duration) });
+    permission.check()?;
+    result
+}
+
+fn lookup_lyrics(
+    title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool,
+    mut get: impl FnMut(&str) -> Result<Vec<u8>, String>,
+    mut captions: impl FnMut(&str, &str, f64) -> Result<LyricsResult, String>,
+) -> Result<LyricsResult, String> {
+    let mut failure = None;
+    let url = format!("https://lrclib.net/api/get?track_name={}&artist_name={}&album_name={}&duration={:.0}", encode(title), encode(artist), encode(album), duration);
+    match get(&url) {
+        Ok(body) => match json_response(&body).and_then(|item| {
+            if lyric_candidate_score(&item, title, artist, album, duration).is_some() { parse_lyrics(&body) } else { Ok(LyricsResult::default()) }
+        }) {
+            Ok(result) if has_lyrics(&result) => return Ok(result),
+            Err(error) => failure = Some(error),
+            _ => {}
+        },
+        Err(error) if !error.contains("404") => failure = Some(error),
+        _ => {}
+    }
+    net::check_cancel()?;
+    let url = format!("https://lrclib.net/api/search?track_name={}&artist_name={}", encode(title), encode(artist));
+    match get(&url).and_then(|body| parse_lyrics_search(&body, title, artist, album, duration)) {
+        Ok(Some(result)) => return Ok(result),
+        Err(error) if !error.contains("404") => failure = Some(error),
+        _ => {}
+    }
+    net::check_cancel()?;
+    if allow_youtube {
+        match captions(title, artist, duration) {
+            Ok(result) if has_lyrics(&result) => return Ok(result),
+            Err(error) => failure = Some(error),
+            _ => {}
+        }
+    }
+    // Never cache a transient/provider failure as a definitive negative lookup.
+    match failure { Some(error) => Err(error), None => Ok(LyricsResult::default()) }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -365,6 +432,119 @@ fn parse_chat_response(kind: ChatKind, body: &[u8]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn lyric_fixture(title: &str, artist: &str, album: &str, duration: f64, text: &str) -> Value {
+        json!({"trackName":title,"artistName":artist,"albumName":album,"duration":duration,"syncedLyrics":format!("[00:01.00]{text}")})
+    }
+    #[test]
+    fn consent_default_and_master_off_block_both_transports() {
+        let consent=crate::lyrics_gate::LyricsConsent::default();
+        for subordinate in [false,true] {
+            consent.set(false,subordinate);
+            assert!(guarded_lyrics(&consent.snapshot(),"Song","Artist","Album",200.,true,
+                |_| panic!("LRCLIB must not run"),|_,_,_| panic!("YouTube must not run")).is_err());
+        }
+    }
+    #[test]
+    fn consent_hit_miss_and_dual_provider_fallback_use_fake_transport() {
+        let consent=crate::lyrics_gate::LyricsConsent::default();consent.set(true,false);
+        let body=serde_json::to_vec(&lyric_fixture("Song","Artist","Album",200.,"accepted")).unwrap();
+        let hit=guarded_lyrics(&consent.snapshot(),"Song","Artist","Album",200.,true,
+            |_| Ok(body.clone()),|_,_,_| panic!("YouTube blocked")).unwrap();
+        assert_eq!(hit.synced_lyrics,"[00:01.00]accepted");
+        let miss=guarded_lyrics(&consent.snapshot(),"Song","Artist","Album",200.,true,
+            |_| Ok(b"[]".to_vec()),|_,_,_| panic!("YouTube blocked")).unwrap();
+        assert!(!has_lyrics(&miss));
+        consent.set(true,true);
+        let mut youtube_calls=0;
+        let fallback=guarded_lyrics(&consent.snapshot(),"Song","Artist","Album",200.,true,
+            |_| Ok(b"[]".to_vec()),|_,_,_| {youtube_calls+=1;Ok(LyricsResult{synced_lyrics:"[00:01.00]caption".into(),is_youtube:true,..Default::default()})}).unwrap();
+        assert!(fallback.is_youtube);assert_eq!(youtube_calls,1);
+        // A session failing the existing heuristic still cannot use YouTube, even with both permissions.
+        guarded_lyrics(&consent.snapshot(),"Song","Artist","Album",200.,false,
+            |_| Ok(b"[]".to_vec()),|_,_,_| panic!("session denied")).unwrap();
+    }
+    #[test]
+    fn consent_revoke_during_each_provider_cancels_and_rejects_late_result() {
+        for revoke_youtube in [false,true] {
+            let consent=crate::lyrics_gate::LyricsConsent::default();consent.set(true,true);
+            let permission=consent.snapshot();let token=crate::net::Cancellation::default();let cancel=token.clone();
+            let result=crate::net::with_cancel(token,|| guarded_lyrics(&permission,"Song","Artist","Album",200.,true,
+                |_| {if !revoke_youtube {consent.set(false,true);cancel.cancel();}Ok(b"[]".to_vec())},
+                |_,_,_| {consent.set(true,false);cancel.cancel();Ok(LyricsResult{plain_lyrics:"late".into(),is_youtube:true,..Default::default()})}));
+            assert!(result.is_err());assert!(cancel.is_cancelled());assert!(permission.check().is_err());
+            consent.set(true,true);assert!(permission.check().is_err());assert!(consent.snapshot().check().is_ok());
+        }
+    }
+    #[test]
+    fn consent_off_on_rejects_old_token_and_revoked_cache_access() {
+        let root=std::env::temp_dir().join(format!("lyrics-consent-013-{}",std::process::id()));
+        let service=OnlineService::new(root);let consent=crate::lyrics_gate::LyricsConsent::default();consent.set(true,true);
+        let old=consent.snapshot();consent.set(false,true);consent.set(true,true);
+        // This must stop before cache access or any network; even identical metadata cannot revive an old token.
+        assert!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,old).is_err());
+        let permission=consent.snapshot();let raw=serde_json::to_string(&("consent-v3",permission.revision(),"Song","Artist","Album",200u64,true)).unwrap();
+        let mut hash=crate::update::crypto::Sha256::new();hash.update(raw.as_bytes());let key=hash.finish().iter().map(|b|format!("{b:02x}")).collect::<String>();
+        service.write_cache("lyrics",&key,&LyricsResult{plain_lyrics:"synthetic cache".into(),..Default::default()}).unwrap();
+        assert_eq!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,permission.clone()).unwrap().plain_lyrics,"synthetic cache");
+        consent.set(false,true);
+        assert!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,permission).is_err());
+    }
+
+    #[test]
+    fn lyrics_search_rejects_wrong_versions_artists_and_durations() {
+        let wrong = json!([
+            lyric_fixture("Song Live", "Artist", "Album", 200., "live"),
+            lyric_fixture("Song", "Other", "Album", 200., "cover"),
+            lyric_fixture("Song", "Artist", "Album", 240., "long"),
+            lyric_fixture("Song", "Artist", "Live Album", 200., "hidden live")
+        ]);
+        assert!(parse_lyrics_search(&serde_json::to_vec(&wrong).unwrap(), "Song", "Artist", "Album", 200.).unwrap().is_none());
+        let good = lyric_fixture("Song", "Artist", "Album", 200., "correct");
+        let body = serde_json::to_vec(&json!([wrong[0],good,wrong[1]])).unwrap();
+        assert_eq!(parse_lyrics_search(&body,"Song","Artist","Album",200.).unwrap().unwrap().synced_lyrics,"[00:01.00]correct");
+        assert!(parse_lyrics_search(&body,"Song","","Album",200.).unwrap().is_none());
+    }
+    #[test]
+    fn lyrics_search_ranks_metadata_and_rejects_ambiguity_in_any_order() {
+        let album = lyric_fixture("Song", "Artist", "Album", 200., "album");
+        let other = lyric_fixture("Song", "Artist", "Compilation", 200., "compilation");
+        for items in [json!([album,other]),json!([other,album])] {
+            assert_eq!(parse_lyrics_search(&serde_json::to_vec(&items).unwrap(),"Song","Artist","Album",200.).unwrap().unwrap().synced_lyrics,"[00:01.00]album");
+        }
+        let ambiguous = json!([album,lyric_fixture("Song","Artist","Album",200.,"different timing/version")]);
+        assert!(parse_lyrics_search(&serde_json::to_vec(&ambiguous).unwrap(),"Song","Artist","Album",200.).unwrap().is_none());
+        assert!(parse_lyrics_search(br#"{}"#,"Song","Artist","Album",200.).is_err());
+        assert!(parse_lyrics(br#"{"syncedLyrics":"[00:NaN]bad"}"#).is_err());
+    }
+    #[test]
+    fn provider_outage_still_reaches_caption_fallback_and_errors_are_not_absence() {
+        let mut called = false;
+        let result = lookup_lyrics("Song","Artist","Album",200.,true,
+            |_| Err("HTTP 503".into()), |_,_,_| { called = true; Ok(LyricsResult { synced_lyrics:"[00:01.00]caption".into(),is_youtube:true,..Default::default() }) }).unwrap();
+        assert!(called && result.is_youtube);
+        assert!(lookup_lyrics("Song","Artist","Album",200.,false, |_| Err("offline".into()), |_,_,_| panic!("caption lookup must be opt-in")).is_err());
+        let result = lookup_lyrics("Song","Artist","Album",200.,false,
+            |url| if url.contains("/get?") { Err("HTTP 404".into()) } else { Ok(b"[]".to_vec()) }, |_,_,_| panic!("unexpected caption lookup")).unwrap();
+        assert!(!has_lyrics(&result));
+    }
+    #[test]
+    fn exact_lookup_also_validates_metadata_before_accepting_lyrics() {
+        let wrong = serde_json::to_vec(&lyric_fixture("Song","Other","Album",200.,"wrong")).unwrap();
+        let good = serde_json::to_vec(&json!([lyric_fixture("Song","Artist","Album",200.,"correct")])).unwrap();
+        let result = lookup_lyrics("Song","Artist","Album",200.,false,
+            |url| Ok(if url.contains("/get?") { wrong.clone() } else { good.clone() }), |_,_,_| panic!("unexpected fallback")).unwrap();
+        assert_eq!(result.synced_lyrics,"[00:01.00]correct");
+    }
+    #[test]
+    #[ignore = "opt-in live LRCLIB request; requires internet"]
+    fn live_lyrics_provider_smoke() {
+        let result = lookup_lyrics("Yellow", "Coldplay", "Parachutes", 267., false, net::get,
+            |_,_,_| panic!("LRCLIB smoke test must not use captions")).expect("live LRCLIB lookup failed");
+        assert!(!result.synced_lyrics.is_empty(), "expected synchronized lyrics for the reference track");
+        let lines = crate::lyrics::parse_lrc_checked_with_options(&result.synced_lyrics, false).unwrap();
+        assert!(lines.len() > 5);
+        assert!(lines.windows(2).all(|w| w[0].at <= w[1].at));
+    }
     #[test] fn weather_preserves_unknown_daily_and_hourly_rain() {
         let report=parse_weather(br#"{"utc_offset_seconds":25200,"current":{"time":1793199600,"temperature_2m":30},"daily":{"time":[1793199600],"temperature_2m_min":[25],"temperature_2m_max":[32],"precipitation_probability_max":[null]},"hourly":{"time":[1793199600],"temperature_2m":[30],"precipitation_probability":[null]}}"#).unwrap();
         assert_eq!(report.daily[0].rain_chance,None);assert_eq!(report.hourly[0].rain_chance,None);

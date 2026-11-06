@@ -383,69 +383,36 @@ pub fn parse_lrc_checked_with_options(content: &str, romanize: bool) -> Result<V
     }
     // Stable sort preserves the file's order when several lines share a timestamp.
     output.sort_by(|a, b| a.at.total_cmp(&b.at));
-    split_long_lines(&mut output, 40);
     if romanize {
         romanize_lines(&mut output);
     }
     Ok(output)
 }
 
-pub fn split_long_lines(lines: &mut Vec<LyricLine>, max_len: usize) {
-    if lines.is_empty() || max_len == 0 {
-        return;
+/// Ping-pong the rendered line, with a one-second pause at either edge.
+pub fn scroll_offset(overflow: f32, elapsed: f64) -> f32 {
+    if !overflow.is_finite() || overflow <= 0. || !elapsed.is_finite() { return 0.; }
+    let travel = f64::from(overflow) / 24.;
+    let phase = elapsed.max(0.) % (travel * 2. + 2.);
+    let offset = if phase <= travel + 1. { (phase - 1.).max(0.) } else { (travel * 2. + 2. - phase).min(travel) };
+    (offset * 24.) as f32
+}
+
+/// Bounded retries for the current track; a new track or manual Retry resets the budget.
+#[derive(Default)]
+pub struct RetryState {
+    failures: usize,
+    next_at: Option<std::time::Instant>,
+}
+impl RetryState {
+    pub fn failed(&mut self, now: std::time::Instant) {
+        const DELAYS: [u64; 5] = [2, 5, 15, 30, 60];
+        self.next_at = DELAYS.get(self.failures).map(|seconds| now + std::time::Duration::from_secs(*seconds));
+        self.failures = self.failures.saturating_add(1);
     }
-    let mut new_lines = Vec::with_capacity(lines.len());
-    for i in 0..lines.len() {
-        let line = &lines[i];
-        if line.text.chars().count() <= max_len {
-            new_lines.push(line.clone());
-            continue;
-        }
-        let words: Vec<&str> = line.text.split_whitespace().collect();
-        if words.is_empty() {
-            new_lines.push(line.clone());
-            continue;
-        }
-
-        let mut chunks: Vec<String> = Vec::new();
-        let mut curr: Vec<&str> = Vec::new();
-        let mut curr_len = 0;
-        for w in words {
-            let add = if curr.is_empty() { w.chars().count() } else { 1 + w.chars().count() };
-            if curr_len + add > max_len && !curr.is_empty() {
-                chunks.push(curr.join(" "));
-                curr.clear();
-                curr_len = 0;
-            }
-            curr_len += if curr.is_empty() { w.chars().count() } else { 1 + w.chars().count() };
-            curr.push(w);
-        }
-        if !curr.is_empty() {
-            chunks.push(curr.join(" "));
-        }
-
-        if chunks.len() <= 1 {
-            new_lines.push(line.clone());
-            continue;
-        }
-
-        let next_at = if i + 1 < lines.len() {
-            lines[i + 1].at
-        } else {
-            line.at + 4.0
-        };
-        let duration = (next_at - line.at).max(1.0);
-        let n_chunks = chunks.len();
-
-        for (idx, chunk_text) in chunks.into_iter().enumerate() {
-            let chunk_time = line.at + (duration * idx as f64 / n_chunks as f64);
-            new_lines.push(LyricLine {
-                at: chunk_time,
-                text: chunk_text,
-            });
-        }
-    }
-    *lines = new_lines;
+    pub fn ready(&self, now: std::time::Instant) -> bool { self.next_at.is_some_and(|at| now >= at) }
+    pub fn pending(&self) -> bool { self.next_at.is_some() }
+    pub fn started(&mut self) { self.next_at = None; }
 }
 
 fn timestamp(value: &str) -> Option<f64> {
@@ -507,13 +474,42 @@ mod tests {
         assert_eq!(raw[0].text, "君の名は");
     }
     #[test]
-    fn test_split_long_lines_limits_length() {
-        let content = "[00:10.00]Ini adalah kalimat yang sangat panjang sekali melebihi empat puluh karakter sehingga harus dipecah menjadi beberapa baris\n[00:20.00]Baris pendek";
-        let lines = parse_lrc_with_options(content, false);
-        assert!(lines.len() >= 3);
-        for l in &lines {
-            assert!(l.text.chars().count() <= 40, "Line too long: {}", l.text);
+    fn long_lines_preserve_source_text_and_timing() {
+        let text = "Ini adalah kalimat yang sangat panjang sekali melebihi empat puluh karakter dan tidak boleh membuat timestamp baru";
+        let lines = parse_lrc_with_options(&format!("[00:10.00]{text}\n[00:10.40]Baris pendek\n[00:20.00]{text}"), false);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], LyricLine { at: 10.0, text: text.into() });
+        assert_eq!(lines[2], LyricLine { at: 20.0, text: text.into() });
+        assert_eq!(active_line(&lines, 10.39), Some(0));
+        assert_eq!(active_line(&lines, 10.4), Some(1));
+    }
+    #[test]
+    fn retries_back_off_stop_and_reset_for_a_new_track() {
+        use std::time::{Duration, Instant};
+        let mut retry = RetryState::default();
+        let now = Instant::now();
+        for seconds in [2, 5, 15, 30, 60] {
+            retry.failed(now);
+            assert!(!retry.ready(now + Duration::from_secs(seconds - 1)));
+            assert!(retry.ready(now + Duration::from_secs(seconds)));
+            retry.started();
+            assert!(!retry.ready(now + Duration::from_secs(100)));
         }
-        assert_eq!(lines[lines.len() - 1].text, "Baris pendek");
+        retry.failed(now);
+        assert!(!retry.pending());
+        retry = RetryState::default();
+        retry.failed(now);
+        assert!(retry.ready(now + Duration::from_secs(2)));
+    }
+    #[test]
+    fn scrolling_is_bounded_and_never_changes_the_playback_clock() {
+        assert_eq!(scroll_offset(240., 0.), 0.);
+        assert_eq!(scroll_offset(240., 1.), 0.);
+        assert_eq!(scroll_offset(240., 11.), 240.);
+        assert_eq!(scroll_offset(240., 12.), 240.);
+        assert_eq!(scroll_offset(240., 22.), 0.);
+        assert_eq!(scroll_offset(0., 12.), 0.);
+        assert_eq!(scroll_offset(240., f64::NAN), 0.);
+        for tick in 0..1000 { assert!((0.0..=240.).contains(&scroll_offset(240., f64::from(tick) / 10.))); }
     }
 }

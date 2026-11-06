@@ -17,7 +17,7 @@ pub fn tab_name<'a>(tab: &'a str, lang: &str) -> &'a str {
         "Kalender" => if en { "Calendar" } else { "Kalender" },
         "Reminder" => if en { "Reminders" } else { "Reminder" },
         "Clipboard" => "Clipboard",
-        "Catatan" => if en { "Notes" } else { "Catatan" },
+        "Catatan" => if en { "Saved" } else { "Simpan" },
         "Tugas" => if en { "Tasks" } else { "Tugas" },
         "Cuaca" => if en { "Weather" } else { "Cuaca" },
 
@@ -190,6 +190,15 @@ pub fn move_desc(stretch_secs: u32, interval_mins: u32, lang: &str) -> String {
 pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
     let en = lang == "en";
     match key {
+        "audio.lyrics_online" => if en { "Online lyrics search" } else { "Pencarian lirik online" },
+        "audio.lyrics_online.desc" => if en { "Send the song title, artist, album, and duration to LRCLIB. Turn off to stop searching and clear lyrics." } else { "Kirim judul lagu, artis, album, dan durasi ke LRCLIB. Matikan untuk menghentikan pencarian dan mengosongkan lirik." },
+        "audio.youtube_fallback" => if en { "YouTube lyrics fallback" } else { "Fallback lirik YouTube" },
+        "audio.youtube_fallback.desc" => if en { "If LRCLIB finds no lyrics, send a title and artist search to YouTube and retrieve player data and captions." } else { "Jika LRCLIB tidak menemukan lirik, kirim pencarian judul dan artis ke YouTube serta ambil data player dan takarir." },
+        "audio.youtube_blocked" => if en { "Enable Online lyrics search first." } else { "Aktifkan Pencarian lirik online terlebih dahulu." },
+        "audio.consent_sent" => if en { "Metadata already sent cannot be recalled." } else { "Metadata yang sudah terkirim tidak dapat ditarik kembali." },
+        "music.consent_off" => if en { "Online lyrics search is off" } else { "Pencarian lirik online dinonaktifkan" },
+        "music.consent_hint" => if en { "Enable permission in Settings > Audio & Player to load lyrics automatically." } else { "Aktifkan izin di Pengaturan > Audio & Pemutar untuk memuat lirik otomatis." },
+        "music.open_settings" => if en { "Open Settings" } else { "Buka Pengaturan" },
         // Settings Common
         "settings.title" => if en { "Settings" } else { "Pengaturan" },
         "settings.auto_saved" => if en { "Changes saved automatically" } else { "Perubahan tersimpan otomatis" },
@@ -353,6 +362,8 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "music.single_album" => if en { "Single / Album" } else { "Single / Album" },
         "music.loading_lyrics" => if en { "Loading lyrics…" } else { "Memuat lirik…" },
         "music.no_lyrics" => if en { "Lyrics not available for this song." } else { "Lirik belum tersedia untuk lagu ini." },
+        "music.lyrics_retry" => if en { "Retry lyrics" } else { "Coba lagi" },
+        "music.youtube_captions" => if en { "YouTube captions" } else { "Caption YouTube" },
         "music.lyrics_error" => if en { "Lyrics failed to load. Check your connection and try again." } else { "Lirik gagal dimuat. Periksa koneksi lalu coba lagi." },
         "music.follow" => if en { "Follow" } else { "Ikuti" },
         "music.open_player_first" => if en { "Open music player first." } else { "Buka pemutar musik terlebih dahulu." },
@@ -850,8 +861,8 @@ fn test_tab_names_translation() {
         assert_eq!(tab_name("Kalender", "en"), "Calendar");
         assert_eq!(tab_name("Reminder", "id"), "Reminder");
         assert_eq!(tab_name("Reminder", "en"), "Reminders");
-        assert_eq!(tab_name("Catatan", "id"), "Catatan");
-        assert_eq!(tab_name("Catatan", "en"), "Notes");
+        assert_eq!(tab_name("Catatan", "id"), "Simpan");
+        assert_eq!(tab_name("Catatan", "en"), "Saved");
         assert_eq!(tab_name("Clipboard", "en"), "Clipboard");
         assert_eq!(tab_name("Daya", "id"), "Daya");
         assert_eq!(tab_name("Daya", "en"), "Power");

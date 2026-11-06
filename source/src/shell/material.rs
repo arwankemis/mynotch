@@ -77,7 +77,7 @@ impl Shell {
     pub(super) fn update_glass_hover(&mut self,point:Option<(f32,f32)>){
         let enabled=(self.expanded||self.hover_stage>=2)&&self.glass_config(self.height).is_some();
         let point=point.filter(|(x,y)|enabled&&*x>=0.&&*x<=self.width&&*y>=0.&&*y<=self.height).map(|(x,y)|(x/self.width.max(1.),y/self.height.max(1.)));
-        self.glass.hover.target(point,self.settings.motion_reduced||!enabled);
+        self.glass.hover.target(point,self.settings.effective_presentation().reduced_motion||!enabled);
         unsafe{if self.glass.hover.step(0.){
             if !self.glass.hover_animating{self.glass.hover_tick=Instant::now();self.glass.hover_animating=SetTimer(Some(self.hwnd),16,16,None)!=0;}
         }else{let _=KillTimer(Some(self.hwnd),16);self.glass.hover_animating=false;}}
@@ -101,7 +101,7 @@ impl Shell {
     }
 
     pub(super) fn glass_fallback(&self) -> Fallback {
-        glass::decide(MaterialMode::from_str(&self.settings.theme_material), self.glass_env()).1
+        glass::decide(MaterialMode::from_str(&self.settings.effective_presentation().material), self.glass_env()).1
     }
 
     pub(super) fn ui_light(&self) -> bool {
@@ -110,7 +110,7 @@ impl Shell {
 
     /// The material for a body of `height` DIPs, or None when Solid is in effect.
     pub(super) fn glass_config(&self, height: f32) -> Option<LiquidGlassConfig> {
-        let (mode, _) = glass::decide(MaterialMode::from_str(&self.settings.theme_material), self.glass_env());
+        let (mode, _) = glass::decide(MaterialMode::from_str(&self.settings.effective_presentation().material), self.glass_env());
         if !mode.is_glass() {
             return None;
         }

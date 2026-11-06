@@ -3,8 +3,9 @@ use crate::net;
 use crate::online::LyricsResult;
 use serde_json::Value;
 
-pub fn fetch_captions(title: &str, artist: &str, duration: f64) -> Result<LyricsResult, String> {
-    net::check_cancel()?;
+pub fn fetch_captions(title: &str, artist: &str, duration: f64, permission: &crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+    permission.check()?;
+    if !permission.youtube() { return Err("YouTube consent disabled".into()); }
     if title.trim().is_empty() {
         return Err("Judul video kosong.".into());
     }
@@ -18,6 +19,7 @@ pub fn fetch_captions(title: &str, artist: &str, duration: f64) -> Result<Lyrics
 
     let encoded_query = url_encode(&query);
     let search_url = format!("https://www.youtube.com/results?search_query={encoded_query}");
+    permission.check()?;
     let search_html = match net::request(
         "GET",
         &search_url,
@@ -36,56 +38,76 @@ pub fn fetch_captions(title: &str, artist: &str, duration: f64) -> Result<Lyrics
         return Err("Video YouTube tidak ditemukan.".into());
     }
 
-    // 2. Try candidate video IDs
+    // Never accept the first search hit solely because it has captions. Multiple
+    // matching videos are ambiguous without an ID supplied by the media session.
+    let mut matched = None;
     for vid in vids.iter().take(3) {
         net::check_cancel()?;
-        if let Ok(result) = fetch_video_captions(vid, title, artist, duration) {
+        if let Ok(result) = fetch_video_captions(vid, title, artist, duration, permission) {
             if !result.synced_lyrics.is_empty() || !result.plain_lyrics.is_empty() {
-                return Ok(result);
+                if matched.is_some() { return Err("Beberapa video cocok; caption tidak dapat dipastikan untuk sesi ini.".into()); }
+                matched = Some(result);
             }
         }
     }
 
-    Err("Caption YouTube tidak tersedia untuk video ini.".into())
+    matched.ok_or_else(|| "Caption YouTube tidak tersedia atau identitas video tidak dapat diverifikasi.".into())
 }
 
-/// Checks whether any visible top-level window contains "YouTube" in its title.
-/// Used to detect YouTube media sessions playing inside standard web browsers.
-pub fn is_youtube_window_present() -> bool {
-    use windows::core::BOOL;
-    use windows::Win32::Foundation::{HWND, LPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
-
-    struct Ctx {
-        found: bool,
-    }
-
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        unsafe {
-            let ctx = &mut *(lparam.0 as *mut Ctx);
-            if IsWindowVisible(hwnd).as_bool() {
-                let mut buf = [0u16; 256];
-                let len = GetWindowTextW(hwnd, &mut buf);
-                if len > 0 {
-                    let title = String::from_utf16_lossy(&buf[..len as usize]);
-                    if title.contains("YouTube") {
-                        ctx.found = true;
-                        return BOOL(0);
-                    }
-                }
-            }
-            BOOL(1)
-        }
-    }
-
-    let mut ctx = Ctx { found: false };
-    unsafe {
-        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
-    }
-    ctx.found
+/// Only metadata belonging to this session may enable caption lookup.
+pub fn session_allows_captions(source: &str, title: &str, album: &str) -> bool {
+    let source = source.to_lowercase();
+    source.contains("youtube") || (["chrome", "edge", "firefox", "opera", "brave"].iter().any(|browser| source.contains(browser))
+        && [title, album].iter().any(|value| value.to_lowercase().contains("youtube")))
 }
 
-fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64) -> Result<LyricsResult, String> {
+fn clean_video_title(title: &str) -> String {
+    let mut title = title.to_lowercase();
+    for decoration in ["(official music video)", "[official music video]", "(official video)", "[official video]", "(official audio)", "[official audio]", "(lyrics)", "[lyrics]"] {
+        title = title.replace(decoration, " ");
+    }
+    crate::online::normalize_track_text(&title)
+}
+
+pub(crate) fn is_allowed_caption_host(url: &str) -> bool {
+    if !url.starts_with("https://") {
+        return false;
+    }
+    let rest = match url.strip_prefix("https://") {
+        Some(r) => r,
+        None => return false,
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let host = match authority.rsplit_once(':') {
+        Some((h, _)) => h,
+        None => authority,
+    };
+    let host_low = host.to_ascii_lowercase();
+    host_low == "youtube.com"
+        || host_low.ends_with(".youtube.com")
+        || host_low == "googlevideo.com"
+        || host_low.ends_with(".googlevideo.com")
+}
+
+pub(crate) fn verify_candidate_match(details: &Value, title: &str, artist: &str, duration: f64) -> Result<(), String> {
+    let length = details["lengthSeconds"].as_str().and_then(|s| s.parse::<f64>().ok())
+        .filter(|n| n.is_finite() && *n > 0.0).ok_or("Durasi video tidak tersedia.")?;
+    if !duration.is_finite() || duration <= 0.0 || (length - duration).abs() > 2.0 {
+        return Err("Durasi video tidak cocok dengan sesi media.".into());
+    }
+    let wanted = clean_video_title(title);
+    let actual = clean_video_title(details["title"].as_str().ok_or("Judul video tidak tersedia.")?);
+    let artist = crate::online::normalize_track_text(artist);
+    if wanted.is_empty() || artist.is_empty() { return Err("Identitas media belum cukup untuk memverifikasi caption.".into()); }
+    let author = crate::online::normalize_track_text(details["author"].as_str().unwrap_or("").trim_end_matches(" - Topic"));
+    let title_matches = actual == wanted || actual == format!("{artist} {wanted}");
+    let artist_matches = author == artist || actual.starts_with(&format!("{artist} "));
+    if !title_matches || !artist_matches { return Err("Judul atau artis video tidak cocok dengan sesi media.".into()); }
+    Ok(())
+}
+
+fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64, permission: &crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
     let payload = serde_json::json!({
         "context": {
             "client": {
@@ -99,6 +121,7 @@ fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64
     });
 
     let payload_bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+    permission.check()?;
     let resp_bytes = net::request(
         "POST",
         "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
@@ -110,6 +133,11 @@ fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64
     )?;
 
     let json: Value = serde_json::from_slice(&resp_bytes).map_err(|e| format!("JSON player tidak valid: {e}"))?;
+
+    let details = json.get("videoDetails").ok_or("Identitas video tidak tersedia.")?;
+    if details["videoId"].as_str() != Some(video_id) { return Err("ID respons video tidak cocok.".into()); }
+    verify_candidate_match(details, title, artist, duration)?;
+
     let caption_tracks = json
         .get("captions")
         .and_then(|c| c.get("playerCaptionsTracklistRenderer"))
@@ -145,6 +173,12 @@ fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64
     }
 
     let caption_url = selected_url.ok_or_else(|| "URL caption tidak valid.".to_string())?;
+    if !is_allowed_caption_host(&caption_url) {
+        return Err(format!("Host URL caption tidak diizinkan: {caption_url}"));
+    }
+    // Request the paragraph format that the parser understands explicitly.
+    let caption_url = caption_srv3_url(&caption_url);
+    permission.check()?;
     let xml_bytes = net::request(
         "GET",
         &caption_url,
@@ -156,163 +190,46 @@ fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64
     parse_timedtext(&xml_text, 40, title, artist, duration)
 }
 
+fn caption_srv3_url(url: &str) -> String {
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let mut params: Vec<&str> = query.split('&').filter(|p| !p.is_empty() && !p.starts_with("fmt=")).collect();
+    params.push("fmt=srv3");
+    format!("{base}?{}", params.join("&"))
+}
+
 pub fn extract_video_ids(html: &str) -> Vec<String> {
     let mut vids = Vec::new();
-    let marker = "\"videoId\":\"";
-    let mut cursor = 0;
-    while let Some(pos) = html[cursor..].find(marker) {
-        let start = cursor + pos + marker.len();
-        if start + 11 <= html.len() {
-            let id = &html[start..start + 11];
-            if id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
-                if !vids.iter().any(|v: &String| v == id) {
-                    vids.push(id.to_string());
-                }
-            }
+    for rest in html.split("\"videoId\":\"").skip(1) {
+        let Some(id) = rest.get(..11) else { continue; };
+        if rest.as_bytes().get(11) == Some(&b'"') && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') && !vids.iter().any(|v| v == id) {
+            vids.push(id.to_string());
         }
-        cursor = start + 11;
-        if vids.len() >= 10 {
-            break;
-        }
+        if vids.len() >= 10 { break; }
     }
     vids
 }
 
-pub fn parse_timedtext(xml: &str, max_line_len: usize, _title: &str, _artist: &str, _duration: f64) -> Result<LyricsResult, String> {
-    let max_len = if max_line_len == 0 { 40 } else { max_line_len };
+pub fn parse_timedtext(xml: &str, _max_line_len: usize, _title: &str, _artist: &str, _duration: f64) -> Result<LyricsResult, String> {
+    if xml.len() > 1024 * 1024 { return Err("Caption melebihi batas ukuran.".into()); }
     let mut synced_lines = Vec::new();
-    let mut plain_paragraphs = Vec::new();
-
-    // Iterate through <p ...> tags
-    let mut p_cursor = 0;
-    while let Some(p_start_rel) = xml[p_cursor..].find("<p ") {
-        let p_start = p_cursor + p_start_rel;
-        let p_close = match xml[p_start..].find('>') {
-            Some(idx) => p_start + idx,
-            None => break,
-        };
-        let p_end = match xml[p_close..].find("</p>") {
-            Some(idx) => p_close + idx,
-            None => break,
-        };
-
-        let tag_header = &xml[p_start..p_close];
-        let p_body = &xml[p_close + 1..p_end];
-        p_cursor = p_end + 4;
-
-        let p_t = extract_attribute_u64(tag_header, "t").unwrap_or(0) as f64 / 1000.0;
-        let p_d = extract_attribute_u64(tag_header, "d").unwrap_or(2000) as f64 / 1000.0;
-
-        // Check if there are word tags <s ...> inside <p>
-        let mut words_with_time = Vec::new();
-        if p_body.contains("<s") {
-            let mut s_cursor = 0;
-            while let Some(s_start_rel) = p_body[s_cursor..].find("<s") {
-                let s_start = s_cursor + s_start_rel;
-                let s_tag_close = match p_body[s_start..].find('>') {
-                    Some(idx) => s_start + idx,
-                    None => break,
-                };
-                let s_end = match p_body[s_tag_close..].find("</s>") {
-                    Some(idx) => s_tag_close + idx,
-                    None => break,
-                };
-
-                let s_header = &p_body[s_start..s_tag_close];
-                let s_text = unescape_xml(&p_body[s_tag_close + 1..s_end]);
-                s_cursor = s_end + 4;
-
-                let offset_ms = extract_attribute_u64(s_header, "t").unwrap_or(0) as f64 / 1000.0;
-                let word_time = p_t + offset_ms;
-                let trimmed = s_text.trim();
-                if !trimmed.is_empty() {
-                    words_with_time.push((word_time, trimmed.to_string()));
-                }
-            }
-        }
-
-        if !words_with_time.is_empty() {
-            // Build lines respecting max_len limit
-            let mut chunk: Vec<String> = Vec::new();
-            let mut chunk_start = words_with_time[0].0;
-            let mut current_len = 0;
-
-            for (w_time, word) in words_with_time {
-                let additional = if chunk.is_empty() { word.len() } else { 1 + word.len() };
-                if current_len + additional > max_len && !chunk.is_empty() {
-                    // Flush line
-                    let text = chunk.join(" ");
-                    let lrc = format!("[{}]{}", format_lrc_timestamp(chunk_start), text);
-                    synced_lines.push(lrc);
-                    plain_paragraphs.push(text);
-
-                    chunk.clear();
-                    chunk_start = w_time;
-                    current_len = 0;
-                }
-
-                current_len += if chunk.is_empty() { word.len() } else { 1 + word.len() };
-                chunk.push(word);
-            }
-
-            if !chunk.is_empty() {
-                let text = chunk.join(" ");
-                let lrc = format!("[{}]{}", format_lrc_timestamp(chunk_start), text);
-                synced_lines.push(lrc);
-                plain_paragraphs.push(text);
-            }
-        } else {
-            // Plain text without <s> tags
-            let clean_text = unescape_xml(&strip_xml_tags(p_body));
-            let trimmed = clean_text.trim();
-            if !trimmed.is_empty() {
-                if trimmed.chars().count() <= max_len {
-                    let lrc = format!("[{}]{}", format_lrc_timestamp(p_t), trimmed);
-                    synced_lines.push(lrc);
-                    plain_paragraphs.push(trimmed.to_string());
-                } else {
-                    // Split sentence into words and interpolate timestamps
-                    let words: Vec<&str> = trimmed.split_whitespace().collect();
-                    let mut chunk: Vec<&str> = Vec::new();
-                    let mut chunk_len = 0;
-                    let mut sub_chunks: Vec<String> = Vec::new();
-
-                    for w in words {
-                        let add = if chunk.is_empty() { w.len() } else { 1 + w.len() };
-                        if chunk_len + add > max_len && !chunk.is_empty() {
-                            sub_chunks.push(chunk.join(" "));
-                            chunk.clear();
-                            chunk_len = 0;
-                        }
-                        chunk_len += if chunk.is_empty() { w.len() } else { 1 + w.len() };
-                        chunk.push(w);
-                    }
-                    if !chunk.is_empty() {
-                        sub_chunks.push(chunk.join(" "));
-                    }
-
-                    let n_chunks = sub_chunks.len().max(1);
-                    for (i, sub) in sub_chunks.into_iter().enumerate() {
-                        let chunk_t = p_t + (p_d * i as f64 / n_chunks as f64);
-                        let lrc = format!("[{}]{}", format_lrc_timestamp(chunk_t), sub);
-                        synced_lines.push(lrc);
-                        plain_paragraphs.push(sub);
-                    }
-                }
-            }
-        }
+    let mut plain_lines = Vec::new();
+    let mut cursor = 0;
+    while let Some(start) = xml[cursor..].find("<p ") {
+        let start = cursor + start;
+        let Some(close) = xml[start..].find('>').map(|i| start + i) else { break; };
+        let Some(end) = xml[close..].find("</p>").map(|i| close + i) else { break; };
+        cursor = end + 4;
+        let Some(at) = extract_attribute_u64(&xml[start..close], "t") else { continue; };
+        let body = &xml[close + 1..end];
+        // Keep paragraph timing intact. Word spans are presentation, not new lyric lines.
+        let text = unescape_xml(&strip_xml_tags(body)).split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() { continue; }
+        synced_lines.push(format!("[{}]{text}", format_lrc_timestamp(at as f64 / 1000.0)));
+        plain_lines.push(text);
+        if synced_lines.len() > 20000 { return Err("Terlalu banyak baris caption.".into()); }
     }
-
-    if synced_lines.is_empty() {
-        return Err("Tidak ada baris caption yang dapat diekstrak.".into());
-    }
-
-    Ok(LyricsResult {
-        plain_lyrics: plain_paragraphs.join("\n"),
-        synced_lyrics: synced_lines.join("\n"),
-        instrumental: false,
-        is_youtube: true,
-    })
+    if synced_lines.is_empty() { return Err("Tidak ada baris caption yang dapat diekstrak.".into()); }
+    Ok(LyricsResult { plain_lyrics: plain_lines.join("\n"), synced_lyrics: synced_lines.join("\n"), instrumental: false, is_youtube: true })
 }
 
 fn extract_attribute_u64(tag: &str, attr: &str) -> Option<u64> {
@@ -376,6 +293,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn direct_caption_entry_requires_both_consents_before_transport() {
+        let consent=crate::lyrics_gate::LyricsConsent::default();
+        assert!(fetch_captions("synthetic title","synthetic artist",200.,&consent.snapshot()).is_err());
+        consent.set(true,false);
+        assert!(fetch_captions("synthetic title","synthetic artist",200.,&consent.snapshot()).is_err());
+        consent.set(false,true);
+        assert!(fetch_captions("synthetic title","synthetic artist",200.,&consent.snapshot()).is_err());
+    }
+    #[test]
     fn test_extract_video_ids() {
         let sample = r#"something "videoId":"wAvlqGbaCw0" and another "videoId":"VcEX_90Sc8I" repeated "videoId":"wAvlqGbaCw0""#;
         let vids = extract_video_ids(sample);
@@ -390,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_timedtext_with_word_splits() {
+    fn caption_word_spans_preserve_paragraph_timing() {
         let xml = r#"<?xml version="1.0" encoding="utf-8" ?>
 <timedtext format="3">
 <body>
@@ -412,28 +338,69 @@ mod tests {
 
         let res = parse_timedtext(xml, 35, "Title", "Artist", 10.0).unwrap();
         let lines: Vec<&str> = res.synced_lyrics.lines().collect();
-        assert!(lines.len() >= 2, "Long sentence must split into multiple lines, got: {:?}", lines);
-        for line in &lines {
-            // Strip [mm:ss.xx] timestamp
-            let text = &line[10..];
-            assert!(text.chars().count() <= 35, "Line too long ({} chars): {}", text.chars().count(), text);
-        }
-        assert_eq!(lines[0], "[00:01.00]Jurusan paling dibutuhin di era");
-        assert_eq!(lines[1], "[00:03.50]kecerdasan buatan ternyata bukan");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("[00:01.00]Jurusan paling dibutuhin"));
+        assert!(lines[0].ends_with("informatika"));
     }
 
     #[test]
-    fn test_parse_timedtext_plain_fallback_splits() {
+    fn test_is_allowed_caption_host() {
+        assert!(is_allowed_caption_host("https://www.youtube.com/api/timedtext?v=123"));
+        assert!(is_allowed_caption_host("https://youtube.com/api/timedtext?v=123"));
+        assert!(is_allowed_caption_host("https://rr1---sn-4g5ednls.googlevideo.com/videoplayback?expire=123"));
+        assert!(is_allowed_caption_host("https://googlevideo.com/videoplayback"));
+        assert!(!is_allowed_caption_host("http://www.youtube.com/api/timedtext"));
+        assert!(!is_allowed_caption_host("https://attacker.com/timedtext"));
+        assert!(!is_allowed_caption_host("https://youtube.com.attacker.com/api"));
+        assert!(!is_allowed_caption_host("https://googlevideo.com.attacker.com/api"));
+    }
+
+    #[test]
+    fn test_verify_candidate_match_duration_and_title() {
+        let matching_details = serde_json::json!({
+            "title": "Artist - Song Title (Official Music Video)",
+            "lengthSeconds": "210"
+        });
+        assert!(verify_candidate_match(&matching_details, "Song Title", "Artist", 212.0).is_ok());
+        assert!(verify_candidate_match(&serde_json::json!({"title":"Artist - Song Other", "lengthSeconds":"210"}), "Song Title", "Artist", 210.0).is_err());
+        assert!(verify_candidate_match(&serde_json::json!({"title":"Song Title", "lengthSeconds":"210", "author":"Other Artist"}), "Song Title", "Artist", 210.0).is_err());
+        assert!(verify_candidate_match(&serde_json::json!({"title":"Artist - Song Title"}), "Song Title", "Artist", 210.0).is_err());
+        assert!(verify_candidate_match(&matching_details, "Song Title", "", 210.0).is_err());
+
+        // Duration mismatch is rejected before accepting a caption candidate.
+        let mismatch_duration = serde_json::json!({
+            "title": "Artist - Song Title (Official Music Video)",
+            "lengthSeconds": "300"
+        });
+        assert!(verify_candidate_match(&mismatch_duration, "Song Title", "Artist", 210.0).is_err());
+
+        // Title mismatch
+        let mismatch_title = serde_json::json!({
+            "title": "Completely Different Random Video",
+            "lengthSeconds": "210"
+        });
+        assert!(verify_candidate_match(&mismatch_title, "Song Title", "Artist", 210.0).is_err());
+    }
+
+    #[test]
+    fn caption_long_paragraph_does_not_invent_timestamps() {
         let xml = r#"<timedtext format="3"><body>
 <p t="2000" d="4000">Kalimat ini sengaja dibuat sangat panjang sekali agar terpicu pemotongan otomatis menjadi beberapa baris yang rapi.</p>
 </body></timedtext>"#;
 
         let res = parse_timedtext(xml, 35, "Title", "Artist", 10.0).unwrap();
         let lines: Vec<&str> = res.synced_lyrics.lines().collect();
-        assert!(lines.len() >= 3, "Expected at least 3 chunks, got: {:?}", lines);
-        for line in &lines {
-            let text = &line[10..];
-            assert!(text.chars().count() <= 35, "Line text too long ({} chars): {}", text.chars().count(), text);
-        }
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("[00:02.00]Kalimat ini"));
+        assert!(lines[0].ends_with("rapi."));
+    }
+    #[test]
+    fn session_detection_does_not_depend_on_other_windows() {
+        assert!(!session_allows_captions("chrome.exe", "Song", "Album"));
+        assert!(!session_allows_captions("spotify.exe", "YouTube Song", "YouTube"));
+        assert!(session_allows_captions("youtube.app", "Song", "Album"));
+        assert!(session_allows_captions("msedge.exe", "Song - YouTube", ""));
+        assert_eq!(caption_srv3_url("https://www.youtube.com/api/timedtext?v=x&fmt=json3&sig=y"), "https://www.youtube.com/api/timedtext?v=x&sig=y&fmt=srv3");
+        assert!(extract_video_ids("\"videoId\":\"短い").is_empty());
     }
 }

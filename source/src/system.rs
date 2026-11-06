@@ -816,10 +816,11 @@ pub fn sample_system_storage() -> (Option<f32>, Option<f32>, Option<f32>, Vec<Dr
     unsafe {
         #[link(name = "kernel32")]
         unsafe extern "system" {
-            fn SetErrorMode(u_mode: u32) -> u32;
+            fn SetThreadErrorMode(dw_new_mode: u32, lp_old_mode: *mut u32) -> i32;
         }
         const SEM_FAILCRITICALERRORS: u32 = 0x0001;
-        let prev_mode = SetErrorMode(SEM_FAILCRITICALERRORS);
+        let mut prev_mode = 0u32;
+        let _ = SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut prev_mode);
 
         use windows::core::PCWSTR;
         use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives};
@@ -860,7 +861,8 @@ pub fn sample_system_storage() -> (Option<f32>, Option<f32>, Option<f32>, Vec<Dr
                 }
             }
         }
-        SetErrorMode(prev_mode);
+        let mut dummy = 0u32;
+        let _ = SetThreadErrorMode(prev_mode, &mut dummy);
 
         if sum_total_bytes > 0 {
             let total_gb = (sum_total_bytes as f64 / (1024.0 * 1024.0 * 1024.0)) as f32;
@@ -908,3 +910,265 @@ pub fn calculate_power(cpu_usage: f32, gpu_usage: f32) -> PowerSnapshot {
 
 
 pub mod power_sensor;
+
+// --- Task 035: Hardware Monitoring Sampler (RAM, CPU, GPU) ---
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum HardwareDataQuality {
+    Valid,
+    Partial,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HardwareSample {
+    pub ram_percent: Option<f32>,
+    pub cpu_percent: Option<f32>,
+    pub gpu_percent: Option<f32>,
+    pub quality: HardwareDataQuality,
+    pub timestamp: std::time::Instant,
+}
+
+impl Default for HardwareSample {
+    fn default() -> Self {
+        Self {
+            ram_percent: None,
+            cpu_percent: None,
+            gpu_percent: None,
+            quality: HardwareDataQuality::Unavailable,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+}
+
+use std::ffi::c_void;
+
+#[repr(C)]
+struct PdhFmtCountervalueDouble {
+    c_status: u32,
+    double_value: f64,
+}
+
+#[repr(C)]
+struct PdhFmtCountervalueItemW {
+    sz_name: *mut u16,
+    fmt_value: PdhFmtCountervalueDouble,
+}
+
+type PdhHQuery = *mut c_void;
+type PdhHCounter = *mut c_void;
+type PdhStatus = i32;
+
+struct PdhGpuSampler {
+    _h_module: windows::Win32::Foundation::HMODULE,
+    fn_close_query: unsafe extern "system" fn(PdhHQuery) -> PdhStatus,
+    fn_collect: unsafe extern "system" fn(PdhHQuery) -> PdhStatus,
+    fn_get_array: unsafe extern "system" fn(PdhHCounter, u32, *mut u32, *mut u32, *mut u8) -> PdhStatus,
+    query: PdhHQuery,
+    counter: PdhHCounter,
+    has_primed: bool,
+}
+
+impl Drop for PdhGpuSampler {
+    fn drop(&mut self) {
+        if !self.query.is_null() {
+            unsafe {
+                (self.fn_close_query)(self.query);
+            }
+            self.query = std::ptr::null_mut();
+        }
+    }
+}
+
+impl PdhGpuSampler {
+    pub fn new() -> Option<Self> {
+        use windows::core::w;
+        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+
+        unsafe {
+            let h_module = LoadLibraryW(w!("pdh.dll")).ok()?;
+
+            let fn_open_query: unsafe extern "system" fn(*const u16, usize, *mut PdhHQuery) -> PdhStatus =
+                std::mem::transmute(GetProcAddress(h_module, windows::core::s!("PdhOpenQueryW"))?);
+            let fn_close_query: unsafe extern "system" fn(PdhHQuery) -> PdhStatus =
+                std::mem::transmute(GetProcAddress(h_module, windows::core::s!("PdhCloseQuery"))?);
+            let fn_collect: unsafe extern "system" fn(PdhHQuery) -> PdhStatus =
+                std::mem::transmute(GetProcAddress(h_module, windows::core::s!("PdhCollectQueryData"))?);
+            let fn_get_array: unsafe extern "system" fn(PdhHCounter, u32, *mut u32, *mut u32, *mut u8) -> PdhStatus =
+                std::mem::transmute(GetProcAddress(h_module, windows::core::s!("PdhGetFormattedCounterArrayW"))?);
+
+            let fn_add_english: Option<unsafe extern "system" fn(PdhHQuery, *const u16, usize, *mut PdhHCounter) -> PdhStatus> =
+                GetProcAddress(h_module, windows::core::s!("PdhAddEnglishCounterW")).map(|p| std::mem::transmute(p));
+            let fn_add_counter: Option<unsafe extern "system" fn(PdhHQuery, *const u16, usize, *mut PdhHCounter) -> PdhStatus> =
+                GetProcAddress(h_module, windows::core::s!("PdhAddCounterW")).map(|p| std::mem::transmute(p));
+
+            let mut query: PdhHQuery = std::ptr::null_mut();
+            if fn_open_query(std::ptr::null(), 0, &mut query) != 0 || query.is_null() {
+                return None;
+            }
+
+            let path: Vec<u16> = "\\GPU Engine(*)\\Utilization Percentage\0".encode_utf16().collect();
+            let mut counter: PdhHCounter = std::ptr::null_mut();
+
+            let mut added = false;
+            if let Some(add_eng) = fn_add_english {
+                if add_eng(query, path.as_ptr(), 0, &mut counter) == 0 && !counter.is_null() {
+                    added = true;
+                }
+            }
+            if !added {
+                if let Some(add_cnt) = fn_add_counter {
+                    if add_cnt(query, path.as_ptr(), 0, &mut counter) == 0 && !counter.is_null() {
+                        added = true;
+                    }
+                }
+            }
+
+            if !added || counter.is_null() {
+                fn_close_query(query);
+                return None;
+            }
+
+            // Prime the initial query
+            let _ = fn_collect(query);
+
+            Some(Self {
+                _h_module: h_module,
+                fn_close_query,
+                fn_collect,
+                fn_get_array,
+                query,
+                counter,
+                has_primed: false,
+            })
+        }
+    }
+
+    pub fn sample(&mut self) -> Option<f32> {
+        if self.query.is_null() || self.counter.is_null() {
+            return None;
+        }
+
+        unsafe {
+            let res = (self.fn_collect)(self.query);
+            if res != 0 {
+                return None;
+            }
+
+            if !self.has_primed {
+                self.has_primed = true;
+                return None;
+            }
+
+            let mut buffer_size: u32 = 0;
+            let mut item_count: u32 = 0;
+            const PDH_FMT_DOUBLE: u32 = 0x00000200;
+
+            // Query buffer size needed
+            let _ = (self.fn_get_array)(self.counter, PDH_FMT_DOUBLE, &mut buffer_size, &mut item_count, std::ptr::null_mut());
+            if buffer_size == 0 || item_count == 0 {
+                return None;
+            }
+
+            let mut buffer: Vec<u8> = vec![0u8; buffer_size as usize];
+            let res2 = (self.fn_get_array)(self.counter, PDH_FMT_DOUBLE, &mut buffer_size, &mut item_count, buffer.as_mut_ptr());
+            if res2 != 0 {
+                return None;
+            }
+
+            let items = buffer.as_ptr() as *const PdhFmtCountervalueItemW;
+            let mut max_utilization: f64 = 0.0;
+            let mut found_any = false;
+
+            for i in 0..item_count {
+                let item = &*items.add(i as usize);
+                if item.sz_name.is_null() {
+                    continue;
+                }
+
+                // Check sz_name for engtype_3D or Compute
+                let mut len = 0;
+                while *item.sz_name.add(len) != 0 {
+                    len += 1;
+                }
+                let slice = std::slice::from_raw_parts(item.sz_name, len);
+                let name = String::from_utf16_lossy(slice);
+
+                if name.contains("engtype_3D") || name.contains("Compute") {
+                    if item.fmt_value.c_status == 0 {
+                        found_any = true;
+                        let val = item.fmt_value.double_value;
+                        if val > max_utilization {
+                            max_utilization = val;
+                        }
+                    }
+                }
+            }
+
+            if found_any {
+                Some((max_utilization as f32).clamp(0.0, 100.0))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+pub struct HardwareSampler {
+    pub cpu: CpuSampler,
+    gpu: Option<PdhGpuSampler>,
+    pub last_sample: Option<HardwareSample>,
+    cpu_primed: bool,
+}
+
+impl Default for HardwareSampler {
+    fn default() -> Self {
+        Self {
+            cpu: CpuSampler::default(),
+            gpu: PdhGpuSampler::new(),
+            last_sample: None,
+            cpu_primed: false,
+        }
+    }
+}
+
+impl HardwareSampler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn sample(&mut self) -> HardwareSample {
+        let (ram_pct, _used, _total) = sample_system_memory();
+
+        let raw_cpu = self.cpu.sample() * 100.0;
+        let cpu_pct = if !self.cpu_primed {
+            self.cpu_primed = true;
+            None
+        } else {
+            Some(raw_cpu.clamp(0.0, 100.0))
+        };
+
+        let gpu_pct = if let Some(gpu) = &mut self.gpu {
+            gpu.sample()
+        } else {
+            None
+        };
+
+        let quality = if ram_pct.is_some() || cpu_pct.is_some() || gpu_pct.is_some() {
+            HardwareDataQuality::Valid
+        } else {
+            HardwareDataQuality::Unavailable
+        };
+
+        let sample = HardwareSample {
+            ram_percent: ram_pct,
+            cpu_percent: cpu_pct,
+            gpu_percent: gpu_pct,
+            quality,
+            timestamp: std::time::Instant::now(),
+        };
+
+        self.last_sample = Some(sample.clone());
+        sample
+    }
+}

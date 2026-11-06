@@ -111,6 +111,7 @@ fn test_migrate_legacy_power_data_runs_once_and_is_idempotent() {
         monthly_kwh: 42.5,
         monthly_cost_idr: 61400,
         power_days_active: vec!["2026-09-01".into(), "2026-09-02".into()],
+        ..Default::default()
     };
 
     // First run: migrates data

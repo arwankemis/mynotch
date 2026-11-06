@@ -5,21 +5,25 @@ use chrono::Datelike;
 
 impl Shell {
     pub(super) fn draw_page(&mut self,p:&mut Painter){unsafe{
-        match self.tab.as_str(){
-            "Musik"=>self.music_page(p),
-            "Kalender"=>self.calendar_page(p),
-            "Reminder"=>self.reminder_page(p),
-            "Clipboard"=>self.clipboard_page(p),
-            "Catatan"=>self.notes_page(p),
-            "Cuaca"=>self.weather_page(p),
+        match page_route(&self.tab,self.settings.quiet_mode,self.preset_host.backlog_open,self.settings.enabled("Catatan")){
+            PageRoute::QuietMusic=>self.quiet_music(p),
+            PageRoute::QuietCalendar=>self.quiet_calendar(p),
+            PageRoute::Hidden=>self.quiet_placeholder(p),
+            PageRoute::Backlog=>self.draw_backlog(p),
+            PageRoute::Music=>self.music_page(p),
+            PageRoute::Calendar=>self.calendar_page(p),
+            PageRoute::Reminder=>self.reminder_page(p),
+            PageRoute::Clipboard=>self.clipboard_page(p),
+            PageRoute::Notes=>self.simpan_page(p),
+            PageRoute::Weather=>self.weather_page(p),
+            PageRoute::Power => {
 
-            "Daya" => {
                 if !self.draw_mod_tab(p) {
                     let msg = if self.settings.language == "en" { "Install or enable the Power mod from Settings → Mods & Extensions." } else { "Pasang atau aktifkan Mod Daya dari Pengaturan → Mod & Ekstensi." };
                     p.text(msg, 24., 76., self.width - 48., 66., 13., render::TEXT, false);
                 }
             }
-            _=>{
+            PageRoute::Other=>{
                 if !self.draw_mod_tab(p) {
                     let msg = crate::i18n::t("shell.select_module", &self.settings.language);
                     p.text(msg,24.,140.,620.,80.,18.,MUTED,false);
@@ -53,20 +57,22 @@ impl Shell {
         // Title (bold 14px white)
         let default_title = crate::i18n::t("music.no_music", &lang);
         let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
-        p.text_ellipsis(title,94.,44.,self.width-138.,18.,14.,0xffffff,true);
+        p.text_ellipsis(title,94.,44.,self.width-156.,18.,14.,self.palette.text_primary,true);
 
         // Media source app icon (Spotify, etc) placed at far right of title row
-        p.icon_media_app(self.width-28.,52.,&self.track.source_app,self.track_is_youtube,self.track.playing);
+        self.draw_media_source(p);
+        let sources=self.media_sessions.sessions.iter().filter(|s|s.playing).count().min(2);
+        let metadata_width=if self.media_source_open{self.width-20.-(38.+sources as f32*32.)-106.}else{self.width-138.};
 
         // Artist (12px #9ea3a8)
         let default_artist = crate::i18n::t("music.no_artist", &lang);
         let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
-        p.text_ellipsis(&artist,94.,65.,self.width-138.,16.,12.,0x9ea3a8,false);
+        p.text_ellipsis(&artist,94.,65.,metadata_width,16.,12.,self.palette.text_muted,false);
 
         // Album (11px #6e7681)
         let default_album = crate::i18n::t("music.no_album", &lang);
         let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
-        p.text_ellipsis(&album,94.,85.,self.width-138.,16.,11.,0x6e7681,false);
+        p.text_ellipsis(&album,94.,85.,metadata_width,16.,11.,self.palette.text_muted,false);
 
         // 2. Scrubber (At y=114, below the artwork)
         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
@@ -79,11 +85,11 @@ impl Shell {
         let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+18.);
         p.fill(track_x,scrub_y+6.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
         if ratio>0.{
-            p.fill(track_x,scrub_y+6.,track_w*ratio as f32,4.,2.,0xffffff);
+            p.fill(track_x,scrub_y+6.,track_w*ratio as f32,4.,2.,self.palette.accent);
         }
         if scrub_hov{
             let thumb_x=(track_x+track_w*ratio as f32-5.).clamp(track_x-2.,track_x+track_w-8.);
-            p.fill(thumb_x,scrub_y+3.,10.,10.,5.,0xffffff);
+            p.fill(thumb_x,scrub_y+3.,10.,10.,5.,self.palette.accent);
         }
         if self.focused.as_ref()==Some(&Action::SeekPointer){
             p.stroke(track_x-2.,scrub_y+2.,track_w+4.,12.,4.,0xd5d5dc,1.);
@@ -106,7 +112,66 @@ impl Shell {
         self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
     }}
 
+    pub(super) fn draw_media_source(&mut self,p:&mut Painter){unsafe{
+        let x=self.width-48.;let action=Action::MediaSourceMenu;
+        p.fill(x,40.,28.,28.,7.,0x121217);
+        let focused=self.focused.as_ref()==Some(&action);
+        p.stroke(x,40.,28.,28.,7.,if focused{self.palette.accent}else{0x2b2b36},1.);
+        p.icon_media_source(x+14.,54.,24.,&self.track.source_app,self.track.playing);
+        if self.media_sessions.manual.is_none(){
+            p.fill(x+18.,57.,12.,12.,6.,0x121217);
+            p.text_centered("A",x+18.,57.,12.,12.,8.,self.palette.accent,1.,true);
+        }
+        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x,40.,28.,28.),action});}
+        if !self.media_source_open{return}
+        let sessions:Vec<_>=self.media_sessions.sessions.iter().filter(|s|s.playing).collect();
+        let visible=sessions.len().min(2);
+        // Keep the approved 102x38 maximum. Arrow keys / wheel page additional
+        // sessions without merging equal app IDs or stretching over the timeline.
+        let range=ui::media_source_range(sessions.len(),self.media_source_cursor);
+        let width=38.+visible as f32*32.;let left=self.width-20.-width;
+        p.fill(left,70.,width,38.,12.,0x121217);p.stroke(left,70.,width,38.,12.,0x2b2b36,1.);
+        let auto=Action::SelectMediaSource(None);
+        let active=self.media_sessions.manual.is_none()||self.focused.as_ref()==Some(&auto);
+        if active{p.stroke(left+6.,75.,24.,28.,6.,self.palette.accent,1.);}
+        p.text_centered("A",left+6.,75.,24.,28.,12.,self.palette.text_primary,1.,true);
+        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(left+6.,75.,24.,28.),action:auto});}
+        for (slot,session) in sessions[range].iter().enumerate(){
+            let bx=left+34.+slot as f32*32.;let action=Action::SelectMediaSource(Some(session.id.clone()));
+            if self.media_sessions.manual.as_ref()==Some(&session.id)||self.focused.as_ref()==Some(&action){p.stroke(bx,75.,28.,28.,6.,self.palette.accent,1.);}
+            p.icon_media_source(bx+14.,89.,20.,&session.source_app,session.playing);
+            if self.track.session_id==session.id{p.fill(bx+12.,100.,4.,4.,2.,self.palette.accent);}
+            if self.hit_enabled{self.hits.push(Hit{rect:render::rect(bx,75.,28.,28.),action});}
+        }
+        if sessions.len()>2{p.fill(left+width-5.,84.,2.,10.,1.,self.palette.text_muted);}
+    }}
+
+    pub(super) fn handle_media_source_key(&mut self,key:u16)->bool{
+        if !self.media_source_open{return false}
+        if self.tab!="Musik"||self.lyric_mode||self.settings_open||!self.expanded{self.media_source_open=false;return false}
+        match key{
+            0x1B|0x09=>{
+                self.media_source_open=false;self.focused=Some(Action::MediaSourceMenu);
+                self.hits.retain(|h|!matches!(h.action,Action::SelectMediaSource(..)));
+                self.invalidate();return key==0x1B;
+            }
+            0x25|0x26|0x27|0x28|0x24|0x23=>{
+                let sessions:Vec<_>=self.media_sessions.sessions.iter().filter(|s|s.playing).collect();
+                let count=sessions.len();
+                self.media_source_cursor=match key{
+                    0x24=>0,0x23=>count,0x25|0x26=>self.media_source_cursor.saturating_sub(1),_ => (self.media_source_cursor+1).min(count),
+                };
+                self.focused=Some(Action::SelectMediaSource(self.media_source_cursor.checked_sub(1).and_then(|i|sessions.get(i)).map(|s|s.id.clone())));
+                self.invalidate();true
+            }
+            _=>false,
+        }
+    }
+
     fn draw_glass_player(&mut self,p:&mut Painter){unsafe{
+        self.draw_media_source(p);
+        let source_width=if self.media_source_open{38.+self.media_sessions.sessions.iter().filter(|s|s.playing).count().min(2) as f32*32.}else{0.};
+        let content_width=if self.media_source_open{self.width-20.-source_width-160.}else{self.width-176.};
         let lang=self.settings.language.clone();
         let key=if self.cover.is_some(){self.cover_key}else{0};
         if !p.cover(self.cover.as_ref(),key,20.,72.,108.,false){
@@ -114,9 +179,9 @@ impl Shell {
             p.text_centered("♫",20.,72.,108.,108.,32.,0xb2e7ee,1.,false);
         }
         let title=if self.track.title.is_empty(){crate::i18n::t("music.no_music",&lang)}else{&self.track.title};
-        p.text_ellipsis(title,148.,72.,self.width-176.,27.,20.,0xf5f8ff,true);
+        p.text_ellipsis(title,148.,72.,content_width,27.,20.,0xf5f8ff,true);
         let artist=if self.track.artist.is_empty(){crate::i18n::t("music.no_artist",&lang)}else{&self.track.artist};
-        p.text_ellipsis(artist,148.,104.,self.width-176.,19.,12.,0xc5cedd,false);
+        p.text_ellipsis(artist,148.,104.,content_width,19.,12.,0xc5cedd,false);
         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
         let duration=self.track.duration_seconds;
         let ratio=if duration>0.{(position/duration).clamp(0.,1.)}else{0.};
@@ -214,8 +279,20 @@ impl Shell {
         // Right Half: Synchronized Lyrics (x = 252..w-20)
         let lyrics_x=252.;
         let lyrics_w=w-272.;
+        if !self.settings.lyrics_online {
+            p.text(crate::i18n::t("music.consent_off",&lang),lyrics_x,46.,lyrics_w,42.,13.,0xdddddd,false);
+            p.text(crate::i18n::t("music.consent_hint",&lang),lyrics_x,90.,lyrics_w,50.,11.,0x92929d,false);
+            self.button_h(p,crate::i18n::t("music.open_settings",&lang),lyrics_x,145.,lyrics_w,24.,Action::OpenSettingsAudio,false);
+            return;
+        }
         let no_lyrics_msg = crate::i18n::t("music.no_lyrics", &lang);
         let loading_lyrics_msg = crate::i18n::t("music.loading_lyrics", &lang);
+        if self.lyrics_from_youtube {
+            p.text(crate::i18n::t("music.youtube_captions", &lang),lyrics_x,26.,lyrics_w,16.,10.,0x72777b,false);
+        }
+        if !self.track.title.is_empty() && !self.jobs.contains_key("Musik") && self.lyrics.is_empty() {
+            self.button_h(p,crate::i18n::t("music.lyrics_retry", &lang),w-102.,144.,84.,20.,Action::LyricsRetry,false);
+        }
         if self.lyrics.is_empty(){
             if self.jobs.contains_key("Musik"){
                 p.text(loading_lyrics_msg,lyrics_x,70.,lyrics_w,50.,13.,0x8dc4dd,false);
@@ -235,7 +312,7 @@ impl Shell {
                         p.text_ellipsis(line,lyrics_x,ly,lyrics_w,22.,12.5,col,i==0);
                     }
                     if self.lyric_offset>0{
-                        self.button_h(p,"Reset",w-64.,144.,46.,20.,Action::LyricsFollow,false);
+                        self.button_h(p,"Reset",lyrics_x,144.,46.,20.,Action::LyricsFollow,false);
                     }
                 }
             }else{
@@ -255,7 +332,7 @@ impl Shell {
                 }
             }
             let active_line=&self.lyrics[curr];
-            p.text_ellipsis(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true);
+            if self.settings.effective_presentation().reduced_motion{p.text_ellipsis_vcenter(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true);}else{p.text_scrolling(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true,(position-active_line.at).max(0.),false);}
             if self.focused.as_ref()==Some(&Action::Lyric(curr)){
                 p.stroke(lyrics_x-2.,72.,lyrics_w+4.,28.,4.,0xd5d5dc,1.);
             }
@@ -478,7 +555,7 @@ impl Shell {
         }
     }}
 
-    fn clipboard_page(&mut self, p: &mut Painter) { unsafe {
+    pub(super) fn clipboard_page(&mut self, p: &mut Painter) { unsafe {
         let lang = self.settings.language.clone();
         let w = self.width;
         let left_x = 22.;
@@ -515,10 +592,10 @@ impl Shell {
             }
 
             if !self.state.clipboard_history.is_empty() {
-                self.button_h(p, crate::i18n::t("clipboard.clear", &lang), left_x + left_w - 70., 42., 70., 21., Action::ClearClips, false);
+                self.icon_button(p,"broom", left_x + left_w - 26., 41., 24., 22., Action::ClearClips, false);
             }
         } else {
-            p.outline_icon("search", left_x + 2., 44., 15., 0x38bdf8);
+            p.outline_icon("search", left_x + 2., 44., 15., 0xd8d8de);
 
             let close_x = left_x + left_w - 22.;
             let close_hover = self.pointer.is_some_and(|(px, py)| px >= close_x && px <= close_x + 22. && py >= 41. && py <= 63.);
@@ -530,7 +607,7 @@ impl Shell {
                 self.hits.push(Hit { rect: render::rect(close_x, 41., 22., 22.), action: Action::ToggleClipSearch });
             }
 
-            p.fill(left_x, 63., left_w, 1.5, 0.5, 0x38bdf8);
+            p.fill(left_x, 63., left_w, 1.5, 0.5, 0xd8d8de);
         }
 
         if total_clips == 0 {
@@ -561,8 +638,8 @@ impl Shell {
                 let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
 
                 if is_selected {
-                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0x0284c7, 0.28);
-                    p.stroke(left_x, item_y, left_w, 32., 6., 0x38bdf8, 1.2);
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., self.palette.accent, 0.25);
+                    p.stroke(left_x, item_y, left_w, 32., 6., self.palette.accent, 1.2);
                 } else if item_hovered {
                     p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.08);
                     p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.12);
@@ -620,23 +697,22 @@ impl Shell {
         });
 
         if total_clips == 0 {
-            p.text_centered("📋", right_x, 82., right_w, 28., 24., 0x38bdf8, 0.8, false);
+            p.text_centered("📋", right_x, 82., right_w, 28., 24., 0xd8d8de, 0.8, false);
             p.text_centered(crate::i18n::t("clipboard.empty_title", &lang), right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
             p.text_centered(crate::i18n::t("clipboard.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
             p.text_centered(crate::i18n::t("clipboard.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
         } else if let Some((orig_idx, item)) = selected_item {
             let clip_word = crate::i18n::t("clipboard.clip", &lang);
+            let del_label = crate::i18n::t("clipboard.delete", &lang);
+            let del_w = 60.;
+            let del_x = w - 20. - del_w;
+            self.button_h(p, del_label, del_x, 43., del_w, 22., Action::DeleteClip(item.id), false);
+            let rec_w = 78.;
+            let rec_x = del_x - 8. - rec_w;
+            self.button_h(p, crate::i18n::t("clipboard.recopy", &lang), rec_x, 43., rec_w, 22., Action::CopyClip(orig_idx), true);
             let title = format!("{} #{} \u{00B7} {}", clip_word, self.selected_clip + 1, item.time);
-            p.text(&title, right_x, 46., 120., 18., 11.5, 0x38bdf8, true);
-
-            let pin_label = if item.pinned { crate::i18n::t("clipboard.unpin", &lang) } else { crate::i18n::t("clipboard.pin", &lang) };
-            let pin_w = 68.;
-            let pin_x = w - 20. - 98. - 8. - pin_w;
-            self.button_h(p, pin_label, pin_x, 43., pin_w, 22., Action::TogglePinClip(item.id), item.pinned);
-
-            let btn_w = 98.;
-            let btn_x = w - 20. - btn_w;
-            self.button_h(p, crate::i18n::t("clipboard.recopy", &lang), btn_x, 43., btn_w, 22., Action::CopyClip(orig_idx), true);
+            let title_w = (rec_x - 8. - right_x).max(40.);
+            p.text_ellipsis(&title, right_x, 46., title_w, 18., 11.5, 0xd8d8de, true);
 
             let box_y = 69.;
             let box_h = 138.;
@@ -661,11 +737,14 @@ impl Shell {
             let footer_y = 212.;
             let count_meta = crate::i18n::clip_meta(item.chars, item.lines, &lang);
             p.text(&count_meta, right_x + 4., footer_y + 2., 140., 14., 9.5, 0x64748b, false);
-            self.button_h(p, crate::i18n::t("clipboard.delete", &lang), w - 20. - 68., footer_y, 68., 20., Action::DeleteClip(item.id), false);
+            let pin_action = Action::TogglePinClip(item.id);
+            self.icon_button(p,"pin", w - 20. - 24., footer_y, 24., 20., pin_action, item.pinned);
         }
     }}
 
-    fn notes_page(&mut self, p: &mut Painter) { unsafe {
+    pub(super) fn notes_page(&mut self, p: &mut Painter) { unsafe {
+        self.commit_editors();self.refresh_notes_host();
+
         let lang = self.settings.language.clone();
         let w = self.width;
         let left_x = 22.;
@@ -674,8 +753,8 @@ impl Shell {
         // ==========================================
         // LEFT PANE: Sticky Notes List
         // ==========================================
-        p.text(crate::i18n::t("notes.header", &lang), left_x, 46., 120., 18., 11.5, 0xfef08a, true);
-        self.button_h(p, crate::i18n::t("notes.new_btn", &lang), left_x + 140., 43., 72., 20., Action::NoteAdd, true);
+
+        self.button_h(p, crate::i18n::t("notes.new_btn", &lang), self.width - 20. - 72., 43., 72., 20., Action::NoteAdd, true);
 
         let total_notes = self.state.sticky_notes.len();
         if total_notes == 0 {
@@ -695,14 +774,14 @@ impl Shell {
 
             for (slot, idx) in (start..end).enumerate() {
                 let note = &self.state.sticky_notes[idx];
-                let item_y = 68. + slot as f32 * 35.;
+                let item_y = 78. + slot as f32 * 32.;
                 let is_selected = idx == self.state.selected_note;
-                let item_act = Action::NoteSelect(idx);
+                let item_act = Action::NoteSelectId(note.id);
                 let item_hovered = self.pointer.is_some_and(|(px, py)| px >= left_x && px <= left_x + left_w && py >= item_y && py <= item_y + 32.);
 
                 if is_selected {
-                    p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xfef08a, 0.16);
-                    p.stroke(left_x, item_y, left_w, 32., 6., 0xfef08a, 1.2);
+                    p.fill_alpha(left_x, item_y, left_w, 32., 6., self.palette.accent, 0.20);
+                    p.stroke(left_x, item_y, left_w, 32., 6., self.palette.accent, 1.2);
                 } else if item_hovered {
                     p.fill_alpha(left_x, item_y, left_w, 32., 6., 0xffffff, 0.08);
                     p.stroke(left_x, item_y, left_w, 32., 6., 0xffffff, 0.12);
@@ -759,9 +838,9 @@ impl Shell {
             p.text_centered(crate::i18n::t("notes.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
             p.text_centered(crate::i18n::t("notes.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
         } else if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
-            self.button_h(p, ".md", 402., 44., 34., 22., Action::NoteExport(0), false);
-            self.button_h(p, ".txt", 440., 44., 34., 22., Action::NoteExport(1), false);
-            self.button_h(p, "⧉ Pop", 478., 44., 42., 22., Action::NotePopout, true);
+            // Download icon opens a small menu with .txt / Sticky Note exports.
+            let menu_open=self.note_export_open==Some(note.id);
+            self.icon_button(p,"download",414.,45.,26.,20.,Action::NoteExportMenu(note.id),menu_open);
 
             let (bg_col, _) = crate::sticky::NOTE_COLORS.get(note.color_idx as usize).copied().unwrap_or((0xfef08a, "Kuning"));
             p.fill_alpha(right_x - 2., 72., right_w + 4., 144., 6., bg_col, 0.12);
@@ -778,17 +857,23 @@ impl Shell {
                 if self.hit_enabled {
                     self.hits.push(Hit {
                         rect: render::rect(cx - 2., cy - 2., 18., 18.),
-                        action: Action::NoteColor(ci as u8),
+                        action: Action::NoteCommand(note.id,10+ci as u8),
                     });
                 }
             }
 
-            self.button_h(p, crate::i18n::t("notes.copy", &lang), 368., 221., 64., 20., Action::NoteExport(2), false);
-            self.button_h(p, crate::i18n::t("notes.delete", &lang), 436., 221., 64., 20., Action::NoteDelete(note.id), false);
+            self.button_h(p, crate::i18n::t("notes.copy", &lang), 368., 221., 64., 20., Action::NoteCommand(note.id,2), false);
+            self.button_h(p, crate::i18n::t("notes.delete", &lang), 436., 221., 64., 20., Action::NoteCommand(note.id,4), false);
 
             let updated_lbl = crate::i18n::t("notes.updated", &lang);
             let update_lbl = format!("{}: {}", updated_lbl, note.updated_at);
-            p.text(&update_lbl, right_x, 248., 240., 14., 9.0, 0x64748b, false);
+            // Empty notes show the "note is empty" hint at the same spot; don't stack
+            // the timestamp on top of it.
+            if !note.content.trim().is_empty() && !self.editors.unsaved && !self.editors.registry.panel_read_only(note.id) {
+                p.text(&update_lbl, right_x, 248., 240., 14., 9.0, 0x64748b, false);
+            }
+            self.notes_link_toolbar(p,note.id);
+            if self.note_export_open==Some(note.id){self.note_export_menu(p,note.id);}
         }
     }}
 
@@ -929,8 +1014,109 @@ impl Shell {
     }}
 
     pub(super) fn action(&mut self,action:Action){
-        let transient=matches!(&action,Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings|Action::ToggleStorageDropdown|Action::KeepStorageDropdown);
+        if self.settings.quiet_mode&&!preset_host::quiet_action_allowed(&action){self.invalidate();return;}
+        if matches!(action,Action::Tab(..)|Action::Settings|Action::Back|Action::NoteAdd|Action::NoteSelect(..)|Action::NoteExport(..)|Action::NotePopout|Action::Exit)&&!self.flush_editors_barrier(){return;}
+        if !matches!(&action,Action::MediaSourceMenu|Action::SelectMediaSource(..)){self.media_source_open=false;}
+        let transient=matches!(&action,Action::MediaSourceMenu|Action::SelectMediaSource(..)|Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings|Action::ToggleStorageDropdown|Action::KeepStorageDropdown|Action::CycleStoragePage|Action::PromptDownloadPowerProvider|Action::ConfirmDownloadPowerProvider|Action::CancelDownloadPowerProvider|Action::QuickControlsOpen|Action::QuickControlsBack|Action::QuickControlsToggleRadio(..)|Action::QuickControlsSelectRadio(..)|Action::QuickControlsSelectDisplay(..)|Action::QuickControlsSetBrightness(..)|Action::QuickBrightnessPointer|Action::OpenSettingsPage(..));
         match action{
+            Action::ActivityExpired=>return,
+            Action::QuickControlsOpen => {
+                if !self.flush_editors_barrier() { return; }
+                self.settings_open = false;
+                self.privacy_detail_open = false;
+                self.mod_view = None;
+                self.quick_controls_open = true;
+                self.quick_controls.refresh();
+                self.set_hover_stage(2);
+                self.invalidate();
+                return;
+            },
+            Action::QuickControlsBack => {
+                self.quick_controls_open = false;
+                self.invalidate();
+                return;
+            },
+            Action::QuickControlsToggleRadio(kind) => {
+                let _ = self.quick_controls.toggle_radio(kind);
+                self.invalidate();
+                return;
+            },
+            Action::QuickControlsSelectRadio(kind, _) => {
+                self.quick_controls.cycle_radio_target(kind);
+                self.invalidate();
+                return;
+            },
+            Action::QuickControlsSelectDisplay(_) => {
+                self.quick_controls.cycle_display_target();
+                self.invalidate();
+                return;
+            },
+            Action::QuickControlsSetBrightness(pct, commit) => {
+                self.quick_controls.set_brightness(pct, commit);
+                self.invalidate();
+                return;
+            },
+            Action::QuickBrightnessPointer => {
+                return;
+            },
+            Action::OpenSettingsPage(uri) => {
+                crate::system::open_settings_page(uri);
+                return;
+            },
+            Action::NotesSubview(tasks)=>{self.notes_subview(tasks);return;},
+            Action::ConvertNote(id)=>{self.convert_note(id);return;},
+            Action::NoteSelectId(id)=>{self.select_note_id(id);return;},
+            Action::TaskSelect(id,rev)=>{self.task_action(id,rev,0,false);return;},
+            Action::TaskDone(id,done,rev)=>{self.task_action(id,rev,1,done);return;},
+            Action::OpenTodoNote(id,rev)=>{self.task_action(id,rev,2,false);return;},
+            Action::DetachTodoNote(id,rev)=>{self.task_action(id,rev,3,false);return;},
+            Action::DeleteTodo(id,rev)=>{self.delete_todo(id,rev);return;},
+            Action::TasksPage(delta)=>{if self.settings.quiet_mode||!self.flush_editors_barrier(){return;}self.notes_host.page=(self.notes_host.page as i64+delta as i64).max(0) as usize;self.notes_host.revision=self.notes_host.revision.saturating_add(1);self.refresh_notes_host();self.clear_note_hits();self.invalidate();return;},
+            Action::RetryNoteSave=>{self.flush_editors_barrier();self.invalidate();return;},
+            Action::NoteExportMenu(id)=>{
+                if self.note_export_open==Some(id){self.note_export_open=None;self.make_inputs();self.invalidate();return;}
+                if self.settings.quiet_mode||!self.flush_editors_barrier(){return;}
+                self.note_export_open=Some(id);self.make_inputs();self.invalidate();return;
+            },
+            Action::NoteExportPick(id,kind)=>{
+                if self.note_export_open!=Some(id){return;}
+                self.note_export_open=None;self.make_inputs();
+                self.action(Action::NoteCommand(id,kind));self.invalidate();return;
+            },
+            Action::NoteCommand(id,operation)=>{
+                if self.settings.quiet_mode||self.state.sticky_notes.iter().filter(|n|n.id==id).count()!=1||self.state.sticky_notes.get(self.state.selected_note).is_none_or(|n|n.id!=id)||!self.flush_editors_barrier(){return;}
+                match operation{0..=2=>self.action(Action::NoteExport(operation)),3=>self.popout_note(),4=>self.action(Action::NoteDelete(id)),10..=14=>self.action(Action::NoteColor(operation-10)),_=>{}}return;
+            },
+
+            Action::Preset(action)=>{self.preset_action(action);return;},
+            Action::PresetSettings=>{if !self.flush_editors_barrier(){return;}self.privacy_detail_open=false;self.mod_view=None;self.reminder_menu=None;self.settings_popup=None;self.settings_open=true;self.settings_cat=0;self.settings_scroll[0]=0.;self.settings_subpage_privacy=false;self.set_hover_stage(2);self.make_inputs();self.invalidate();return;},
+            Action::BacklogOpen=>{self.open_backlog();return;},
+            Action::BacklogClose=>{self.preset_host.backlog_open=false;self.invalidate();return;},
+            Action::BacklogItem(id,dismiss)=>{self.backlog_action(id,dismiss);return;},
+            Action::BacklogPage(delta)=>{self.preset_host.offset=(self.preset_host.offset as i64+delta as i64*5).max(0) as usize;self.focused=None;self.pressed=None;self.hits.clear();self.invalidate();return;},
+
+            Action::OpenActivity(id,rev)=>{self.activity_action(id,rev,0);return;},
+            Action::DismissActivity(id,rev)=>{self.activity_action(id,rev,1);return;},
+            Action::ConfirmActivity(id,rev)=>{self.activity_action(id,rev,2);return;},
+            Action::MediaSourceMenu=>{
+                self.media_source_open=!self.media_source_open;
+                self.media_source_cursor=0;
+                if self.media_source_open{self.focused=Some(Action::SelectMediaSource(None));}
+            },
+            Action::SelectMediaSource(id)=>{
+                // A queued mouse/key action may refer to the previous tray list.
+                if !media_source_choice_available(&self.media_sessions,&id){
+                    self.media_source_cursor=0;self.focused=Some(Action::MediaSourceMenu);self.pressed=None;
+                    self.invalidate();return;
+                }
+                self.media_source_open=false;self.focused=Some(Action::MediaSourceMenu);
+                if let Some(media)=&self.media{match media.select_session(id){
+                    Ok(revision)=>{
+                        self.media_selection_revision=revision;
+                        self.track.can_toggle=false;self.track.can_next=false;self.track.can_previous=false;self.track.can_seek=false;
+                    },Err(error)=>self.notice(error),
+                }}
+            },
 
             Action::VolumeStep(step)=>self.action(Action::MasterVolumeStep(step)),
             Action::MasterVolumeStep(step)=>{if let Some(volume)=crate::system::adjust_master_volume(step as f32/100.){self.last_known_volume=Some(volume);}else{self.notice(if self.settings.language=="en"{"The audio endpoint rejected the volume change."}else{"Endpoint audio menolak perubahan volume."});}self.invalidate();},
@@ -953,6 +1139,37 @@ impl Shell {
                 self.hover_blocked_until=Instant::now()+Duration::from_millis(600);
                 self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));
             },
+            Action::ExpandMusic=>{
+                // Clicking anywhere on the Stage 1 lyric / now-playing pill opens the
+                // Music tab in Stage 2, regardless of the currently selected tab.
+                self.open_activity_target(crate::activity::ActivityTarget::Music);
+            },
+            Action::ExpandHardware=>{
+                // Clicking the Stage 1 hardware monitor opens Stage 2 on the Daya/Power
+                // page when available, otherwise just expands the current tab.
+                let order=self.settings.active_tab_order();
+                if order.iter().any(|t|t=="Daya"){self.tab="Daya".into();self.lyric_mode=false;}
+                else if order.iter().any(|t|t=="Power"){self.tab="Power".into();self.lyric_mode=false;}
+                self.set_expanded(true);
+                self.activate_on_explicit_open();
+                self.invalidate();
+            },
+            Action::ExpandWeather=>{
+                self.tab="Cuaca".into();
+                self.lyric_mode=false;
+                self.set_expanded(true);
+                self.activate_on_explicit_open();
+                self.invalidate();
+            },
+            Action::SimpanSub(sub)=>{
+                self.simpan_sub=sub.min(2);
+                self.notes_host.tasks=self.simpan_sub==2;
+                self.focused=None;self.pressed=None;self.hits.clear();
+                if self.tab!="Catatan"{self.tab="Catatan".into();}
+                self.make_inputs();
+                self.retarget_morph();self.update_window_region();self.start_morph_timer();
+                self.invalidate();
+            },
             Action::CalendarToday=>{
                 let now=Local::now().date_naive();
                 self.year=now.year();
@@ -971,7 +1188,7 @@ impl Shell {
             },
             Action::Tab(tab)=>{
                 self.stage1_media_until=None;
-                self.reminder_menu=None;
+                self.reminder_menu=None;self.reminder_menu_scroll=0;
                 self.mod_view=None;
                 self.storage_dropdown_open=false;
                 if self.tab == tab && self.hover_stage >= 2 {
@@ -984,8 +1201,9 @@ impl Shell {
                     let old_idx=order.iter().position(|m|m==&self.tab).unwrap_or(0);
                     let new_idx=order.iter().position(|m|m==&tab).unwrap_or(0);
                     let dir=if new_idx>=old_idx{1i8}else{-1i8};
+                    self.clear_note_hits();
                     self.lyric_mode=false;
-                    self.tab_fade=Some((self.tab.clone(),Instant::now(),dir));
+                    self.tab_fade=if self.settings.effective_presentation().reduced_motion{None}else{Some((self.tab.clone(),Instant::now(),dir))};
                     self.tab=tab;
                     if self.tab == "Cuaca" && self.weather.is_none() {
                         self.refresh_weather(false);
@@ -1000,7 +1218,7 @@ impl Shell {
                     self.make_inputs();
                     self.refresh_mod_output();
                     self.invalidate();
-                    unsafe{SetTimer(Some(self.hwnd),10,16,None);}
+                    if !self.settings.effective_presentation().reduced_motion{unsafe{SetTimer(Some(self.hwnd),10,16,None);}}
                 }
             },
             Action::MoveTab(tab, delta)=>{
@@ -1114,7 +1332,7 @@ impl Shell {
                 self.mod_view=Some(id);
                 self.settings_open=false;
                 self.settings_popup=None;
-                self.reminder_menu=None;
+                self.reminder_menu=None;self.reminder_menu_scroll=0;
                 self.focused=None;
                 self.tab_fade=None;
                 self.retarget_morph();
@@ -1195,7 +1413,7 @@ impl Shell {
             },
             Action::ModButtonClick(cmd)=>{
                 if let Some(url) = cmd.strip_prefix("url:") {
-                    crate::system::open_browser(url);
+                    if crate::mod_script::valid_action_url(url) { crate::system::open_browser(url); }
                 } else if let Some(msg) = cmd.strip_prefix("toast:") {
                     self.notice(msg);
                 } else if let Some(txt) = cmd.strip_prefix("copy:") {
@@ -1208,22 +1426,91 @@ impl Shell {
                 self.invalidate();
             },
             Action::KeepStorageDropdown => {},
+            Action::CycleStoragePage => {
+                let total_drives = self.power_snapshot.storage_drives.len();
+                if total_drives > 4 {
+                    let total_pages = (total_drives + 3) / 4;
+                    self.storage_dropdown_page = (self.storage_dropdown_page + 1) % total_pages;
+                    self.invalidate();
+                }
+            },
+            Action::PromptDownloadPowerProvider => {
+                self.confirm_provider_download = true;
+                self.invalidate();
+            },
+            Action::CancelDownloadPowerProvider => {
+                self.confirm_provider_download = false;
+                self.invalidate();
+            },
+            Action::ConfirmDownloadPowerProvider => {
+                self.confirm_provider_download = false;
+                if !self.provider_downloading {
+                    self.provider_downloading = true;
+                    self.provider_download_progress = 0;
+                    let poster = self.poster();
+                    let api = self.online.clone();
+                    let app_dir = std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    std::thread::spawn(move || {
+                        let cancel = crate::net::Cancellation::default();
+                        let releases_res = api.check_update();
+                        let release = match releases_res {
+                            Ok(Some(rel)) => rel,
+                            Ok(None) => {
+                                poster.send(super::Event::ProviderDownloadResult(Err("Tidak ada rilis yang ditemukan di GitHub.".into())));
+                                return;
+                            }
+                            Err(e) => {
+                                poster.send(super::Event::ProviderDownloadResult(Err(format!("Gagal memeriksa rilis: {e}"))));
+                                return;
+                            }
+                        };
+                        let poster_prog = poster.clone();
+                        let install_res = crate::update::provider_download::download_and_install_provider(
+                            &release,
+                            &app_dir,
+                            &cancel,
+                            move |pct| {
+                                poster_prog.send(super::Event::ProviderDownloadProgress(pct));
+                            },
+                        );
+                        match install_res {
+                            Ok(_) => {
+                                poster.send(super::Event::ProviderDownloadResult(Ok("Power Provider berhasil diunduh dan dipasang.".into())));
+                            }
+                            Err(e) => {
+                                poster.send(super::Event::ProviderDownloadResult(Err(e)));
+                            }
+                        }
+                    });
+                }
+                self.invalidate();
+            },
             Action::ToggleStorageDropdown => {
                 self.storage_dropdown_open = !self.storage_dropdown_open;
-                if self.storage_dropdown_open && self.last_storage_tick.is_none_or(|t| t.elapsed() >= Duration::from_secs(5)) && !self.jobs.contains_key("Storage") {
-                    self.last_storage_tick = Some(Instant::now());
-                    self.job("Storage", || {
-                        let (st_pct, st_used, st_total, drives) = crate::system::sample_system_storage();
-                        super::Event::Storage(st_pct, st_used, st_total, drives)
-                    });
+                if self.storage_dropdown_open {
+                    self.storage_dropdown_page = 0;
+                    if self.last_storage_tick.is_none_or(|t| t.elapsed() >= Duration::from_secs(5)) && !self.jobs.contains_key("Storage") {
+                        let now = Instant::now();
+                        if self.job("Storage", || {
+                            let (st_pct, st_used, st_total, drives) = crate::system::sample_system_storage();
+                            super::Event::Storage(st_pct, st_used, st_total, drives)
+                        }) {
+                            self.last_storage_tick = Some(now);
+                            self.storage_job_started = Some(now);
+                        }
+                    }
                 }
                 self.invalidate();
             },
             Action::SettingsMenu(key,x,y,w)=>self.open_settings_menu(key,x,y,w),
             Action::SettingsValue(key,value)=>{self.apply_settings_value(key,value);self.settings_popup=None;},
-            Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}self.mod_view=None;self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.retarget_morph();self.start_morph_timer();self.make_inputs();self.update_window_region();},
+            Action::SettingsOpenTab(tab,index)=>{if !self.settings.enabled(&tab){return}self.mod_view=None;self.settings_open=false;self.settings_popup=None;self.reminder_menu=None;self.reminder_menu_scroll=0;self.tab=tab;self.tab_fade=None;if self.tab=="Reminder"{self.select_reminder(index);}self.retarget_morph();self.start_morph_timer();self.make_inputs();self.update_window_region();},
             Action::SetDefaultTab(tab)=>{if self.settings.enabled(&tab){self.settings.default_tab=tab;}},
-            Action::Settings=>{self.privacy_detail_open=false;self.settings_subpage_privacy=false;self.settings_popup=None;self.reminder_menu=None;self.focused=None;self.mod_view=None;self.settings_open=true;self.set_expanded(true);self.retarget_morph();self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
+            Action::OpenSettingsAudio=>{self.action(Action::Settings);self.settings_cat=3;self.settings_scroll[3]=0.;self.invalidate();},
+            Action::Settings=>{self.privacy_detail_open=false;self.settings_subpage_privacy=false;self.settings_popup=None;self.reminder_menu=None;self.reminder_menu_scroll=0;self.focused=None;self.mod_view=None;self.settings_open=true;self.set_expanded(true);self.retarget_morph();self.update_window_region();self.start_morph_timer();self.make_inputs();self.invalidate();},
             Action::Back=>{
                 if self.privacy_detail_open {
                     self.privacy_detail_open = false;
@@ -1264,12 +1551,30 @@ impl Shell {
                 self.settings_subpage_privacy = false;
                 self.invalidate();
             },
-            Action::Close=>self.set_expanded(false),Action::Exit=>{self.flush_note_edits();unsafe{let _=DestroyWindow(self.hwnd);}},
+            Action::Close=>self.set_expanded(false),Action::Exit=>{if !self.flush_editors_barrier(){return;}unsafe{let _=DestroyWindow(self.hwnd);}},
             Action::Bottom(value)=>{self.settings.bottom=value;self.layout();self.save();},
             Action::Minimal=>{self.settings.minimal=!self.settings.minimal;if !self.expanded{self.set_hover_stage(super::collapse_target_stage(self.settings.minimal));}self.sync_visualizer();self.save();},
             Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(MIN_OPACITY as i32,255)as u8;self.save();self.invalidate();},
-            Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.track=MediaSnapshot::default();self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
+            Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.cancel_job("Musik");self.lyrics_retry=Default::default();self.track=MediaSnapshot::default();self.media_sessions=MediaSessions::default();self.media_source_open=false;self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
+                "hw_monitor"=>{
+                    self.settings.hw_monitor_enabled=!self.settings.hw_monitor_enabled;
+                    if self.settings.hw_monitor_enabled{
+                        // Force an immediate sample so Stage 1 shows data without waiting a tick.
+                        self.last_hardware_tick=Instant::now()-std::time::Duration::from_secs(2);
+                    }
+                    self.save();self.invalidate();
+                },
+                "hw_cpu"|"hw_ram"|"hw_gpu"=>{
+                    let metric=match key{"hw_cpu"=>crate::core::HwMetric::Cpu,"hw_ram"=>crate::core::HwMetric::Ram,_=>crate::core::HwMetric::Gpu};
+                    if let Some(pos)=self.settings.hw_metrics.iter().position(|m|*m==metric){
+                        // Keep at least one metric selected.
+                        if self.settings.hw_metrics.len()>1{self.settings.hw_metrics.remove(pos);}
+                    }else if self.settings.hw_metrics.len()<3{
+                        self.settings.hw_metrics.push(metric);
+                    }
+                    self.save();self.invalidate();
+                },
                 "privacy_enabled" => {
                     self.settings.privacy_enabled = !self.settings.privacy_enabled;
                     if self.settings.privacy_enabled {
@@ -1328,16 +1633,11 @@ impl Shell {
                 "fullscreen"=>{self.settings.hide_fullscreen=!self.settings.hide_fullscreen;self.save();},
                 "glow"=>{self.settings.glow=!self.settings.glow;self.save();},
                 "visualizer"=>{self.settings.visualizer=!self.settings.visualizer;self.sync_visualizer();self.save();},
+                "lyrics_online"=>{self.settings.lyrics_online=!self.settings.lyrics_online;self.refresh_lyrics_consent();self.save();},
+                "lyrics_youtube_fallback"=>{if self.settings.lyrics_online{self.settings.lyrics_youtube_fallback=!self.settings.lyrics_youtube_fallback;self.refresh_lyrics_consent();self.save();}},
                 "romanize_lyrics"=>{
                     self.settings.romanize_lyrics=!self.settings.romanize_lyrics;
-                    self.lyrics_key.clear();
-                    if !self.track.title.is_empty(){
-                        let key=serde_json::to_string(&(&self.track.title,&self.track.artist,&self.track.album,self.track.duration_seconds.round()as u64)).unwrap_or_default();
-                        self.lyrics_key=key.clone();
-                        let api=self.online.clone();
-                        let track=self.track.clone();
-                        self.job("Musik",move||Event::Lyrics(key,api.lyrics(&track.title,&track.artist,&track.album,track.duration_seconds)));
-                    }
+                    if let Some(value)=self.lyrics_data.clone(){self.apply_lyrics(value);}self.layout();
                     self.save();
                 },
                 "water_reminder"=>{self.settings.water_reminder=!self.settings.water_reminder;self.last_water=Instant::now();self.save();},
@@ -1347,48 +1647,30 @@ impl Shell {
                 _=>{}
             },
             Action::SeekPointer=>{},Action::LyricsFollow=>self.lyric_offset=0,
+            Action::LyricsRetry=>{self.lyrics_retry=Default::default();self.request_lyrics(true);},
             Action::Play=>self.media_command(|m|m.toggle_playback()),Action::Next=>self.media_command(|m|m.next()),Action::Previous=>self.media_command(|m|m.previous()),Action::Seek(seconds)=>{if self.track.can_seek{self.media_command(|m|m.seek(seconds));}},Action::Lyric(index)=>{if self.track.can_seek{if let Some(line)=self.lyrics.get(index){let at=line.at;self.media_command(|m|m.seek(at));}}},
             Action::ReminderSelect(i)=>self.select_reminder(i),
             Action::ReminderStep(d)=>self.select_reminder((self.reminder_index as i32+d).clamp(0,3)as usize),
             Action::StretchLength(d)=>self.settings.stretch_seconds=(self.settings.stretch_seconds as i32+d).clamp(15,300)as u32,
             Action::StretchDone=>{self.stretch_deadline=None;self.last_move=Instant::now();self.notice(crate::i18n::t("notice.stretch_done", &self.settings.language));},
-            Action::StretchStart=>{if self.stretch_deadline.is_some(){self.stretch_deadline=None;self.last_move=Instant::now();}else{self.stretch_deadline=Some(Instant::now()+Duration::from_secs(self.settings.stretch_seconds as u64));}},
+            Action::StretchStart=>{if self.stretch_deadline.is_some(){self.stretch_deadline=None;self.last_move=Instant::now();}else{self.stretch_deadline=Some(Instant::now()+Duration::from_secs(self.settings.stretch_seconds as u64));self.start_activity_run(true);}},
             Action::PrayerRefresh=>self.refresh_prayers(true),
             Action::ReminderMenu(key)=>{self.open_reminder_menu(key);},
-            Action::ReminderValue(key,value)=>{self.apply_reminder_value(key,value);self.reminder_menu=None;},
+            Action::ReminderValue(key,value)=>{self.apply_reminder_value(key,value);self.reminder_menu=None;self.reminder_menu_scroll=0;},
             Action::PrayerLead(d)=>self.settings.prayer_lead=(self.settings.prayer_lead as i32+d).clamp(0,30)as u32,
 
-            Action::FocusStart=>self.focus.start(self.settings.focus_minutes,false),Action::FocusBreak=>self.focus.start(self.settings.break_minutes,true),Action::FocusPause=>{if self.focus.running(){self.focus.pause();}else{self.focus.resume();}},Action::FocusReset=>self.focus.reset(),Action::FocusLength(delta)=>{self.settings.focus_minutes=(self.settings.focus_minutes as i32+delta).clamp(1,180)as u32;self.save();},Action::BreakLength(delta)=>{self.settings.break_minutes=(self.settings.break_minutes as i32+delta).clamp(1,60)as u32;self.save();},
-            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};self.state.todos.push(Todo{id:Local::now().timestamp_millis()as u64,text,done:false,due,reminded:false});self.clear_input(10);self.clear_input(11);},Action::Todo(id)=>{if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::DeleteTodo(id)=>self.state.todos.retain(|t|t.id!=id),Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
+            Action::FocusStart=>{self.focus.start(self.settings.focus_minutes,false);self.start_activity_run(false);},Action::FocusBreak=>{self.focus.start(self.settings.break_minutes,true);self.start_activity_run(false);},Action::FocusPause=>{if self.focus.running(){self.focus.pause();}else{self.focus.resume();}},Action::FocusReset=>{self.focus.reset();self.activities.focus=Default::default();},Action::FocusLength(delta)=>{self.settings.focus_minutes=(self.settings.focus_minutes as i32+delta).clamp(1,180)as u32;self.save();},Action::BreakLength(delta)=>{self.settings.break_minutes=(self.settings.break_minutes as i32+delta).clamp(1,60)as u32;self.save();},
+            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};let id=match self.state.allocate_todo_id(){Ok(id)=>id,Err(_)=>{self.notice("Identitas tugas habis");return}};self.state.todos.push(Todo{id,text,done:false,due,reminded:false,note_id:None});self.clear_input(10);self.clear_input(11);},Action::Todo(id)=>{if !crate::todo_notes::todo_is_unambiguous(&self.state,id){self.notice("Identitas tugas tidak tersedia");return}if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::DeleteTodo(id,_revision)=>{crate::todo_notes::delete(&mut self.state,id,false,&mut self.store).ok();},Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
             Action::Water=>{self.state.water.push(Drink{date:Local::now().date_naive(),ml:self.settings.water_serving});self.last_water=Instant::now();},Action::UndoWater=>{if let Some(index)=self.state.water.iter().rposition(|d|d.date==Local::now().date_naive()){self.state.water.remove(index);}},Action::WaterTarget(delta)=>self.settings.water_target=(self.settings.water_target as i32+delta).clamp(250,10000)as u32,Action::WaterServing(delta)=>self.settings.water_serving=(self.settings.water_serving as i32+delta).clamp(50,2000)as u32,
             Action::WaterInterval(delta)=>{self.settings.water_interval=(self.settings.water_interval as i32+delta).clamp(5,180)as u32;self.save();},
             Action::MoveInterval(delta)=>{self.settings.move_interval=(self.settings.move_interval as i32+delta).clamp(5,180)as u32;self.save();},
-            Action::ConfirmWater=>{
-                let serving=self.settings.water_serving;
-                self.state.water.push(Drink{date:Local::now().date_naive(),ml:serving});
-                self.last_water=Instant::now();
-                self.save();
-                if let Some(toast)=&mut self.toast{
-                    toast.confirmed=true;
-                    toast.confirmed_at=Some(Instant::now());
-                    toast.message = if self.settings.language == "en" {
-                        format!("Awesome! +{}ml logged 🎉", serving)
-                    } else {
-                        format!("Hebat! +{}ml tercatat 🎉", serving)
-                    };
-                }
-                unsafe{
-                    let _=MessageBeep(0x00000040);
-                    SetTimer(Some(self.hwnd),3,2200,None);
-                }
-                self.retarget_morph();
-                self.start_morph_timer();
-                self.invalidate();
-            },
+            Action::ConfirmWater=>{},
             Action::SelectClip(idx)=>{self.selected_clip=idx;self.invalidate();},
             Action::CopyClip(idx)=>{
                 if let Some(item)=self.state.clipboard_history.get(idx).cloned(){
-                    if crate::clipboard::set_clipboard_text(&item.text){
+                    if item.locked.is_some(){
+                        self.notice(crate::i18n::t("notice.clip_failed", &self.settings.language));
+                    } else if crate::clipboard::set_clipboard_text(&item.text){
                         self.last_clipboard_seq=crate::clipboard::get_sequence_number();
                         self.state.clipboard_history.retain(|c|c.id!=item.id);
                         self.state.clipboard_history.insert(0,item);
@@ -1437,6 +1719,7 @@ impl Shell {
             Action::TogglePinClip(id)=>{
                 if let Some(item) = self.state.clipboard_history.iter_mut().find(|it| it.id == id) {
                     item.pinned = !item.pinned;
+                    item.pinned_at = if item.pinned { crate::clipboard::now_unix() } else { 0 };
                     self.save();
                     self.invalidate();
                 }
@@ -1576,10 +1859,20 @@ impl Shell {
 
                         let managed_files: Vec<crate::update::transaction::ManagedFile> = extracted
                             .into_iter()
-                            .map(|rel| crate::update::transaction::ManagedFile {
-                                relative_path: rel,
-                                stage_sha256: None,
-                                original_sha256: None,
+                            .map(|rel| {
+                                let stage_path = stage_dir.join(&rel);
+                                let orig_path = install_dir.join(&rel);
+                                let stage_sha256 = crate::update::crypto::hash_file_hex(&stage_path).ok();
+                                let original_sha256 = if orig_path.exists() {
+                                    crate::update::crypto::hash_file_hex(&orig_path).ok()
+                                } else {
+                                    None
+                                };
+                                crate::update::transaction::ManagedFile {
+                                    relative_path: rel,
+                                    stage_sha256,
+                                    original_sha256,
+                                }
                             })
                             .collect();
 
@@ -1610,14 +1903,20 @@ impl Shell {
                 }
             },
             Action::RestartNow => {
-                if let super::UpdateStatus::AwaitingRestart { ref tx_dir, .. } = self.update_status {
+                if let super::UpdateStatus::AwaitingRestart { ref tx_dir, ref version } = self.update_status {
                     let tx_path = tx_dir.clone();
+                    let cand_version = version.clone();
                     self.flush_note_edits();
                     self.save();
 
                     if let Ok(exe) = std::env::current_exe() {
                         if let Ok(root) = crate::app::storage_root(&exe, self.preview) {
-                            crate::update::ui::PendingUpdate::clear(&root);
+                            let pending = crate::update::ui::PendingUpdate::new(
+                                tx_path.clone(),
+                                cand_version,
+                                crate::update::current_profile().to_string(),
+                            );
+                            let _ = pending.save(&root);
                         }
                     }
 
@@ -1679,25 +1978,10 @@ impl Shell {
                 _=>{}
             },
             Action::NoteAdd => {
-                if self.input_page == "Catatan" {
-                    let title = self.input(50);
-                    let content = self.input(51);
-                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
-                        if !title.is_empty() || !content.is_empty() {
-                            note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
-                            note.content = content;
-                            note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
-                        }
-                    }
-                    self.clear_input(50);
-                    self.clear_input(51);
-                    self.drafts.remove(&("Catatan".into(), 50));
-                    self.drafts.remove(&("Catatan".into(), 51));
-                }
                 if self.state.sticky_notes.len() >= 20 {
                     self.notice(crate::i18n::t("notice.notes_max", &self.settings.language));
                 } else {
-                    let new_id = self.state.sticky_notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+                    let new_id = match self.state.allocate_note_id(){Ok(id)=>id,Err(_)=>{self.notice("Identitas catatan habis");return}};
                     let now_str = Local::now().format("%Y-%m-%d %H:%M").to_string();
                     let new_note = crate::sticky::StickyNote {
                         id: new_id,
@@ -1716,19 +2000,6 @@ impl Shell {
                 }
             },
             Action::NoteSelect(idx) => {
-                if self.input_page == "Catatan" {
-                    let title = self.input(50);
-                    let content = self.input(51);
-                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
-                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
-                        note.content = content;
-                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
-                    }
-                    self.clear_input(50);
-                    self.clear_input(51);
-                    self.drafts.remove(&("Catatan".into(), 50));
-                    self.drafts.remove(&("Catatan".into(), 51));
-                }
                 if idx < self.state.sticky_notes.len() {
                     self.state.selected_note = idx;
                     self.trigger_stage1_temporary(5);
@@ -1738,12 +2009,7 @@ impl Shell {
                 }
             },
             Action::NoteDelete(id) => {
-                if self.input_page == "Catatan" {
-                    self.clear_input(50);
-                    self.clear_input(51);
-                    self.drafts.remove(&("Catatan".into(), 50));
-                    self.drafts.remove(&("Catatan".into(), 51));
-                }
+                if self.editors.registry.panel_read_only(id)||!self.retire_panel(){self.notice("Tutup editor catatan sebelum menghapus");return;}
                 self.state.sticky_notes.retain(|n| n.id != id);
                 if self.state.selected_note >= self.state.sticky_notes.len() {
                     self.state.selected_note = self.state.sticky_notes.len().saturating_sub(1);
@@ -1761,16 +2027,6 @@ impl Shell {
                 }
             },
             Action::NoteExport(kind) => {
-                if self.input_page == "Catatan" {
-                    let title = self.input(50);
-                    let content = self.input(51);
-                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
-                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
-                        note.content = content;
-                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
-                    }
-                    self.save();
-                }
                 if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
                     match kind {
                         0 => {
@@ -1829,29 +2085,14 @@ impl Shell {
                     }
                 }
             },
-            Action::NotePopout => {
-                if self.input_page == "Catatan" {
-                    let title = self.input(50);
-                    let content = self.input(51);
-                    if let Some(note) = self.state.sticky_notes.get_mut(self.state.selected_note) {
-                        note.title = if title.trim().is_empty() { "Catatan Baru".into() } else { title };
-                        note.content = content;
-                        note.updated_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
-                    }
-                    self.save();
-                }
-                if let Some(note) = self.state.sticky_notes.get(self.state.selected_note) {
-                    super::spawn_floating_sticky_note(note.id, &note.title, &note.content, note.color_idx, self.hwnd);
-                    self.notice(crate::i18n::t("notice.note_popout", &self.settings.language));
-                }
-            },
+            Action::NotePopout=>self.popout_note(),
         }
         self.sync_weather_lifecycle();
         for module in MODULES{if !self.settings.enabled(module){self.cancel_job(module);}}
         if !self.settings.enabled("Musik"){self.cancel_job("Artwork");self.cover=None;self.cover_key=0;self.lyrics_key.clear();self.plain_lyrics.clear();self.lyric_offset=0;}
-        self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.clock_timer();self.invalidate();
+        self.sync_foreground();self.sync_visualizer();if !transient{self.save();}self.reconcile_activities();self.clock_timer();self.invalidate();
     }
-    fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
+    fn media_command(&mut self,command:impl FnOnce(&MediaService)->Result<(),String>){if self.track.selection_revision<self.media_selection_revision{return}if let Some(media)=&self.media{if let Err(e)=command(media){self.notice(e);}}else{self.notice(crate::i18n::t("music.open_player_first", &self.settings.language));}}
     pub(super) fn refresh_agenda(&mut self){if !self.settings.enabled("Kalender"){return}let feed=match crate::secrets::unprotect(&self.settings.calendar_feed){Ok(feed)=>feed,Err(e)=>{self.notice(e);return}};if feed.is_empty(){self.cancel_job("Kalender");self.agenda.clear();self.notice(crate::i18n::t("notice.calendar_feed_removed", &self.settings.language));return}if self.jobs.contains_key("Kalender"){return}let api=self.online.clone();self.job("Kalender",move||Event::Agenda(api.agenda(&feed)));}
     fn send_ai(&mut self){if self.jobs.contains_key("AI")||self.fullscreen{return}let text=self.input(40).trim().to_owned();if text.is_empty(){return}let key=match crate::secrets::unprotect(&self.settings.ai_key){Ok(key)if!key.is_empty()=>key,_=>{self.notice(crate::i18n::t("notice.ai_key_missing", &self.settings.language));return}};if self.settings.ai_model.trim().is_empty(){self.notice(crate::i18n::t("notice.ai_model_missing", &self.settings.language));return}self.ai_messages.push(crate::online::ChatMessage{role:"user".into(),content:text});self.clear_input(40);let api=self.online.clone();let settings=self.settings.clone();let messages=self.ai_messages.clone();self.job("AI",move||Event::Ai(api.chat(&settings.ai_provider,&settings.ai_endpoint,&settings.ai_model,&key,&messages)));}
 
@@ -1912,7 +2153,14 @@ impl Shell {
             self.mod_output = None;
             return
         }
-        let button = self.last_mod_button_clicked.take();
+        // Accept only a button from the currently rendered mod; consume it once.
+        let button = self.last_mod_button_clicked.take().filter(|button| {
+            self.mod_output.as_ref().is_some_and(|(cached, output)| {
+                cached == &manifest.id && output.as_ref().is_ok_and(|value| {
+                    value.buttons.iter().any(|b| &b.id == button)
+                })
+            })
+        });
         let mod_dir = crate::mods::get_mod_dir(&self.store.root, &manifest.id);
         let script = mod_dir.join("main.lua");
         let config = std::fs::read(mod_dir.join("config.json"))
@@ -1969,7 +2217,9 @@ impl Shell {
                 for toast in value.toasts.clone() { self.notice(toast); }
             }
             if button.is_some() {
-                for url in &value.urls_to_open { crate::system::open_browser(url); }
+                for url in &value.urls_to_open {
+                    if crate::mod_script::valid_action_url(url) { crate::system::open_browser(url); }
+                }
                 for text in &value.clipboard_copies {
                     crate::clipboard::set_clipboard_text(text);
                     self.notice(crate::i18n::t("notice.clip_copied", &self.settings.language));
@@ -2011,7 +2261,7 @@ impl Shell {
         };
         let lang = self.settings.language.clone();
         self.draw_button(p, crate::i18n::t("mods.back", &lang), 18., 12., 92., 26., Action::CloseModView);
-        p.outline_icon(&manifest.icon, 122., 16., 18., 0x6ee7b7);
+        p.outline_icon(&manifest.icon, 122., 16., 18., 0xd8d8de);
         let mod_title = crate::i18n::mod_name(&manifest.id, &manifest.name, &lang);
         p.text_ellipsis(mod_title, 148., 9., self.width - 166., 18., 13., render::TEXT, true);
         let kind = match manifest.mod_type {
@@ -2022,7 +2272,20 @@ impl Shell {
         p.text_ellipsis(&format!("v{} · {}", manifest.version, kind), 148., 27., self.width - 166., 14., 9.5, MUTED, false);
         p.text_ellipsis(&manifest.description, 18., 47., self.width - 36., 16., 10., MUTED, false);
         p.fill(18., 67., self.width - 36., 1., 0., 0x222229);
-        if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{self.draw_button(p,if self.settings.language=="en"{"Set up CPU sensor"}else{"Siapkan sensor CPU"},self.width-194.,10.,174.,28.,Action::PowerSensorSetup);}
+        if manifest.id == "daya" {
+            let provider_installed = crate::update::provider_download::is_power_provider_installed();
+            if !provider_installed {
+                let btn_lbl = if self.provider_downloading {
+                    if self.settings.language == "en" { format!("Downloading {}%...", self.provider_download_progress) } else { format!("Mengunduh {}%...", self.provider_download_progress) }
+                } else {
+                    if self.settings.language == "en" { "Download Provider".to_string() } else { "Unduh Provider".to_string() }
+                };
+                let act = if self.provider_downloading { Action::KeepStorageDropdown } else { Action::PromptDownloadPowerProvider };
+                self.draw_button(p, &btn_lbl, self.width - 194., 10., 174., 28., act);
+            } else if self.power_snapshot.cpu_setup_required {
+                self.draw_button(p, if self.settings.language == "en" { "Set up CPU sensor" } else { "Siapkan sensor CPU" }, self.width - 194., 10., 174., 28., Action::PowerSensorSetup);
+            }
+        }
         self.draw_mod_body(p, &manifest, 77.);
     }}
 
@@ -2031,14 +2294,36 @@ impl Shell {
         let tab = self.tab.clone();
         if !self.settings.mod_tabs.iter().any(|t| t == &tab) { return false }
         let Some(manifest) = self.mods().into_iter().find(|m| m.tab_name == tab) else { return false };
-        p.outline_icon(&manifest.icon, 24., 38., 20., 0x6ee7b7);
+        p.outline_icon(&manifest.icon, 24., 38., 20., 0xd8d8de);
         let mod_title = crate::i18n::mod_name(&manifest.id, &manifest.name, &self.settings.language);
         p.text_ellipsis(mod_title, 52., 34., self.width - 76., 18., 13., render::TEXT, true);
-        let description=if manifest.id=="daya"&&manifest.publisher=="mynotch"{if self.settings.language=="en"{"CPU/GPU sensors · observed component energy"}else{"Sensor CPU/GPU · energi komponen teramati"}}else{&manifest.description};
-        p.text_ellipsis(description, 52., 53., if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{self.width-262.}else{self.width-76.}, 14., 9.5, MUTED, false);
-        if manifest.id=="daya"&&self.power_snapshot.cpu_setup_required{
-            let label=if self.settings.language=="en"{"Set up CPU sensor"}else{"Siapkan sensor CPU"};
-            self.draw_button(p,label,self.width-194.,34.,174.,28.,Action::PowerSensorSetup);
+        let provider_installed = if manifest.id == "daya" { crate::update::provider_download::is_power_provider_installed() } else { true };
+        let description = if manifest.id == "daya" {
+            if !provider_installed {
+                if self.settings.language == "en" { "Power Provider not installed · Hardware power sensors require companion" } else { "Power Provider belum terpasang · Sensor daya hardware memerlukan pendamping" }
+            } else if manifest.publisher == "mynotch" {
+                if self.settings.language == "en" { "CPU/GPU sensors · observed component energy" } else { "Sensor CPU/GPU · energi komponen teramati" }
+            } else {
+                &manifest.description
+            }
+        } else {
+            &manifest.description
+        };
+        let has_action_btn = manifest.id == "daya" && (!provider_installed || self.power_snapshot.cpu_setup_required);
+        p.text_ellipsis(description, 52., 53., if has_action_btn { self.width - 262. } else { self.width - 76. }, 14., 9.5, MUTED, false);
+        if manifest.id == "daya" {
+            if !provider_installed {
+                let btn_lbl = if self.provider_downloading {
+                    if self.settings.language == "en" { format!("Downloading {}%...", self.provider_download_progress) } else { format!("Mengunduh {}%...", self.provider_download_progress) }
+                } else {
+                    if self.settings.language == "en" { "Download Provider".to_string() } else { "Unduh Provider".to_string() }
+                };
+                let act = if self.provider_downloading { Action::KeepStorageDropdown } else { Action::PromptDownloadPowerProvider };
+                self.draw_button(p, &btn_lbl, self.width - 194., 34., 174., 28., act);
+            } else if self.power_snapshot.cpu_setup_required {
+                let label = if self.settings.language == "en" { "Set up CPU sensor" } else { "Siapkan sensor CPU" };
+                self.draw_button(p, label, self.width - 194., 34., 174., 28., Action::PowerSensorSetup);
+            }
         }
         p.fill(24., 74., self.width - 48., 1., 0., 0x222229);
         self.draw_mod_body(p, &manifest, 82.);
@@ -2055,10 +2340,10 @@ impl Shell {
                 for (i, card) in manifest.cards.iter().enumerate() {
                     let x = margin + (i % 2) as f32 * (card_w + 12.);
                     let y = start_y + (i / 2) as f32 * (card_h + 10.);
-                    p.fill(x, y, card_w, card_h, 8., 0x16161d);
-                    p.stroke(x, y, card_w, card_h, 8., 0x2b2b36, 1.);
-                    p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., MUTED, false);
-                    p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., render::TEXT, false);
+                    p.fill(x, y, card_w, card_h, 8., self.palette.card_bg);
+                    p.stroke(x, y, card_w, card_h, 8., self.palette.border, 1.);
+                    p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., self.palette.text_muted, false);
+                    p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., self.palette.text_primary, false);
                     if !card.subtext.is_empty() {
                         p.text(&card.subtext, x + 12., y + 48., card_w - 24., 14., 9., MUTED, false);
                     }
@@ -2109,10 +2394,10 @@ impl Shell {
                         for (i, card) in output.cards.iter().enumerate() {
                             let x = margin + (i % 2) as f32 * (card_w + 12.);
                             let y = body_y + (i / 2) as f32 * (card_h + 10.);
-                            p.fill(x, y, card_w, card_h, 8., 0x16161d);
-                            p.stroke(x, y, card_w, card_h, 8., 0x2b2b36, 1.);
-                            p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., MUTED, false);
-                            p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., render::TEXT, false);
+                            p.fill(x, y, card_w, card_h, 8., self.palette.card_bg);
+                            p.stroke(x, y, card_w, card_h, 8., self.palette.border, 1.);
+                            p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., self.palette.text_muted, false);
+                            p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., self.palette.text_primary, false);
                             if let Some(sub) = &card.subtext {
                                 p.text(sub, x + 12., y + 48., card_w - 24., 14., 9., MUTED, false);
                             }
@@ -2163,7 +2448,7 @@ impl Shell {
             let ratio = if gauge.value.is_some() { val / max } else { 0.0 };
 
             // Arc
-            p.draw_gauge_arc(cx, cy, r, ratio, 0x64748b, 0x69d2e5, 3.5);
+            p.draw_gauge_arc(cx, cy, r, ratio, 0x64748b, 0xd8d8de, 3.5);
 
             // Value text
             let val_str = if let Some(v) = gauge.value {
@@ -2201,7 +2486,7 @@ impl Shell {
                     let hover = self.pointer.is_some_and(|(px, py)| px >= btn_x - 2. && px <= btn_x + 20. && py >= btn_y - 2. && py <= btn_y + 18.);
                     let btn_bg = if self.storage_dropdown_open { 0x3d4452 } else if hover { 0x2a2a36 } else { 0x1e1e28 };
                     p.fill(btn_x, btn_y, 18., 16., 4., btn_bg);
-                    p.stroke(btn_x, btn_y, 18., 16., 4., if hover { 0x69d2e5 } else { 0x48485a }, 1.);
+                    p.stroke(btn_x, btn_y, 18., 16., 4., if hover { 0xd8d8de } else { 0x48485a }, 1.);
                     let sym = if self.storage_dropdown_open { "−" } else { "+" };
                     p.text_centered(sym, btn_x, btn_y - 1., 18., 16., 11., 0xf3f3f5, 1.0, true);
                     self.hit(btn_x - 2., btn_y - 2., 22., 20., Action::ToggleStorageDropdown);
@@ -2211,7 +2496,7 @@ impl Shell {
                     let pct_str = format!("{:.0}%", pct);
                     let pct_w = p.measure_text(&pct_str, 10., false) + 4.;
                     let pct_x = if item.has_dropdown { x + col_w - 22. - pct_w } else { x + col_w - pct_w };
-                    p.text(&pct_str, pct_x, y, pct_w, 14., 10., 0x69d2e5, false);
+                    p.text(&pct_str, pct_x, y, pct_w, 14., 10., 0xd8d8de, false);
                     label_w -= pct_w + 4.;
                 }
 
@@ -2234,7 +2519,7 @@ impl Shell {
                     p.fill(x, bar_y, bar_w, bar_h, 1.5, 0x22222e);
                     let fill_w = (bar_w * prog.clamp(0.0, 1.0)).max(0.0);
                     if fill_w > 0.0 {
-                        let bar_color = if prog >= 0.90 { 0xf87171 } else { 0x69d2e5 };
+                        let bar_color = if prog >= 0.90 { 0xf87171 } else { 0xd8d8de };
                         p.fill(x, bar_y, fill_w, bar_h, 1.5, bar_color);
                     }
                 }
@@ -2293,14 +2578,23 @@ impl Shell {
         // Storage drives dropdown overlay (rendered in front of everything)
         if self.storage_dropdown_open {
             let drives = self.power_snapshot.storage_drives.clone();
-            let show_more = drives.len() > 5;
-            let visible_count = if show_more { 4 } else { drives.len() };
-            let total_rows = if drives.is_empty() { 1 } else if show_more { visible_count + 1 } else { visible_count };
+            let total_drives = drives.len();
+            let page_size = 4;
+            let total_pages = if total_drives == 0 { 1 } else { (total_drives + page_size - 1) / page_size };
+            let current_page = self.storage_dropdown_page % total_pages;
+            let start_idx = current_page * page_size;
+            let page_drives: Vec<_> = drives.iter().skip(start_idx).take(page_size).cloned().collect();
+            let has_multiple_pages = total_drives > page_size;
+            let total_rows = if drives.is_empty() { 1 } else if has_multiple_pages { page_drives.len() + 1 } else { page_drives.len() };
             let drop_w = 210.0_f32.min(content_w);
             let drop_x = (metrics_x + metrics_w - drop_w).max(margin);
-            let drop_y = top_y + 106.;
             let item_h = 32.0;
             let drop_h = 14.0 + total_rows as f32 * item_h;
+            let mut drop_y = top_y + 106.;
+            // Clamping vertikal: jika overflow ke bawah panel, geser/balik ke atas
+            if drop_y + drop_h > self.height - 12.0 {
+                drop_y = (top_y + 106. - drop_h - item_h).max(margin);
+            }
 
             // Opaque backdrop to fully cover anything underneath
             p.fill(drop_x - 1., drop_y - 1., drop_w + 2., drop_h + 2., 9., 0x0a0a10);
@@ -2320,7 +2614,7 @@ impl Shell {
                     false,
                 );
             } else {
-                for (idx, drive) in drives.iter().take(visible_count).enumerate() {
+                for (idx, drive) in page_drives.iter().enumerate() {
                     let dy = drop_y + 8. + idx as f32 * item_h;
                     let label_text = format!("Drive {}", drive.letter);
                     p.text_ellipsis(&label_text, drop_x + 10., dy, drop_w - 105., 15., 10., 0xf3f3f5, true);
@@ -2338,26 +2632,35 @@ impl Shell {
                     let prog = (drive.percent / 100.0).clamp(0.0, 1.0);
                     let fill_w = bar_w * prog;
                     if fill_w > 0.0 {
-                        let bar_color = if prog >= 0.90 { 0xf87171 } else { 0x69d2e5 };
+                        let bar_color = if prog >= 0.90 { 0xf87171 } else { 0xd8d8de };
                         p.fill(bar_x, bar_y, fill_w, bar_h, 1.25, bar_color);
                     }
                 }
-                if show_more {
-                    let dy = drop_y + 8. + visible_count as f32 * item_h;
-                    let remaining = drives.len() - visible_count;
-                    let more_label = if self.settings.language == "en" {
-                        format!("+{remaining} other drive{}", if remaining > 1 { "s" } else { "" })
+                if has_multiple_pages {
+                    let dy = drop_y + 8. + page_drives.len() as f32 * item_h;
+                    let remaining = total_drives - (start_idx + page_drives.len());
+                    let page_label = if self.settings.language == "en" {
+                        if remaining > 0 {
+                            format!("+{remaining} more (page {}/{} • click)", current_page + 1, total_pages)
+                        } else {
+                            format!("Page {}/{} (click to restart)", current_page + 1, total_pages)
+                        }
                     } else {
-                        format!("+{remaining} drive lainnya")
+                        if remaining > 0 {
+                            format!("+{remaining} drive lagi (hal {}/{} • klik)", current_page + 1, total_pages)
+                        } else {
+                            format!("Halaman {}/{} (klik kembali ke awal)", current_page + 1, total_pages)
+                        }
                     };
-                    p.text_ellipsis(&more_label, drop_x + 10., dy + 4., drop_w - 20., 16., 9.5, 0x888898, false);
+                    p.text_ellipsis(&page_label, drop_x + 10., dy + 4., drop_w - 20., 16., 9.5, 0xd8d8de, false);
+                    self.hit(drop_x + 6., dy + 2., drop_w - 12., 20., Action::CycleStoragePage);
                 }
             }
         }
     }}
 }
 
-const LANE_GREEN: u32 = 0x6ee7b7;
+const LANE_GREEN: u32 = 0xd8d8de;
 const LANE_RED: u32 = 0xf87171;
 const LANE_FAINT: u32 = 0x7f7f8a;
 
@@ -2464,4 +2767,112 @@ const CALENDAR_LEAVE_TEXT_X:f32=148.;
     assert!(!super::use_bundled_daya("daya","mynotch",false,"custom-script-digest"));
 }
 #[test]fn leave_marker_precedes_its_text_without_overlap(){assert!(super::CALENDAR_LEAVE_DOT_X+4.+4.<=super::CALENDAR_LEAVE_TEXT_X);}
+}
+
+// Keep the viewport and the action consumed by Enter tied to the same list.
+pub(super) fn reconcile_media_source_focus(sessions:&MediaSessions,cursor:usize,focused:Option<Action>)->(usize,Option<Action>){
+    let eligible:Vec<_>=sessions.sessions.iter().filter(|s|s.playing).collect();
+    match &focused{
+        Some(Action::SelectMediaSource(Some(id)))=>{
+            if let Some(index)=eligible.iter().position(|s|&s.id==id){(index+1,focused)}
+            // Keep Enter/Space on the header instead of silently activating a
+            // different source or Auto after the focused item disappears.
+            else{(0,Some(Action::MediaSourceMenu))}
+        }
+        Some(Action::SelectMediaSource(None))=>(0,focused),
+        _=>(cursor.min(eligible.len()),focused),
+    }
+}
+fn media_source_choice_available(sessions:&MediaSessions,id:&Option<String>)->bool{
+    id.as_ref().is_none_or(|id|sessions.sessions.iter().any(|s|s.playing&&&s.id==id))
+}
+#[cfg(test)]mod media_source_focus_tests{
+    use super::*;
+    fn sessions()->MediaSessions{
+        MediaSessions {sessions:(1..=4).map(|id|crate::media::MediaSession{id:id.to_string(),source_app:"same-app.exe".into(),playing:true}).collect(),..Default::default()}
+    }
+    #[test]fn withdrawn_third_source_focus_returns_to_header_before_enter(){
+        for disappears in [false,true]{
+            let mut list=sessions();
+            if disappears{list.sessions.retain(|s|s.id!="3");}else{list.sessions[2].playing=false;}
+            let (cursor,focused)=reconcile_media_source_focus(&list,3,Some(Action::SelectMediaSource(Some("3".into()))));
+            assert!(focused==Some(Action::MediaSourceMenu),"Enter must not consume the old session action");
+            assert_eq!(cursor,0);
+            assert_eq!(ui::media_source_range(list.sessions.iter().filter(|s|s.playing).count(),cursor),0..2);
+            assert!(!media_source_choice_available(&list,&Some("3".into())),"stale pointer/key selection must also be rejected at dispatch");
+        }
+    }
+    #[test]fn retained_source_focus_reindexes_after_an_earlier_source_disappears(){
+        let mut list=sessions();list.sessions.remove(0);
+        let (cursor,focused)=reconcile_media_source_focus(&list,3,Some(Action::SelectMediaSource(Some("3".into()))));
+        assert_eq!(cursor,2,"cursor follows the ID, not its previous index");
+        assert!(focused==Some(Action::SelectMediaSource(Some("3".into()))));
+        let visible:Vec<_>=list.sessions.iter().filter(|s|s.playing).collect();
+        assert!(ui::media_source_range(visible.len(),cursor).contains(&(cursor-1)));
+        assert_eq!(visible[cursor-1].id,"3");
+        assert!(media_source_choice_available(&list,&Some("3".into())));
+    }
+    #[test]fn same_app_sources_keep_identity_and_viewport_when_reordered(){
+        let mut list=sessions();list.sessions.swap(0,2);
+        let (cursor,focused)=reconcile_media_source_focus(&list,3,Some(Action::SelectMediaSource(Some("3".into()))));
+        assert_eq!(cursor,1);assert!(focused==Some(Action::SelectMediaSource(Some("3".into()))));
+        assert_eq!(list.sessions[ui::media_source_range(4,cursor)][cursor-1].id,"3");
+        assert!(media_source_choice_available(&list,&Some("1".into())));
+    }
+    #[test]fn empty_list_clears_session_focus_but_auto_remains_available(){
+        let list=MediaSessions::default();
+        let (cursor,focused)=reconcile_media_source_focus(&list,3,Some(Action::SelectMediaSource(Some("3".into()))));
+        assert_eq!(cursor,0);assert!(focused==Some(Action::MediaSourceMenu));
+        assert_eq!(ui::media_source_range(0,cursor),0..0);
+        assert!(!media_source_choice_available(&list,&Some("3".into())));
+        assert!(media_source_choice_available(&list,&None));
+    }
+    #[test]fn auto_focus_and_manual_selection_are_not_changed_by_reconciliation(){
+        let mut list=sessions();list.manual=Some("2".into());
+        let (cursor,focused)=reconcile_media_source_focus(&list,3,Some(Action::SelectMediaSource(None)));
+        assert_eq!(cursor,0);assert!(focused==Some(Action::SelectMediaSource(None)));
+        assert_eq!(list.manual.as_deref(),Some("2"));
+    }
+}
+
+/// The dispatch used by draw_page. Quiet routes never accept content payloads.
+#[derive(Debug,PartialEq,Eq)]
+enum PageRoute{QuietMusic,QuietCalendar,Hidden,Backlog,Music,Calendar,Reminder,Clipboard,Notes,Weather,Power,Other}
+fn page_route(tab:&str,quiet:bool,backlog:bool,notes_enabled:bool)->PageRoute{
+    if quiet{return match tab{"Musik"=>PageRoute::QuietMusic,"Kalender"=>PageRoute::QuietCalendar,_=>PageRoute::Hidden};}
+    match tab{"Musik"=>PageRoute::Music,"Kalender"=>PageRoute::Calendar,"Reminder" if backlog=>PageRoute::Backlog,"Reminder"=>PageRoute::Reminder,"Clipboard"=>PageRoute::Clipboard,"Catatan" if notes_enabled=>PageRoute::Notes,"Catatan"=>PageRoute::Other,"Cuaca"=>PageRoute::Weather,"Daya"=>PageRoute::Power,_=>PageRoute::Other}
+}
+#[cfg(test)]mod presenter_router_r1_tests{
+ use super::*;
+ #[test]fn due_target_second_page_routes_notes_and_never_overrides_clipboard(){
+  let mut state=State::default();state.todos=(1..=12).map(|id|Todo{id,text:format!("fixture{id}"),done:false,due:None,reminded:false,note_id:None}).collect();
+  let target=crate::todo_notes::resolve_activity_todo(&state,8,crate::todo_notes::NoteAccess{notes_enabled:true,quiet:false}).unwrap();
+  assert_eq!(target,crate::todo_notes::NoteTarget::TasksSubview{todo_id:8});
+  assert_eq!(page_route("Catatan",false,false,true),PageRoute::Notes);
+  assert_eq!(page_route("Clipboard",false,false,true),PageRoute::Clipboard);
+  assert_eq!(crate::todo_notes::resolve_activity_todo(&state,8,crate::todo_notes::NoteAccess{notes_enabled:false,quiet:false}).unwrap(),crate::todo_notes::NoteTarget::ReminderFallback);
+  assert_eq!(page_route("Catatan",false,false,false),PageRoute::Other);
+ }
+ #[test]fn actual_presenter_boundary_keeps_tasks_only_in_notes(){
+  let source=include_str!("pages.rs");
+  let clipboard=source.split("fn clipboard_page(").nth(1).unwrap().split("fn notes_page(").next().unwrap();
+  assert!(!clipboard.contains("self.notes_header(p)"));assert!(!clipboard.contains("self.tasks_page(p)"));assert!(!clipboard.contains("self.commit_editors()"));
+  let notes=source.split("fn notes_page(").nth(1).unwrap().split("#[allow(dead_code)]").next().unwrap();
+  assert!(!notes.contains("self.notes_header(p)"));
+  let router=source.split("fn draw_page(").nth(1).unwrap().split("fn music_page(").next().unwrap();
+  assert!(router.contains("match page_route("));assert!(router.contains("PageRoute::Notes=>self.simpan_page(p)"));assert!(router.contains("PageRoute::Clipboard=>self.clipboard_page(p)"));
+ }
+ #[test]fn quiet_actual_dispatch_rejects_content_routes_and_retains_escape_music_calendar(){
+  for tab in ["Clipboard","Catatan","Cuaca","Reminder","Daya","fixture-private-mod"]{assert_eq!(page_route(tab,true,true,true),PageRoute::Hidden);}
+  assert_eq!(page_route("Musik",true,false,true),PageRoute::QuietMusic);assert_eq!(page_route("Kalender",true,false,true),PageRoute::QuietCalendar);
+ }
+}
+
+#[cfg(test)]mod privacy_boundaries_r1_tests{
+ #[test]fn quiet_gate_precedes_page_payload_reads_and_native_input_creation(){
+  let source=include_str!("../shell.rs");let inputs=source.split("fn make_inputs(").nth(1).unwrap().split("unsafe fn edit(").next().unwrap();
+  assert!(inputs.find("if self.settings.quiet_mode{self.input_page.clear()").unwrap()<inputs.find("self.edit(50,").unwrap());
+  let preset=include_str!("preset_host.rs");let transition=preset.split("fn preset_action(").nth(1).unwrap().split("fn settle_preset_animations(").next().unwrap();
+  assert!(transition.contains("self.lyric_anim=None"));assert!(transition.contains("self.tab_fade=None"));assert!(transition.contains("self.activities.feedback=None"));assert!(transition.contains("self.sync_popout_privacy()"));
+ }
 }
