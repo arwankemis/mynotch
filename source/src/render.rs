@@ -569,6 +569,62 @@ impl Painter {
             }
         }
     }}
+    /// Closed-Captions icon [CC] (24-box) for YouTube media.
+    /// Draws a rounded rectangular badge with two centered 'C' glyphs.
+    /// When `active`, stroke is drawn with a soft aura (matching `icon_mic`).
+    pub unsafe fn icon_cc(&self, cx: f32, cy: f32, size: f32, rgb: u32, thickness: f32, active: bool) {
+        let s = size / 24.;
+        let draw_cc = |painter: &Self, rgb: u32, alpha: f32, th: f32| unsafe {
+            painter.brush.SetColor(&color(rgb, alpha));
+            if let Ok(path) = painter.d2d.CreatePathGeometry() {
+                if let Ok(sink) = path.Open() {
+                    let l = cx - 10.0 * s;
+                    let t = cy - 7.0 * s;
+                    let r = cx + 10.0 * s;
+                    let b = cy + 7.0 * s;
+                    let rr = 2.5 * s;
+                    sink.BeginFigure(pt(l + rr, t), D2D1_FIGURE_BEGIN_HOLLOW);
+                    sink.AddLine(pt(r - rr, t));
+                    sink.AddArc(&D2D1_ARC_SEGMENT { point: pt(r, t + rr), size: D2D_SIZE_F { width: rr, height: rr }, rotationAngle: 0., sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE, arcSize: D2D1_ARC_SIZE_SMALL });
+                    sink.AddLine(pt(r, b - rr));
+                    sink.AddArc(&D2D1_ARC_SEGMENT { point: pt(r - rr, b), size: D2D_SIZE_F { width: rr, height: rr }, rotationAngle: 0., sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE, arcSize: D2D1_ARC_SIZE_SMALL });
+                    sink.AddLine(pt(l + rr, b));
+                    sink.AddArc(&D2D1_ARC_SEGMENT { point: pt(l, b - rr), size: D2D_SIZE_F { width: rr, height: rr }, rotationAngle: 0., sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE, arcSize: D2D1_ARC_SIZE_SMALL });
+                    sink.AddLine(pt(l, t + rr));
+                    sink.AddArc(&D2D1_ARC_SEGMENT { point: pt(l + rr, t), size: D2D_SIZE_F { width: rr, height: rr }, rotationAngle: 0., sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE, arcSize: D2D1_ARC_SIZE_SMALL });
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+
+                    // Left 'C'
+                    sink.BeginFigure(pt(cx - 1.8 * s, cy - 3.5 * s), D2D1_FIGURE_BEGIN_HOLLOW);
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(cx - 6.0 * s, cy - 3.5 * s),
+                        point2: pt(cx - 6.0 * s, cy + 3.5 * s),
+                        point3: pt(cx - 1.8 * s, cy + 3.5 * s),
+                    });
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+
+                    // Right 'C'
+                    sink.BeginFigure(pt(cx + 4.4 * s, cy - 3.5 * s), D2D1_FIGURE_BEGIN_HOLLOW);
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(cx + 0.2 * s, cy - 3.5 * s),
+                        point2: pt(cx + 0.2 * s, cy + 3.5 * s),
+                        point3: pt(cx + 4.4 * s, cy + 3.5 * s),
+                    });
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+
+                    let _ = sink.Close();
+                    painter.context.DrawGeometry(&path, &painter.brush, th, None);
+                }
+            }
+        };
+        if active {
+            draw_cc(self, 0xffffff, 0.16, thickness + 3.2);
+            draw_cc(self, 0xffffff, 0.30, thickness + 1.6);
+            draw_cc(self, 0xffffff, 1.0, thickness);
+        } else {
+            draw_cc(self, rgb, 1.0, thickness);
+        }
+    }
     pub unsafe fn icon_media_source(&mut self,cx:f32,cy:f32,size:f32,source_app:&str,playing:bool){unsafe{
         // Reuse the native app artwork, preserving the caller's morph/DPI transform.
         let mut saved=windows_numerics::Matrix3x2::default();self.context.GetTransform(&mut saved);
@@ -660,7 +716,26 @@ impl Painter {
                     self.context.FillGeometry(&path,&self.brush,None);
                 }
             }
-        }else if app.contains("chrome")||app.contains("google"){
+                }else if app.contains("twitch"){
+            // Twitch: Purple circle (#9146ff) with white chat bubble & eye slits
+            self.fill(left,top,d,d,r,0x9146ff);
+            let bw=10.0;let bh=8.0;
+            let bx=cx-bw*0.5;let by=cy-bh*0.5-0.5;
+            self.fill(bx,by,bw,bh,2.0,0xffffff);
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(bx+1.5,by+bh),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(pt(bx+1.5,by+bh+2.0));
+                    sink.AddLine(pt(bx+4.0,by+bh));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    let _=sink.Close();
+                    self.brush.SetColor(&color(0xffffff,1.0));
+                    self.context.FillGeometry(&path,&self.brush,None);
+                }
+            }
+            self.fill(cx-2.2,by+2.0,1.4,3.5,0.4,0x9146ff);
+            self.fill(cx+0.8,by+2.0,1.4,3.5,0.4,0x9146ff);
+}else if app.contains("chrome")||app.contains("google"){
             // Google Chrome: Red/Yellow/Green 3-color pinwheel with white ring & blue center
             self.fill(left,top,d,d,r,0x34a853);
             if let Ok(path)=self.d2d.CreatePathGeometry(){
@@ -1279,7 +1354,16 @@ mod tests {
         let _ = is_reduced_transparency();
     }
 
-    #[test]
+        #[test]
+    fn test_twitch_icon_bounds() {
+        let r = 8.0f32;
+        let points = [(-5.0f32, -4.5f32), (5.0, -4.5), (5.0, 3.5), (-5.0, 3.5), (-3.5, 5.5)];
+        for (x, y) in points {
+            let dist = (x * x + y * y).sqrt();
+            assert!(dist <= r + 0.01, "Twitch point ({x}, {y}) leaks beyond radius {r}");
+        }
+    }
+#[test]
     fn test_chrome_icon_points_within_circle_bounds() {
         let r = 8.0f32;
         let points = [

@@ -100,7 +100,8 @@ impl Shell {
         // 3. Transport Controls ala Spotify (mockup stage2-musik: [mic kiri] … acak · prev ·
         //    putar · next · ulangi; hover tanpa latar, aktif = titik 4 px di bawah ikon)
         let trans_y=132.;
-        self.transport_btn(p,"MIC",24.,trans_y,34.,34.,Action::ToggleLyrics,self.lyric_mode,true);
+        let mic_label = if self.track_is_youtube && self.track.playing { "CC" } else { "MIC" };
+        self.transport_btn(p,mic_label,24.,trans_y,34.,34.,Action::ToggleLyrics,self.lyric_mode,true);
         let (slots,total)=Self::spotify_transport_slots(false);
         let gx=self.width/2.-total*0.5;
         self.transport_btn(p,"SHUFFLE",gx+slots[1].0,trans_y,slots[1].1,34.,Action::ToggleShuffle,self.track.shuffle,self.track.can_shuffle);
@@ -115,7 +116,7 @@ impl Shell {
         p.fill(x,40.,28.,28.,7.,0x121217);
         let focused=self.focused.as_ref()==Some(&action);
         p.stroke(x,40.,28.,28.,7.,if focused{self.palette.accent}else{0x2b2b36},1.);
-        p.icon_media_source(x+14.,54.,24.,&self.track.source_app,self.track.playing);
+        let brand = self.resolved_media_brand(); p.icon_media_source(x+14.,54.,24.,brand,self.track.playing);
         if self.media_sessions.manual.is_none(){
             p.fill(x+18.,57.,12.,12.,6.,0x121217);
             p.text_centered("A",x+18.,57.,12.,12.,8.,self.palette.accent,1.,true);
@@ -137,7 +138,16 @@ impl Shell {
         for (slot,session) in sessions[range].iter().enumerate(){
             let bx=left+34.+slot as f32*32.;let action=Action::SelectMediaSource(Some(session.id.clone()));
             if self.media_sessions.manual.as_ref()==Some(&session.id)||self.focused.as_ref()==Some(&action){p.stroke(bx,75.,28.,28.,6.,self.palette.accent,1.);}
-            p.icon_media_source(bx+14.,89.,20.,&session.source_app,session.playing);
+            let sess_brand = if session.id == self.track.session_id {
+                self.resolved_media_brand()
+            } else if session.source_app.to_lowercase().contains("twitch") {
+                "twitch"
+            } else if session.source_app.to_lowercase().contains("youtube") {
+                "youtube"
+            } else {
+                &session.source_app
+            };
+            p.icon_media_source(bx+14.,89.,20.,sess_brand,session.playing);
             if self.track.session_id==session.id{p.fill(bx+12.,100.,4.,4.,2.,self.palette.accent);}
             if self.hit_enabled{self.hits.push(Hit{rect:render::rect(bx,75.,28.,28.),action});}
         }
@@ -193,7 +203,7 @@ impl Shell {
         let default_album=crate::i18n::t("music.single_album",&lang);
         let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
         p.text_ellipsis(&album,92.,86.,left_w-104.,16.,11.,0x9299a4,false);
-        p.icon_media_app(left_w-16.,art_y+8.,&self.track.source_app,self.track_is_youtube,self.track.playing);
+        p.icon_media_app(left_w-16.,art_y+8.,self.resolved_media_brand(),self.track_is_youtube,self.track.playing);
 
         // Scrubber (mockup .scrub: waktu 11px, bar 4px, thumb muncul saat hover)
         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
@@ -222,7 +232,8 @@ impl Shell {
         let trans_y=138.;
         let (slots,_) =Self::spotify_transport_slots(true);
         let gx=24.;
-        self.transport_btn(p,"MIC",gx+slots[0].0,trans_y,slots[0].1,30.,Action::ToggleLyrics,self.lyric_mode,true);
+        let mic_label = if self.track_is_youtube && self.track.playing { "CC" } else { "MIC" };
+        self.transport_btn(p,mic_label,gx+slots[0].0,trans_y,slots[0].1,30.,Action::ToggleLyrics,self.lyric_mode,true);
         self.transport_btn(p,"SHUFFLE",gx+slots[1].0,trans_y,slots[1].1,30.,Action::ToggleShuffle,self.track.shuffle,self.track.can_shuffle);
         self.transport_btn(p,"⏮",gx+slots[2].0,trans_y,slots[2].1,30.,Action::Previous,false,self.track.can_previous);
         self.spotify_play_button(p,gx+slots[3].0,trans_y-4.,slots[3].1,self.track.playing,self.track.can_toggle);

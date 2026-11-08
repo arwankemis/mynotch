@@ -56,9 +56,111 @@ pub fn fetch_captions(title: &str, artist: &str, duration: f64, permission: &cra
 
 /// Only metadata belonging to this session may enable caption lookup.
 pub fn session_allows_captions(source: &str, title: &str, album: &str) -> bool {
-    let source = source.to_lowercase();
-    source.contains("youtube") || (["chrome", "edge", "firefox", "opera", "brave"].iter().any(|browser| source.contains(browser))
-        && [title, album].iter().any(|value| value.to_lowercase().contains("youtube")))
+    let source_low = source.to_lowercase();
+    if source_low.contains("youtube") {
+        return true;
+    }
+    let is_browser = ["chrome", "edge", "firefox", "opera", "brave", "vivaldi", "browser"]
+        .iter()
+        .any(|browser| source_low.contains(browser));
+    if !is_browser {
+        return false;
+    }
+    if [title, album].iter().any(|value| value.to_lowercase().contains("youtube")) {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if browser_has_window_keyword("youtube", title) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detects if the media session is from Twitch (standalone app or web stream).
+pub fn is_twitch_session(source: &str, title: &str, album: &str) -> bool {
+    let source_low = source.to_lowercase();
+    if source_low.contains("twitch") {
+        return true;
+    }
+    let is_browser = ["chrome", "edge", "firefox", "opera", "brave", "vivaldi", "browser"]
+        .iter()
+        .any(|browser| source_low.contains(browser));
+    if !is_browser {
+        return false;
+    }
+    if [title, album].iter().any(|value| value.to_lowercase().contains("twitch")) {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if browser_has_window_keyword("twitch", title) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+pub fn browser_has_window_keyword(keyword: &str, track_title: &str) -> bool {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextLengthW, GetWindowTextW};
+
+    struct Context<'a> {
+        keyword: &'a str,
+        title_prefix: Option<String>,
+        keyword_matched: bool,
+        exact_matched: bool,
+    }
+
+    let prefix = {
+        let trimmed = track_title.trim();
+        if trimmed.len() >= 4 {
+            let end = trimmed.char_indices().nth(12).map(|(i, _)| i).unwrap_or(trimmed.len());
+            Some(trimmed[..end].to_lowercase())
+        } else {
+            None
+        }
+    };
+
+    unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        unsafe {
+            let len = GetWindowTextLengthW(hwnd);
+            if len <= 0 {
+                return BOOL(1);
+            }
+            let ctx = &mut *(lparam.0 as *mut Context);
+            let mut buf = vec![0u16; (len + 1) as usize];
+            let copied = GetWindowTextW(hwnd, &mut buf);
+            if copied > 0 {
+                let text = String::from_utf16_lossy(&buf[..copied as usize]);
+                let text_low = text.to_lowercase();
+                if text_low.contains(ctx.keyword) {
+                    ctx.keyword_matched = true;
+                    if let Some(ref pfx) = ctx.title_prefix {
+                        if text_low.contains(pfx) {
+                            ctx.exact_matched = true;
+                            return BOOL(0);
+                        }
+                    }
+                }
+            }
+            BOOL(1)
+        }
+    }
+
+    let mut ctx = Context {
+        keyword,
+        title_prefix: prefix,
+        keyword_matched: false,
+        exact_matched: false,
+    };
+    unsafe {
+        let _ = EnumWindows(Some(enum_cb), LPARAM(&mut ctx as *mut _ as isize));
+    }
+    ctx.exact_matched || ctx.keyword_matched
 }
 
 fn clean_video_title(title: &str) -> String {

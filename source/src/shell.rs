@@ -327,6 +327,7 @@ pub(super) struct Shell {
     pub storage_dropdown_open: bool,
     pub storage_dropdown_page: usize,
     pub track_is_youtube: bool,
+    pub track_is_twitch: bool,
     pub pending_ack_tx: Option<std::path::PathBuf>,
     /// Earliest moment the updated build may report itself healthy.
     pub pending_ack_ready_at: Option<Instant>,
@@ -447,7 +448,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         cover:None,cover_key:0,preview_silent:args.iter().any(|s|s=="--silent"||s=="--preview-silent"),
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
         hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
-privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
+privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,track_is_twitch:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
 
     app.tab=app.settings.default_tab.clone();
     if !app.settings.active_tab_order().contains(&app.tab){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
@@ -1260,6 +1261,15 @@ impl Shell {
             }
         } else {
             0.
+        }
+    }
+        pub fn resolved_media_brand(&self) -> &str {
+        if self.track_is_youtube {
+            "youtube"
+        } else if self.track_is_twitch {
+            "twitch"
+        } else {
+            &self.track.source_app
         }
     }
     pub fn current_lyric_line(&self) -> Option<String> {
@@ -2576,6 +2586,7 @@ impl Shell {
                 self.sync_stage1_timer();
             }
             self.track_is_youtube = crate::youtube::session_allows_captions(&track.source_app, &track.title, &track.album);
+            self.track_is_twitch = crate::youtube::is_twitch_session(&track.source_app, &track.title, &track.album);
             self.track=track;if changed{
                 self.cancel_job("Musik");self.lyrics_key=key;self.lyrics_data=None;self.lyrics.clear();self.plain_lyrics.clear();self.lyric_offset=0;self.lyrics_error=None;
                 self.lyrics_retry=Default::default();self.lyrics_from_youtube=false;
@@ -2755,6 +2766,10 @@ impl Shell {
             }
             let cx=x+w*0.5;let cy=y+h*0.5;
             match label{
+                "CC" => {
+                    let size=if w<32.{17.}else{19.};
+                    p.icon_cc(cx,cy,size,color,if emphasis{2.4}else{1.8},active);
+                },
                 "LYRICS"|"MIC"|"❝" => {
                     let size=if w<32.{17.}else{19.};
                     p.icon_mic(cx,cy,size,color,if emphasis{2.4}else{1.8},active);
@@ -3257,6 +3272,8 @@ impl Shell {
             if self.settings.effective_presentation().visualizer && self.track.playing {
                 let levels = if self.levels.len() >= 4 { &self.levels[0..4] } else { &[0.4, 0.8, 1.0, 0.6] };
                 p.bars_mirror(levels, plan.music_icon_rect.0, (self.height - 12.) * 0.5, 14., 12., 0xd8d8de);
+            } else if self.track_is_youtube {
+                p.icon_cc(plan.music_icon_rect.0 + 8., self.height * 0.5, 15., 0xd8d8de, 1.4, false);
             } else {
                 p.outline_icon("music", plan.music_icon_rect.0, plan.music_icon_rect.1, plan.music_icon_rect.2, 0xd8d8de);
             }
@@ -3355,7 +3372,7 @@ impl Shell {
         unsafe { p.clip(0., 0., self.width, self.height); }
         let info_x = self.draw_stage1_status(p, &info, &time_str, btn_up_x);
         unsafe {
-            p.icon_media_source((info_x - 12.).max(10.), self.height * 0.5, 20., &self.track.source_app, self.track.playing);
+            let brand = self.resolved_media_brand(); p.icon_media_source((info_x - 12.).max(10.), self.height * 0.5, 20., brand, self.track.playing);
             self.button_chevron_up(p, btn_up_x, (self.height - 20.) * 0.5, 20., 20., Action::ToStage0, 0x88888e);
         }
         if self.hit_enabled {
