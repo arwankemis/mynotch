@@ -134,7 +134,7 @@ enum Action {
     Play,Next,Previous,Seek(f64),SeekPointer,VolumeStep(i32),MasterVolumeStep(i32),LyricsFollow,LyricsRetry,Lyric(usize),FocusStart,FocusPause,FocusReset,FocusBreak,FocusLength(i32),BreakLength(i32),
     AddTodo,Todo(u64),DeleteTodo(u64,u64),TodoPage(i32),SaveNote,Water,UndoWater,WaterTarget(i32),WaterServing(i32),Breath,
     Month(i32),Day(u32),JumpToDate(i32,u32,u32),CalendarSave,CalendarRefresh,WeatherSave,WeatherRefresh,WeatherToggleMenu,AiSave,AiSend,AiClear,
-    ToggleLyrics,ToggleShuffle,CycleRepeat,SelectMode(usize),MediaSourceMenu,SelectMediaSource(Option<String>),
+    ToggleLyrics,ToggleShuffle,CycleRepeat,SelectMode(usize),MediaSourceMenu,SelectMediaSource(Option<String>),SelectCcLang(String),
     CalendarToday,CalendarLeaveToggle,
     TogglePin,ToStage0,ToStage1,ExpandMusic,ExpandHardware,ExpandWeather,SimpanSub(u8),
     WaterInterval(i32),MoveInterval(i32),ReminderSelect(usize),ReminderStep(i32),StretchLength(i32),StretchStart,StretchDone,PrayerLead(i32),PrayerRefresh,ReminderMenu(&'static str),ReminderValue(&'static str,u32),
@@ -328,6 +328,7 @@ pub(super) struct Shell {
     pub storage_dropdown_page: usize,
     pub track_is_youtube: bool,
     pub track_is_twitch: bool,
+    pub cc_menu_open: bool,
     pub pending_ack_tx: Option<std::path::PathBuf>,
     /// Earliest moment the updated build may report itself healthy.
     pub pending_ack_ready_at: Option<Instant>,
@@ -448,7 +449,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         cover:None,cover_key:0,preview_silent:args.iter().any(|s|s=="--silent"||s=="--preview-silent"),
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
         hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
-privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,track_is_twitch:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
+privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,track_is_twitch:false,cc_menu_open:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
 
     app.tab=app.settings.default_tab.clone();
     if !app.settings.active_tab_order().contains(&app.tab){app.tab=app.settings.active_tab_order().first().cloned().unwrap_or_default();}
@@ -1797,13 +1798,14 @@ impl Shell {
     }
     fn request_lyrics(&mut self, force: bool) {
         if !self.settings.lyrics_online || self.track.title.is_empty() || !self.settings.enabled("Musik") || self.fullscreen || self.suspended { return; }
-        let key = lyric_request_key(&self.track);
+        let key = lyric_request_key(&self.track, &self.settings.youtube_caption_lang);
         let api = self.online.clone();
         let track = self.track.clone();
         let allow_yt = crate::youtube::session_allows_captions(&track.source_app, &track.title, &track.album);
         let permission=self.lyrics_consent.snapshot();
-        if self.job("Musik", move || { let result=api.lyrics_lookup(&track.title, &track.artist, &track.album, track.duration_seconds, allow_yt, force, permission.clone()); Event::Lyrics(permission,key,result) }) {
-            self.lyrics_key = lyric_request_key(&self.track);
+        let yt_lang = self.settings.youtube_caption_lang.clone();
+        if self.job("Musik", move || { let result=api.lyrics_lookup(&track.title, &track.artist, &track.album, track.duration_seconds, allow_yt, force, permission.clone(), &yt_lang); Event::Lyrics(permission,key,result) }) {
+            self.lyrics_key = lyric_request_key(&self.track, &self.settings.youtube_caption_lang);
             self.lyrics_error = None;
             self.lyrics_retry.started();
         }
@@ -2338,6 +2340,7 @@ impl Shell {
                         return LRESULT(0);
                     }
                 }
+                0x1B if self.cc_menu_open=>{self.cc_menu_open=false;self.invalidate();return LRESULT(0)},
                 0x1B if self.note_export_open.is_some()=>{self.note_export_open=None;self.make_inputs();self.invalidate();return LRESULT(0)},
                 0x1B if self.weather_menu_open=>{self.weather_menu_open=false;self.invalidate();return LRESULT(0)},
                 0x1B if self.weather_custom_open=>{self.action(Action::WeatherToggleCustom);return LRESULT(0)},
@@ -2353,9 +2356,35 @@ impl Shell {
                 }
                 _=>{}
             }}
-            WM_SETFOCUS|WM_KILLFOCUS=>{if msg==WM_KILLFOCUS{self.media_source_open=false;}self.focused=None;self.invalidate();return LRESULT(0)},
+            WM_SETFOCUS|WM_KILLFOCUS=>{if msg==WM_KILLFOCUS{self.media_source_open=false;self.cc_menu_open=false;}self.focused=None;self.invalidate();return LRESULT(0)},
             WM_HOTKEY=>{if !self.fullscreen{self.set_expanded(!self.expanded);}return LRESULT(0)},
-            WM_RBUTTONUP|TRAY=>{if msg==WM_RBUTTONUP&&self.fullscreen&&self.settings.hide_fullscreen{return LRESULT(0)}if msg==WM_RBUTTONUP||lparam.0 as u32==WM_RBUTTONUP{self.menu();}else if lparam.0 as u32==WM_LBUTTONUP{self.set_expanded(!self.expanded);}return LRESULT(0)},
+            WM_RBUTTONUP|TRAY=>{
+                if msg==WM_RBUTTONUP&&self.fullscreen&&self.settings.hide_fullscreen{return LRESULT(0)}
+                if msg==WM_RBUTTONUP {
+                    let (x,y) = self.client_to_capsule(lparam);
+                    if self.expanded && self.tab == "Musik" && self.track_is_youtube && self.track.playing {
+                        let (cc_x, cc_y, cc_w, cc_h) = if self.lyric_mode {
+                            (24.0, 138.0, 30.0, 30.0)
+                        } else {
+                            (24.0, 132.0, 34.0, 34.0)
+                        };
+                        if x >= cc_x - 4.0 && x <= cc_x + cc_w + 4.0 && y >= cc_y - 4.0 && y <= cc_y + cc_h + 4.0 {
+                            self.cc_menu_open = !self.cc_menu_open;
+                            self.invalidate();
+                            return LRESULT(0);
+                        }
+                    }
+                    if self.cc_menu_open {
+                        self.cc_menu_open = false;
+                        self.invalidate();
+                        return LRESULT(0);
+                    }
+                    self.menu();
+                } else if lparam.0 as u32==WM_LBUTTONUP {
+                    self.set_expanded(!self.expanded);
+                }
+                return LRESULT(0)
+            },
             WAKE=>{self.events();return LRESULT(0)},
             WM_DPICHANGED|WM_DISPLAYCHANGE=>{self.layout();self.make_inputs();self.invalidate();return LRESULT(0)},
         // WM_SETTINGCHANGE / WM_THEMECHANGED / WM_DWMCOMPOSITIONCHANGED: transparency or High Contrast may have flipped.
@@ -2573,7 +2602,7 @@ impl Shell {
             if matches!(self.pressed,Some(Action::SelectMediaSource(..))){self.pressed=None;}
         },
         Event::Media(MediaEvent::Changed(track))=>{if !self.settings.enabled("Musik")||track.selection_revision<self.media_selection_revision{continue}
-            let key=lyric_request_key(&track);let changed=key!=self.lyrics_key;
+            let key=lyric_request_key(&track, &self.settings.youtube_caption_lang);let changed=key!=self.lyrics_key;
             let cover_key=crate::artwork::fingerprint(&track.artwork);
             if cover_key!=self.cover_key||(self.cover.is_none()&&!track.artwork.is_empty()&&!self.jobs.contains_key("Artwork")&&changed){
                 self.cancel_job("Artwork");self.cover_key=cover_key;self.cover=None;
@@ -4047,8 +4076,8 @@ pub(super) fn classify_notice_kind(msg:&str)->ToastKind{
     }
 }
 
-fn lyric_request_key(track: &MediaSnapshot) -> String {
-    serde_json::to_string(&(&track.session_id, &track.source_app, &track.title, &track.artist, &track.album, track.duration_seconds.round() as u64)).unwrap_or_default()
+fn lyric_request_key(track: &MediaSnapshot, yt_lang: &str) -> String {
+    serde_json::to_string(&(&track.session_id, &track.source_app, &track.title, &track.artist, &track.album, track.duration_seconds.round() as u64, yt_lang)).unwrap_or_default()
 }
 
 pub(super) fn lyric_display_index(lines:&[crate::lyrics::LyricLine],position:f64,offset:usize)->usize{
@@ -4319,14 +4348,14 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
     #[test]
     fn lyric_request_identity_changes_when_the_source_session_changes() {
         let mut track=MediaSnapshot {title:"Song".into(),artist:"Artist".into(),source_app:"spotify.exe".into(),duration_seconds:200.,..Default::default()};
-        let old=lyric_request_key(&track);
+        let old=lyric_request_key(&track, "orig");
         track.session_id="another-session-same-app".into();
-        assert_ne!(old,lyric_request_key(&track));
+        assert_ne!(old,lyric_request_key(&track, "orig"));
         track.source_app="youtube.app".into();
-        assert_ne!(old,lyric_request_key(&track));
-        let key=lyric_request_key(&track);
+        assert_ne!(old,lyric_request_key(&track, "orig"));
+        let key=lyric_request_key(&track, "orig");
         track.playing=true;track.position_seconds=100.;
-        assert_eq!(key,lyric_request_key(&track));
+        assert_eq!(key,lyric_request_key(&track, "orig"));
     }
     #[test]fn minimal_mode_collapses_directly_to_stage0(){assert_eq!(collapse_target_stage(true),0);assert_eq!(collapse_target_stage(false),1);assert_eq!(initial_hover_stage(false,true),0);assert_eq!(initial_hover_stage(false,false),1);}
     #[test]fn f1_boot_starts_at_stage0_and_completes_to_idle_or_minimal(){

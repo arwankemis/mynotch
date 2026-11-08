@@ -3,7 +3,7 @@ use crate::net;
 use crate::online::LyricsResult;
 use serde_json::Value;
 
-pub fn fetch_captions(title: &str, artist: &str, duration: f64, permission: &crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+pub fn fetch_captions(title: &str, artist: &str, duration: f64, preferred_lang: &str, permission: &crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
     permission.check()?;
     if !permission.youtube() { return Err("YouTube consent disabled".into()); }
     if title.trim().is_empty() {
@@ -43,7 +43,7 @@ pub fn fetch_captions(title: &str, artist: &str, duration: f64, permission: &cra
     let mut matched = None;
     for vid in vids.iter().take(3) {
         net::check_cancel()?;
-        if let Ok(result) = fetch_video_captions(vid, title, artist, duration, permission) {
+        if let Ok(result) = fetch_video_captions(vid, title, artist, duration, preferred_lang, permission) {
             if !result.synced_lyrics.is_empty() || !result.plain_lyrics.is_empty() {
                 if matched.is_some() { return Err("Beberapa video cocok; caption tidak dapat dipastikan untuk sesi ini.".into()); }
                 matched = Some(result);
@@ -209,7 +209,7 @@ pub(crate) fn verify_candidate_match(details: &Value, title: &str, artist: &str,
     Ok(())
 }
 
-fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64, permission: &crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64, preferred_lang: &str, permission: &crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
     let payload = serde_json::json!({
         "context": {
             "client": {
@@ -251,20 +251,62 @@ fn fetch_video_captions(video_id: &str, title: &str, artist: &str, duration: f64
         return Err("Daftar caption kosong.".into());
     }
 
-    // Pick best track: Indonesian first, then English, then first available
     let mut selected_url = None;
-    for lang in ["id", "en"] {
-        for track in caption_tracks {
-            let code = track.get("languageCode").and_then(|c| c.as_str()).unwrap_or("");
-            if code.starts_with(lang) {
-                if let Some(url) = track.get("baseUrl").and_then(|u| u.as_str()) {
-                    selected_url = Some(url.to_string());
+    match preferred_lang {
+        "id" => {
+            for track in caption_tracks {
+                let code = track.get("languageCode").and_then(|c| c.as_str()).unwrap_or("");
+                if code.starts_with("id") {
+                    selected_url = track.get("baseUrl").and_then(|u| u.as_str()).map(str::to_string);
                     break;
                 }
             }
-        }
-        if selected_url.is_some() {
-            break;
+            if selected_url.is_none() {
+                for track in caption_tracks {
+                    let translatable = track.get("isTranslatable").and_then(|v| v.as_bool()).unwrap_or(false);
+                    if translatable {
+                        if let Some(base) = track.get("baseUrl").and_then(|u| u.as_str()) {
+                            selected_url = Some(format!("{base}&tlang=id"));
+                            break;
+                        }
+                    }
+                }
+            }
+        },
+        "en" => {
+            for track in caption_tracks {
+                let code = track.get("languageCode").and_then(|c| c.as_str()).unwrap_or("");
+                if code.starts_with("en") {
+                    selected_url = track.get("baseUrl").and_then(|u| u.as_str()).map(str::to_string);
+                    break;
+                }
+            }
+            if selected_url.is_none() {
+                for track in caption_tracks {
+                    let translatable = track.get("isTranslatable").and_then(|v| v.as_bool()).unwrap_or(false);
+                    if translatable {
+                        if let Some(base) = track.get("baseUrl").and_then(|u| u.as_str()) {
+                            selected_url = Some(format!("{base}&tlang=en"));
+                            break;
+                        }
+                    }
+                }
+            }
+        },
+        _ => {
+            // "orig" / default: prefer manual/non-ASR track, or first track
+            for track in caption_tracks {
+                let kind = track.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+                if kind != "asr" {
+                    selected_url = track.get("baseUrl").and_then(|u| u.as_str()).map(str::to_string);
+                    break;
+                }
+            }
+            if selected_url.is_none() {
+                if let Some(first) = caption_tracks.first() {
+                    selected_url = first.get("baseUrl").and_then(|u| u.as_str()).map(str::to_string);
+                }
+            }
         }
     }
 
@@ -397,11 +439,11 @@ mod tests {
     #[test]
     fn direct_caption_entry_requires_both_consents_before_transport() {
         let consent=crate::lyrics_gate::LyricsConsent::default();
-        assert!(fetch_captions("synthetic title","synthetic artist",200.,&consent.snapshot()).is_err());
+        assert!(fetch_captions("synthetic title","synthetic artist",200.,"orig",&consent.snapshot()).is_err());
         consent.set(true,false);
-        assert!(fetch_captions("synthetic title","synthetic artist",200.,&consent.snapshot()).is_err());
+        assert!(fetch_captions("synthetic title","synthetic artist",200.,"orig",&consent.snapshot()).is_err());
         consent.set(false,true);
-        assert!(fetch_captions("synthetic title","synthetic artist",200.,&consent.snapshot()).is_err());
+        assert!(fetch_captions("synthetic title","synthetic artist",200.,"orig",&consent.snapshot()).is_err());
     }
     #[test]
     fn test_extract_video_ids() {

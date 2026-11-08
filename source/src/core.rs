@@ -45,6 +45,8 @@ pub struct Settings {
     pub bottom: bool, pub edge_gap: i32, pub scale: f32, pub opacity: u8, pub minimal: bool,
     pub hide_fullscreen: bool, #[serde(default = "default_true")] pub hide_screenshot: bool, pub lyrics_below: bool, pub glow: bool, pub visualizer: bool, pub romanize_lyrics: bool,
     pub lyrics_online: bool, pub lyrics_youtube_fallback: bool,
+    #[serde(default = "default_youtube_cc_lang")]
+    pub youtube_caption_lang: String,
     #[serde(default)] pub quiet_mode: bool,
     #[serde(default)] pub power_saver_mode: bool,
     pub default_tab: String, pub modules: BTreeMap<String,bool>,
@@ -104,6 +106,9 @@ pub struct Settings {
 fn default_true() -> bool {
     true
 }
+fn default_youtube_cc_lang() -> String {
+    "orig".to_string()
+}
 fn default_reminder_accent() -> String {
     "nyala".to_string()
 }
@@ -117,6 +122,7 @@ impl Default for Settings {
     fn default()->Self { Self {
         quiet_mode:false,power_saver_mode:false,
         bottom:false,edge_gap:0,scale:1.,opacity:250,minimal:false,hide_fullscreen:true,hide_screenshot:true,lyrics_below:true,glow:true,visualizer:true,romanize_lyrics:true,lyrics_online:false,lyrics_youtube_fallback:false,
+        youtube_caption_lang: "orig".into(),
         default_tab:"Musik".into(), modules: MODULES.iter().map(|&m|(m.to_owned(),m!="Clipboard")).chain([("Catatan".to_owned(),true)]).collect(),
         tab_order: MODULES.iter().map(|&m| m.to_string()).chain(["Catatan".to_owned()]).collect(),
         installed_mods: vec![],
@@ -384,6 +390,9 @@ impl Settings {
         let mut seen=std::collections::BTreeSet::new();self.tab_order.retain(|m| (MODULES.contains(&m.as_str())||BUILTIN_MOD_TABS.contains(&m.as_str())||self.mod_tabs.iter().any(|t|t==m))&&seen.insert(m.clone()));
         if self.language != "en" && self.language != "id" {
             self.language = "id".into();
+        }
+        if self.youtube_caption_lang != "id" && self.youtube_caption_lang != "en" && self.youtube_caption_lang != "orig" {
+            self.youtube_caption_lang = "orig".into();
         }
 
         if self.default_tab!="Catatan"&&(self.default_tab=="Sistem"||(!MODULES.contains(&self.default_tab.as_str())&&!mod_tabs.iter().any(|t|t==&self.default_tab)&&!self.mod_tabs.iter().any(|t|t==&self.default_tab))){self.default_tab="Musik".into();}

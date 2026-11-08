@@ -105,17 +105,17 @@ impl OnlineService {
     }
 
     pub fn lyrics_with_options(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool, permission: crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
-        self.lyrics_lookup(title, artist, album, duration, allow_youtube, false, permission)
+        self.lyrics_lookup(title, artist, album, duration, allow_youtube, false, permission, "orig")
     }
 
-    pub fn lyrics_lookup(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool, force: bool, permission: crate::lyrics_gate::LyricsPermission) -> Result<LyricsResult, String> {
+    pub fn lyrics_lookup(&self, title: &str, artist: &str, album: &str, duration: f64, allow_youtube: bool, force: bool, permission: crate::lyrics_gate::LyricsPermission, preferred_lang: &str) -> Result<LyricsResult, String> {
         permission.check()?;
         let allow_youtube = allow_youtube && permission.youtube();
         if title.trim().is_empty() { return Ok(LyricsResult::default()); }
         if [title, artist, album].iter().any(|v| v.len() > 4096) || !duration.is_finite() || !(0.0..=86400.0).contains(&duration) { return Err("Metadata lagu tidak valid.".into()); }
         let duration = duration.round() as u64;
         // Version the matching policy so older unverified results cannot be reused.
-        let raw_key = serde_json::to_string(&("consent-v3", permission.revision(), title.trim(), artist.trim(), album.trim(), duration, allow_youtube)).map_err(|_| "Metadata lagu tidak valid.")?;
+        let raw_key = serde_json::to_string(&("consent-v3", permission.revision(), title.trim(), artist.trim(), album.trim(), duration, allow_youtube, preferred_lang)).map_err(|_| "Metadata lagu tidak valid.")?;
         let mut hasher = crate::update::crypto::Sha256::new();
         hasher.update(raw_key.as_bytes());
         let key = hasher.finish().iter().map(|b| format!("{b:02x}")).collect::<String>();
@@ -124,7 +124,7 @@ impl OnlineService {
             if result.instrumental || !result.plain_lyrics.is_empty() || !result.synced_lyrics.is_empty() || self.read_cache::<LyricsResult>("lyrics", &key, 30 * 60).is_some() { permission.check()?; return Ok(result); }
         }
         let result = guarded_lyrics(&permission, title.trim(), artist.trim(), album.trim(), duration as f64, allow_youtube,
-            net::get, |t,a,d| crate::youtube::fetch_captions(t,a,d,&permission))?;
+            net::get, |t,a,d| crate::youtube::fetch_captions(t,a,d,preferred_lang,&permission))?;
         permission.check()?;let _ = self.write_cache("lyrics", &key, &result);
         Ok(result)
     }
@@ -481,13 +481,13 @@ mod tests {
         let service=OnlineService::new(root);let consent=crate::lyrics_gate::LyricsConsent::default();consent.set(true,true);
         let old=consent.snapshot();consent.set(false,true);consent.set(true,true);
         // This must stop before cache access or any network; even identical metadata cannot revive an old token.
-        assert!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,old).is_err());
-        let permission=consent.snapshot();let raw=serde_json::to_string(&("consent-v3",permission.revision(),"Song","Artist","Album",200u64,true)).unwrap();
+        assert!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,old,"orig").is_err());
+        let permission=consent.snapshot();let raw=serde_json::to_string(&("consent-v3",permission.revision(),"Song","Artist","Album",200u64,true,"orig")).unwrap();
         let mut hash=crate::update::crypto::Sha256::new();hash.update(raw.as_bytes());let key=hash.finish().iter().map(|b|format!("{b:02x}")).collect::<String>();
         service.write_cache("lyrics",&key,&LyricsResult{plain_lyrics:"synthetic cache".into(),..Default::default()}).unwrap();
-        assert_eq!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,permission.clone()).unwrap().plain_lyrics,"synthetic cache");
+        assert_eq!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,permission.clone(),"orig").unwrap().plain_lyrics,"synthetic cache");
         consent.set(false,true);
-        assert!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,permission).is_err());
+        assert!(service.lyrics_lookup("Song","Artist","Album",200.,true,false,permission,"orig").is_err());
     }
 
     #[test]

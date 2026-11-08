@@ -109,6 +109,9 @@ impl Shell {
         self.spotify_play_button(p,gx+slots[3].0,trans_y-3.,slots[3].1,self.track.playing,self.track.can_toggle);
         self.transport_btn(p,"⏭",gx+slots[4].0,trans_y,slots[4].1,34.,Action::Next,false,self.track.can_next);
         self.transport_btn(p,"REPEAT",gx+slots[5].0,trans_y,slots[5].1,34.,Action::CycleRepeat,self.track.repeat_mode>0,true);
+        if self.cc_menu_open && self.track_is_youtube && self.track.playing {
+            self.draw_cc_lang_dropdown(p, trans_y);
+        }
     }}
 
     pub(super) fn draw_media_source(&mut self,p:&mut Painter){unsafe{
@@ -176,6 +179,49 @@ impl Shell {
         }
     }
 
+    pub(super) fn draw_cc_lang_dropdown(&mut self, p: &mut Painter, trans_y: f32) { unsafe {
+        let dw = 52.0;
+        let dh = 86.0;
+        let dx = 16.0;
+        let dy = (trans_y - dh - 6.0).max(38.0);
+        // Dark popover background with subtle shadow border
+        p.fill(dx, dy, dw, dh, 8.0, 0x16161c);
+        p.stroke(dx, dy, dw, dh, 8.0, 0x2e2e3a, 1.0);
+
+        let items = [
+            ("id", "ID"),
+            ("en", "EN"),
+            ("orig", "🌐"),
+        ];
+
+        for (idx, (code, label)) in items.iter().enumerate() {
+            let iy = dy + 5.0 + idx as f32 * 26.0;
+            let ix = dx + 5.0;
+            let iw = dw - 10.0;
+            let ih = 24.0;
+            let active = self.settings.youtube_caption_lang == *code;
+            let hovered = self.pointer.is_some_and(|(px, py)| px >= ix && px <= ix + iw && py >= iy && py <= iy + ih);
+
+            if active {
+                p.fill(ix, iy, iw, ih, 5.0, 0x282836);
+                p.stroke(ix, iy, iw, ih, 5.0, self.palette.accent, 1.0);
+            } else if hovered {
+                p.fill(ix, iy, iw, ih, 5.0, 0x20202a);
+            }
+
+            let text_color = if active { self.palette.accent } else if hovered { 0xffffff } else { 0xc5cedd };
+            let sz = if *label == "🌐" { 13.0 } else { 11.0 };
+            p.text_centered(label, ix, iy, iw, ih, sz, text_color, 1.0, true);
+
+            if self.hit_enabled {
+                self.hits.push(Hit {
+                    rect: render::rect(ix, iy, iw, ih),
+                    action: Action::SelectCcLang(code.to_string()),
+                });
+            }
+        }
+    }}
+
     /// Stage 2 lyric mode (mockup stage2-musik, tabel spesifikasi "Mode lirik"): panel
     /// melebar 460->620, kolom kiri 40% detail lagu + scrubber + transport rapat (30/38 px,
     /// mic ikut alur), pemisah 1 px, kolom kanan 60% lembar lirik setinggi +-5 baris 28 px
@@ -239,6 +285,9 @@ impl Shell {
         self.spotify_play_button(p,gx+slots[3].0,trans_y-4.,slots[3].1,self.track.playing,self.track.can_toggle);
         self.transport_btn(p,"⏭",gx+slots[4].0,trans_y,slots[4].1,30.,Action::Next,false,self.track.can_next);
         self.transport_btn(p,"REPEAT",gx+slots[5].0,trans_y,slots[5].1,30.,Action::CycleRepeat,self.track.repeat_mode>0,true);
+        if self.cc_menu_open && self.track_is_youtube && self.track.playing {
+            self.draw_cc_lang_dropdown(p, trans_y);
+        }
 
         // Pemisah vertikal 1px (mockup .pdiv #3a4350)
         p.fill_alpha(left_w,44.,1.,132.,0.,0xffffff,0.14);
@@ -1003,7 +1052,8 @@ impl Shell {
         if self.settings.quiet_mode&&!preset_host::quiet_action_allowed(&action){self.invalidate();return;}
         if matches!(action,Action::Tab(..)|Action::Settings|Action::Back|Action::NoteAdd|Action::NoteSelect(..)|Action::NoteExport(..)|Action::NotePopout|Action::Exit)&&!self.flush_editors_barrier(){return;}
         if !matches!(&action,Action::MediaSourceMenu|Action::SelectMediaSource(..)){self.media_source_open=false;}
-        let transient=matches!(&action,Action::MediaSourceMenu|Action::SelectMediaSource(..)|Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings|Action::ToggleStorageDropdown|Action::KeepStorageDropdown|Action::CycleStoragePage|Action::PromptDownloadPowerProvider|Action::ConfirmDownloadPowerProvider|Action::CancelDownloadPowerProvider|Action::QuickControlsOpen|Action::QuickControlsBack|Action::QuickControlsToggleRadio(..)|Action::QuickControlsSelectRadio(..)|Action::QuickControlsSelectDisplay(..)|Action::QuickControlsSetBrightness(..)|Action::QuickBrightnessPointer|Action::OpenSettingsPage(..));
+        if !matches!(&action,Action::SelectCcLang(..)){self.cc_menu_open=false;}
+        let transient=matches!(&action,Action::MediaSourceMenu|Action::SelectMediaSource(..)|Action::SelectCcLang(..)|Action::VolumeStep(..)|Action::BackModsList|Action::SettingsCategory(..)|Action::SettingsMenu(..)|Action::Settings|Action::Back|Action::Tab(..)|Action::ReminderMenu(..)|Action::ReminderSelect(..)|Action::ReminderStep(..)|Action::WeatherRefresh|Action::WeatherToggleMenu|Action::WeatherToggleCustom|Action::PrivacyDetail|Action::PrivacyClose|Action::OpenWindowsMicSettings|Action::OpenWindowsCameraSettings|Action::OpenPrivacySettings|Action::ClosePrivacySettings|Action::ToggleStorageDropdown|Action::KeepStorageDropdown|Action::CycleStoragePage|Action::PromptDownloadPowerProvider|Action::ConfirmDownloadPowerProvider|Action::CancelDownloadPowerProvider|Action::QuickControlsOpen|Action::QuickControlsBack|Action::QuickControlsToggleRadio(..)|Action::QuickControlsSelectRadio(..)|Action::QuickControlsSelectDisplay(..)|Action::QuickControlsSetBrightness(..)|Action::QuickBrightnessPointer|Action::OpenSettingsPage(..));
         match action{
             Action::ActivityExpired=>return,
             Action::QuickControlsOpen => {
@@ -1097,6 +1147,23 @@ impl Shell {
                         self.track.can_toggle=false;self.track.can_next=false;self.track.can_previous=false;self.track.can_seek=false;
                     },Err(error)=>self.notice(error),
                 }}
+            },
+            Action::SelectCcLang(lang)=>{
+                self.cc_menu_open = false;
+                if self.settings.youtube_caption_lang != lang {
+                    self.settings.youtube_caption_lang = lang;
+                    self.save();
+                    self.cancel_job("Musik");
+                    self.lyrics_key.clear();
+                    self.lyrics_data = None;
+                    self.lyrics.clear();
+                    self.plain_lyrics.clear();
+                    self.lyric_offset = 0;
+                    self.lyrics_error = None;
+                    self.lyrics_retry = Default::default();
+                    self.request_lyrics(true);
+                }
+                self.invalidate();
             },
 
             Action::VolumeStep(step)=>self.action(Action::MasterVolumeStep(step)),
