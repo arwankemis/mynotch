@@ -478,7 +478,8 @@ privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_con
     // save attempt, so the hold cannot be missed either.
     let held = app.store.held_files();
     if !held.is_empty() {
-        app.notice(format!("Data gagal dibaca ({}); data asli dipertahankan sebagai recovery dan penyimpanan ditahan sampai dipulihkan.", held.join(", ")));
+        let en=app.settings.language=="en";
+        app.notice(if en{format!("Data could not be read ({}); the original data was kept for recovery and saving is paused until restored.",held.join(", "))}else{format!("Data gagal dibaca ({}); data asli dipertahankan sebagai recovery dan penyimpanan ditahan sampai dipulihkan.",held.join(", "))});
     }
     crate::system::set_volume_osd_hidden(true);
     crate::clipboard::listen_clipboard(hwnd);
@@ -888,7 +889,7 @@ impl Shell {
         let settings_saved=self.store.save("settings.json",&self.settings).is_ok();
         let state_saved=self.store.save("state.json",&self.state).is_ok();
         self.preset_host.settings_unsaved=!settings_saved;self.editors.unsaved=!state_saved;
-        if self.editors.unsaved||self.preset_host.settings_unsaved{self.notice("Belum tersimpan — coba simpan lagi");}
+        if self.editors.unsaved||self.preset_host.settings_unsaved{self.notice(crate::i18n::t("notice.save_hold",&self.settings.language));}
     }
     fn notice(&mut self,text:impl Into<String>){
         let msg=text.into();
@@ -2296,7 +2297,7 @@ impl Shell {
                 },
                 _=>{}
             }return LRESULT(0)},
-            WM_KEYDOWN=>{if self.quick_controls_open && self.quick_controls.handle_key(wparam.0 as u16){self.invalidate();return LRESULT(0)}if self.quick_controls_open && wparam.0 == 0x1B{self.action(Action::QuickControlsBack);return LRESULT(0)}if self.handle_media_source_key(wparam.0 as u16){return LRESULT(0)}if self.handle_settings_key(wparam.0 as u16){return LRESULT(0)}if self.reminder_menu.is_some()&&self.handle_reminder_menu_key(wparam.0 as u16){return LRESULT(0)}match wparam.0 as u16{
+            WM_KEYDOWN=>{if self.quick_controls_open && self.quick_controls.handle_key(wparam.0 as u16, &self.settings.language){self.layout();self.invalidate();return LRESULT(0)}if self.quick_controls_open && wparam.0 == 0x1B{self.action(Action::QuickControlsBack);return LRESULT(0)}if self.handle_media_source_key(wparam.0 as u16){return LRESULT(0)}if self.handle_settings_key(wparam.0 as u16){return LRESULT(0)}if self.reminder_menu.is_some()&&self.handle_reminder_menu_key(wparam.0 as u16){return LRESULT(0)}match wparam.0 as u16{
                 0x26|0x28 if self.tab=="Catatan"&&self.notes_host.tasks&&!self.settings_open&&!self.settings.quiet_mode=>{
                     self.refresh_notes_host();let current=self.notes_host.selected.and_then(|id|self.state.todos.iter().position(|t|t.id==id)).unwrap_or(0);
                     let next=if wparam.0==0x26{current.saturating_sub(1)}else{(current+1).min(self.state.todos.len().saturating_sub(1))};
@@ -3720,7 +3721,21 @@ impl Shell {
     }}
     fn active_lyric(&self)->Option<String>{let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);self.lyrics.iter().rev().find(|line|line.at<=position).map(|line|line.text.clone())}
     fn tray(&self,add:bool){unsafe{use windows::Win32::UI::Shell::*;let mut data=NOTIFYICONDATAW{cbSize:std::mem::size_of::<NOTIFYICONDATAW>()as u32,hWnd:self.hwnd,uID:1,uFlags:NIF_MESSAGE|NIF_ICON|NIF_TIP,uCallbackMessage:TRAY,hIcon:LoadIconW(None,IDI_APPLICATION).unwrap_or_default(),..Default::default()};let text:Vec<u16>=app_title().encode_utf16().take(data.szTip.len()-1).collect();data.szTip[..text.len()].copy_from_slice(&text);let _=Shell_NotifyIconW(if add{NIM_ADD}else{NIM_DELETE},&data);}}
-    fn menu(&self){unsafe{if let Ok(menu)=CreatePopupMenu(){let _=AppendMenuW(menu,MF_STRING,900,w!("Buka / tutup notch"));let _=AppendMenuW(menu,MF_STRING,901,w!("Pengaturan"));let _=AppendMenuW(menu,MF_STRING,902,w!("Posisi atas"));let _=AppendMenuW(menu,MF_STRING,903,w!("Posisi bawah"));let _=AppendMenuW(menu,MF_SEPARATOR,0,PCWSTR::null());let _=AppendMenuW(menu,MF_STRING,999,w!("Keluar"));let mut cursor=POINT::default();let _=GetCursorPos(&mut cursor);let _=TrackPopupMenu(menu,TPM_RIGHTBUTTON,cursor.x,cursor.y,None,self.hwnd,None);let _=DestroyMenu(menu);}}}
+    fn menu(&self){unsafe{
+        let l=|key:&str|{let s=crate::i18n::t(key,&self.settings.language);let w:Vec<u16>=s.encode_utf16().chain([0]).collect();w};
+        if let Ok(menu)=CreatePopupMenu(){
+            let _=AppendMenuW(menu,MF_STRING,900,PCWSTR(l("tray.toggle").as_ptr()));
+            let _=AppendMenuW(menu,MF_STRING,901,PCWSTR(l("tray.settings").as_ptr()));
+            let _=AppendMenuW(menu,MF_STRING,902,PCWSTR(l("tray.top").as_ptr()));
+            let _=AppendMenuW(menu,MF_STRING,903,PCWSTR(l("tray.bottom").as_ptr()));
+            let _=AppendMenuW(menu,MF_SEPARATOR,0,PCWSTR::null());
+            let _=AppendMenuW(menu,MF_STRING,999,PCWSTR(l("tray.exit").as_ptr()));
+            let mut cursor=POINT::default();
+            let _=GetCursorPos(&mut cursor);
+            let _=TrackPopupMenu(menu,TPM_RIGHTBUTTON,cursor.x,cursor.y,None,self.hwnd,None);
+            let _=DestroyMenu(menu);
+        }
+    }}
 }
 impl Drop for Shell{fn drop(&mut self){if let Ok(mut q)=self.queue.lock(){q.close();}self.flush_note_edits();crate::clipboard::unlisten_clipboard(self.hwnd);self.cancel_jobs();self.tray(false);crate::system::set_volume_osd_hidden(false);if let Some(mut m)=self.media.take(){m.stop();}if let Some(mut v)=self.visualizer.take(){v.stop();}if let Some(mut p_mon)=self.privacy_monitor.take(){p_mon.stop();}unsafe{let h_val = HOOK_HANDLE.swap(0, Ordering::Relaxed); if h_val != 0 { let _ = UnhookWindowsHookEx(HHOOK(h_val as *mut _)); } HOOK_HWND.store(0, Ordering::Relaxed);for id in 1..=16{let _=KillTimer(Some(self.hwnd),id);}if self.morph_timer!=0{let _=timeKillEvent(self.morph_timer);}let _=UnregisterHotKey(Some(self.hwnd),1);let _=DestroyWindow(self.inputs_hwnd);if let Ok(tray)=FindWindowW(w!("Shell_TrayWnd"),None){let _=ShowWindow(tray,SW_SHOW);}if let Ok(sec_tray)=FindWindowW(w!("Shell_SecondaryTrayWnd"),None){let _=ShowWindow(sec_tray,SW_SHOW);}}self.save();}}
 fn time_label(seconds:f64)->String{let secs=seconds.max(0.)as u64;format!("{:02}:{:02}",secs/60,secs%60)}

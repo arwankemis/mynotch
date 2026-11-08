@@ -122,10 +122,8 @@ unsafe extern "system" fn sticky_wndproc(
                 let ptr=GetWindowLongPtrW(hwnd,GWLP_USERDATA) as *mut FloatBinding;
                 if !ptr.is_null(){
                     let context=&*ptr;
-                    match context.source.borrow_mut().capture_close(context.lease){
-                        Ok(()) => {let _=PostMessageW(Some(context.shell),NOTE_SAVED,WPARAM(0),LPARAM(0));}
-                        Err(error) => {eprintln!("Gagal membaca catatan pop-out ({}); jendela tetap ditutup.",error.message());}
-                    }
+                    if context.source.borrow_mut().capture_close(context.lease).is_err(){return LRESULT(0);}
+                    let _=PostMessageW(Some(context.shell),NOTE_SAVED,WPARAM(0),LPARAM(0));
                 }
                 let _=DestroyWindow(hwnd);LRESULT(0)
             }
@@ -163,7 +161,7 @@ fn clamp_to_work_area(x: i32, y: i32, w: i32, h: i32) -> (i32, i32) {
     }
 }
 
-pub fn spawn_owned_note(note:&crate::sticky::StickyNote,lease:Lease,source:Rc<RefCell<NativeSnapshots>>,shell:HWND)->Result<HWND,EditorError>{
+pub fn spawn_owned_note(note:&crate::sticky::StickyNote,lease:Lease,source:Rc<RefCell<NativeSnapshots>>,shell:HWND,lang:&str)->Result<HWND,EditorError>{
     let (note_id,title,content,color_idx)=(note.id,note.title.as_str(),note.content.as_str(),note.color_idx);
     unsafe {
         let instance = match GetModuleHandleW(None) {
@@ -188,7 +186,8 @@ pub fn spawn_owned_note(note:&crate::sticky::StickyNote,lease:Lease,source:Rc<Re
             }
         }
 
-        let title_w: Vec<u16> = format!("📌 {}", if title.trim().is_empty() { "Catatan Sticky" } else { title })
+        let empty_title = crate::i18n::t("notes.window_title", lang);
+        let title_w: Vec<u16> = format!("📌 {}", if title.trim().is_empty() { empty_title } else { title })
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();

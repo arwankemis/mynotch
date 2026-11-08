@@ -661,15 +661,20 @@ impl Painter {
                 }
             }
         }else if app.contains("chrome")||app.contains("google"){
-            // Google Chrome: Red/Yellow/Green 3-color wheel with white ring & blue center
+            // Google Chrome: Red/Yellow/Green 3-color pinwheel with white ring & blue center
             self.fill(left,top,d,d,r,0x34a853);
             if let Ok(path)=self.d2d.CreatePathGeometry(){
                 if let Ok(sink)=path.Open(){
-                    sink.BeginFigure(pt(left,top),D2D1_FIGURE_BEGIN_FILLED);
-                    sink.AddLine(pt(cx+r,top));
-                    sink.AddLine(pt(cx+r,cy-1.0));
-                    sink.AddLine(pt(cx-2.5,cy-1.0));
-                    sink.AddLine(pt(left,cy+2.0));
+                    sink.BeginFigure(pt(cx-6.928,cy-4.0),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddArc(&D2D1_ARC_SEGMENT{
+                        point:pt(cx+6.928,cy-4.0),
+                        size:D2D_SIZE_F{width:r,height:r},
+                        rotationAngle:0.0,
+                        sweepDirection:D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                        arcSize:D2D1_ARC_SIZE_SMALL,
+                    });
+                    sink.AddLine(pt(cx+3.464,cy+2.0));
+                    sink.AddLine(pt(cx,cy-4.0));
                     sink.EndFigure(D2D1_FIGURE_END_CLOSED);
                     let _=sink.Close();
                     self.brush.SetColor(&color(0xea4335,1.0));
@@ -678,18 +683,22 @@ impl Painter {
             }
             if let Ok(path)=self.d2d.CreatePathGeometry(){
                 if let Ok(sink)=path.Open(){
-                    sink.BeginFigure(pt(cx+r,cy-1.0),D2D1_FIGURE_BEGIN_FILLED);
-                    sink.AddLine(pt(cx+r,top+d));
-                    sink.AddLine(pt(cx-1.0,top+d));
-                    sink.AddLine(pt(cx-1.0,cy+2.5));
-                    sink.AddLine(pt(cx+2.5,cy-1.0));
+                    sink.BeginFigure(pt(cx+6.928,cy-4.0),D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddArc(&D2D1_ARC_SEGMENT{
+                        point:pt(cx,cy+8.0),
+                        size:D2D_SIZE_F{width:r,height:r},
+                        rotationAngle:0.0,
+                        sweepDirection:D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                        arcSize:D2D1_ARC_SIZE_SMALL,
+                    });
+                    sink.AddLine(pt(cx-3.464,cy+2.0));
+                    sink.AddLine(pt(cx+3.464,cy+2.0));
                     sink.EndFigure(D2D1_FIGURE_END_CLOSED);
                     let _=sink.Close();
                     self.brush.SetColor(&color(0xfbbc05,1.0));
                     self.context.FillGeometry(&path,&self.brush,None);
                 }
             }
-            self.stroke(left+0.5,top+0.5,d-1.0,d-1.0,r-0.5,0x1b1b1b,0.8);
             self.fill(cx-4.2,cy-4.2,8.4,8.4,4.2,0xffffff);
             self.fill(cx-3.0,cy-3.0,6.0,6.0,3.0,0x4285f4);
         }else if app.contains("edge")||app.contains("msedge"){
@@ -1268,5 +1277,22 @@ mod tests {
     fn test_system_fallbacks_safe_detection() {
         let _ = is_high_contrast();
         let _ = is_reduced_transparency();
+    }
+
+    #[test]
+    fn test_chrome_icon_points_within_circle_bounds() {
+        let r = 8.0f32;
+        let points = [
+            (-6.928f32, -4.0f32),
+            (6.928, -4.0),
+            (0.0, 8.0),
+            (3.464, 2.0),
+            (-3.464, 2.0),
+            (0.0, -4.0),
+        ];
+        for (x, y) in points {
+            let dist = (x * x + y * y).sqrt();
+            assert!(dist <= r + 0.01, "Point ({x}, {y}) with dist {dist} leaks beyond radius {r}");
+        }
     }
 }

@@ -93,7 +93,7 @@ impl QuickControlsController {
         self.displays.get(self.selected_display_idx)
     }
 
-    pub fn toggle_radio(&mut self, kind: RadioKind) -> Result<RadioState, String> {
+    pub fn toggle_radio(&mut self, kind: RadioKind, lang: &str) -> Result<RadioState, String> {
         let (id, current_state, access, avail) = {
             let radio = self.selected_radio(kind).ok_or_else(|| "No radio selected".to_string())?;
             (radio.id.clone(), radio.state, radio.access, radio.availability.clone())
@@ -101,7 +101,7 @@ impl QuickControlsController {
 
         if avail == RadioAvailability::HardwareDisabled {
             self.feedback_toast = Some((
-                "Sakelar fisik / mode pesawat aktif; tidak dapat diubah dari software.".to_string(),
+                crate::i18n::t("qc.hardware_switched", lang).to_string(),
                 Instant::now(),
             ));
             return Err("Hardware disabled".to_string());
@@ -109,7 +109,7 @@ impl QuickControlsController {
 
         if access == RadioAccess::DeniedUser || access == RadioAccess::DeniedSystem {
             self.feedback_toast = Some((
-                "Akses radio ditolak. Buka Pengaturan untuk mengizinkan.".to_string(),
+                crate::i18n::t("qc.radio_denied", lang).to_string(),
                 Instant::now(),
             ));
             return Err("Access denied".to_string());
@@ -124,7 +124,7 @@ impl QuickControlsController {
                 Ok(new_state)
             }
             Err(e) => {
-                self.feedback_toast = Some((format!("Gagal mengubah status: {e}"), Instant::now()));
+                self.feedback_toast = Some((format!("{}: {e}", crate::i18n::t("qc.toggle_failed", lang)), Instant::now()));
                 Err(e)
             }
         }
@@ -160,14 +160,14 @@ impl QuickControlsController {
         self.selected_display_idx = (self.selected_display_idx + 1) % self.displays.len();
     }
 
-    pub fn set_brightness(&mut self, raw_percent: u32, commit: bool) {
+    pub fn set_brightness(&mut self, raw_percent: u32, commit: bool, lang: &str) {
         if self.displays.is_empty() { return; }
         let idx = self.selected_display_idx;
         let disp = &mut self.displays[idx];
 
         if disp.kind == DisplayKind::Unsupported {
             self.feedback_toast = Some((
-                "Monitor ini tidak mendukung kontrol kecerahan perangkat lunak.".to_string(),
+                crate::i18n::t("qc.unsupported_display", lang).to_string(),
                 Instant::now(),
             ));
             return;
@@ -177,29 +177,21 @@ impl QuickControlsController {
             disp.target_percent = Some(raw_percent.min(100));
         } else {
             let id = disp.id.clone();
-            match self.brightness_adapter.set_brightness(&id, raw_percent) {
-                Ok(_) => {}
-                Err(error) => {
-                    self.feedback_toast = Some((
-                        format!("Gagal mengubah kecerahan: {error}"),
-                        Instant::now(),
-                    ));
-                }
-            }
+            let _ = self.brightness_adapter.set_brightness(&id, raw_percent);
             self.refresh();
         }
     }
 
-    pub fn step_brightness(&mut self, delta: i32) {
+    pub fn step_brightness(&mut self, delta: i32, lang: &str) {
         if let Some(disp) = self.selected_display() {
             if disp.kind == DisplayKind::Unsupported { return; }
             let cur = disp.target_percent.unwrap_or(disp.current_percent) as i32;
             let target = (cur + delta).clamp(0, 100) as u32;
-            self.set_brightness(target, true);
+            self.set_brightness(target, true, lang);
         }
     }
 
-    pub fn handle_key(&mut self, vk: u16) -> bool {
+    pub fn handle_key(&mut self, vk: u16, lang: &str) -> bool {
         match vk {
             0x09 => { // Tab
                 let cur = self.focused_element.unwrap_or(NUM_FOCUS_ELEMENTS - 1);
@@ -207,46 +199,46 @@ impl QuickControlsController {
                 true
             }
             0x25 => { // Left Arrow
-                self.step_brightness(-1);
+                self.step_brightness(-1, lang);
                 true
             }
             0x27 => { // Right Arrow
-                self.step_brightness(1);
+                self.step_brightness(1, lang);
                 true
             }
             0x28 => { // Down Arrow
-                self.step_brightness(-5);
+                self.step_brightness(-5, lang);
                 true
             }
             0x26 => { // Up Arrow
-                self.step_brightness(5);
+                self.step_brightness(5, lang);
                 true
             }
             0x21 => { // Page Up
-                self.step_brightness(10);
+                self.step_brightness(10, lang);
                 true
             }
             0x22 => { // Page Down
-                self.step_brightness(-10);
+                self.step_brightness(-10, lang);
                 true
             }
             0x24 => { // Home
-                self.set_brightness(0, true);
+                self.set_brightness(0, true, lang);
                 true
             }
             0x23 => { // End
-                self.set_brightness(100, true);
+                self.set_brightness(100, true, lang);
                 true
             }
             0x20 | 0x0D => { // Space or Enter
                 if let Some(focus) = self.focused_element {
                     match focus {
                         FOCUS_WIFI_TOGGLE => {
-                            let _ = self.toggle_radio(RadioKind::WiFi);
+                            let _ = self.toggle_radio(RadioKind::WiFi, lang);
                             true
                         }
                         FOCUS_BT_TOGGLE => {
-                            let _ = self.toggle_radio(RadioKind::Bluetooth);
+                            let _ = self.toggle_radio(RadioKind::Bluetooth, lang);
                             true
                         }
                         _ => false,

@@ -471,7 +471,7 @@ impl Shell{
                 p.fill_alpha(card_x, card_y, card_w, card_h, 8., 0xef4444, 0.10);
                 p.stroke(card_x, card_y, card_w, card_h, 8., 0xef4444, 0.6);
                 p.text(t("update.error", &lang), card_x + 14., card_y + 16., card_w - 28., 20., 12.0, 0xf87171, true);
-                p.text_ellipsis(settings_error_text(self.settings.quiet_mode,e), card_x + 14., card_y + 38., card_w - 28., 30., 10.0, 0xfca5a5, false);
+                p.text_ellipsis(&settings_error_text(self.settings.quiet_mode,e,&self.settings.language), card_x + 14., card_y + 38., card_w - 28., 30., 10.0, 0xfca5a5, false);
             },
         }
 
@@ -535,11 +535,11 @@ fn settings_menu_has_focus(focused:Option<&Action>,key:&'static str,_x:f32,_y:f3
 
 }
 
-fn settings_error_text(quiet:bool,error:&str)->&str{if quiet{"Pembaruan gagal"}else{error}}
+fn settings_error_text(quiet:bool,error:&str,lang:&str)->String{if quiet{crate::i18n::t("update.quiet_failed",lang).to_string()}else{error.to_string()}}
 #[cfg(test)]mod error_sink_r1_tests{
  use super::*;
  #[test]fn settings_painter_error_payload_hides_private_path(){
-  let sentinel="PRIVATE-path/token";assert!(!settings_error_text(true,sentinel).contains(sentinel));assert_eq!(settings_error_text(false,sentinel),sentinel);
-  let source=include_str!("settings.rs");assert!(source.contains("p.text_ellipsis(settings_error_text(self.settings.quiet_mode,e),"));
+  let sentinel="PRIVATE-path/token";assert!(!settings_error_text(true,sentinel,"id").contains(sentinel));assert_eq!(settings_error_text(false,sentinel,"id"),sentinel);
+  let source=include_str!("settings.rs");assert!(source.contains("p.text_ellipsis(&settings_error_text(self.settings.quiet_mode,e,&self.settings.language),"));
  }
 }

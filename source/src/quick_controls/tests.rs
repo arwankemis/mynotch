@@ -50,13 +50,13 @@ fn test_radio_state_machine_transitions() {
     assert_eq!(ctrl.selected_radio(RadioKind::WiFi).unwrap().state, RadioState::On);
 
     // Toggle On -> Off
-    let res = ctrl.toggle_radio(RadioKind::WiFi);
+    let res = ctrl.toggle_radio(RadioKind::WiFi, "en");
     assert_eq!(res, Ok(RadioState::Off));
     assert_eq!(ctrl.selected_radio(RadioKind::WiFi).unwrap().state, RadioState::Off);
     assert!(ctrl.selected_radio(RadioKind::WiFi).unwrap().status_text.contains("Mati"));
 
     // Toggle Off -> On
-    let res = ctrl.toggle_radio(RadioKind::WiFi);
+    let res = ctrl.toggle_radio(RadioKind::WiFi, "en");
     assert_eq!(res, Ok(RadioState::On));
     assert_eq!(ctrl.selected_radio(RadioKind::WiFi).unwrap().state, RadioState::On);
     assert!(ctrl.selected_radio(RadioKind::WiFi).unwrap().status_text.contains("Aktif"));
@@ -67,9 +67,9 @@ fn test_radio_state_machine_hardware_disabled() {
     let adapter = Box::new(MockRadioAdapter::new_with_scenario(6));
     let mut ctrl = QuickControlsController::new(adapter, Box::new(MockBrightnessAdapter::new_default()));
 
-    let res = ctrl.toggle_radio(RadioKind::WiFi);
+    let res = ctrl.toggle_radio(RadioKind::WiFi, "en");
     assert!(res.is_err());
-    assert!(ctrl.feedback_toast.as_ref().unwrap().0.contains("Sakelar fisik"));
+    assert!(ctrl.feedback_toast.as_ref().unwrap().0.contains("Hardware switch"));
 }
 
 #[test]
@@ -77,9 +77,9 @@ fn test_radio_state_machine_access_denied() {
     let adapter = Box::new(MockRadioAdapter::new_with_scenario(5));
     let mut ctrl = QuickControlsController::new(adapter, Box::new(MockBrightnessAdapter::new_default()));
 
-    let res = ctrl.toggle_radio(RadioKind::WiFi);
+    let res = ctrl.toggle_radio(RadioKind::WiFi, "en");
     assert!(res.is_err());
-    assert!(ctrl.feedback_toast.as_ref().unwrap().0.contains("Akses radio ditolak"));
+    assert!(ctrl.feedback_toast.as_ref().unwrap().0.contains("Radio access denied"));
 }
 
 #[test]
@@ -104,17 +104,17 @@ fn test_brightness_slider_target_vs_commit() {
     assert_eq!(ctrl.selected_display().unwrap().target_percent, None);
 
     // Intermediate drag to 82% (uncommitted)
-    ctrl.set_brightness(82, false);
+    ctrl.set_brightness(82, false, "en");
     assert_eq!(ctrl.selected_display().unwrap().current_percent, 75);
     assert_eq!(ctrl.selected_display().unwrap().target_percent, Some(82));
 
     // Release mouse at 82% (commit=true): snaps to 75% because levels are [0, 10, 25, 50, 75, 100]
-    ctrl.set_brightness(82, true);
+    ctrl.set_brightness(82, true, "en");
     assert_eq!(ctrl.selected_display().unwrap().current_percent, 75);
     assert_eq!(ctrl.selected_display().unwrap().target_percent, None);
 
     // Drag to 90% and commit: snaps to 100%
-    ctrl.set_brightness(90, true);
+    ctrl.set_brightness(90, true, "en");
     assert_eq!(ctrl.selected_display().unwrap().current_percent, 100);
 }
 
@@ -124,8 +124,8 @@ fn test_unsupported_display_safety() {
     ctrl.select_display(2); // Layar 3 Unsupported
     assert_eq!(ctrl.selected_display().unwrap().kind, DisplayKind::Unsupported);
 
-    ctrl.set_brightness(80, true);
-    assert!(ctrl.feedback_toast.as_ref().unwrap().0.contains("tidak mendukung kontrol kecerahan"));
+    ctrl.set_brightness(80, true, "en");
+    assert!(ctrl.feedback_toast.as_ref().unwrap().0.contains("does not support software brightness"));
 }
 
 #[test]
@@ -155,23 +155,23 @@ fn test_keyboard_navigation() {
     assert_eq!(ctrl.focused_element, None);
 
     // Tab through focus elements
-    assert!(ctrl.handle_key(0x09));
+    assert!(ctrl.handle_key(0x09, "en"));
     assert_eq!(ctrl.focused_element, Some(0));
 
-    assert!(ctrl.handle_key(0x09));
+    assert!(ctrl.handle_key(0x09, "en"));
     assert_eq!(ctrl.focused_element, Some(1));
 
     // Arrow keys for brightness
     let _initial = ctrl.selected_display().unwrap().current_percent;
-    assert!(ctrl.handle_key(0x27)); // Right Arrow (+1%) -> 76% snaps to 75%
+    assert!(ctrl.handle_key(0x27, "en")); // Right Arrow (+1%) -> 76% snaps to 75%
     assert_eq!(ctrl.selected_display().unwrap().current_percent, 75);
 
-    assert!(ctrl.handle_key(0x26)); // Up Arrow (+5%) -> 80% snaps to 75%
-    assert!(ctrl.handle_key(0x21)); // Page Up (+10%) -> 85% snaps to 75%
-    assert!(ctrl.handle_key(0x23)); // End (100%)
+    assert!(ctrl.handle_key(0x26, "en")); // Up Arrow (+5%) -> 80% snaps to 75%
+    assert!(ctrl.handle_key(0x21, "en")); // Page Up (+10%) -> 85% snaps to 75%
+    assert!(ctrl.handle_key(0x23, "en")); // End (100%)
     assert_eq!(ctrl.selected_display().unwrap().current_percent, 100);
 
-    assert!(ctrl.handle_key(0x24)); // Home (0%)
+    assert!(ctrl.handle_key(0x24, "en")); // Home (0%)
     assert_eq!(ctrl.selected_display().unwrap().current_percent, 0);
 }
 

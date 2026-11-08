@@ -49,7 +49,7 @@ impl Shell {
             CreateResult::Created(todo)|CreateResult::Existing(todo)=>{self.editors.unsaved=false;self.show_todo(todo);},
             CreateResult::SaveFailed(_)|CreateResult::SourceSaveFailed=>{self.editors.unsaved=true;self.invalidate();},
             CreateResult::Empty=>{self.editors.unsaved=false;self.activity_feedback(if self.settings.language=="en"{"The note is empty"}else{"Catatan kosong"}.into(),4000);},
-            _=>{self.editors.unsaved=true;self.activity_feedback("Tindakan ditahan; catatan tidak tersedia".into(),5000);},
+            _=>{self.editors.unsaved=true;self.activity_feedback(crate::i18n::t("notice.note_action_held",&self.settings.language).into(),5000);},
         }
     }
     pub(super) fn select_note_id(&mut self,id:u64){

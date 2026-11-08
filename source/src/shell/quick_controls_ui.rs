@@ -4,7 +4,6 @@ use crate::shell::{Action, Hit, Shell};
 impl Shell {
     pub(super) unsafe fn draw_quick_controls(&mut self, p: &mut Painter) { unsafe {
         let layout = crate::quick_controls::calculate_layout();
-        let lang = if self.settings.language == "en" { "en" } else { "id" };
         let bg_col = 0x000000;
         p.fill(0., 0., self.width, self.height, 18., bg_col);
 
@@ -13,18 +12,17 @@ impl Shell {
         let back_bg = if back_hover { 0x292930 } else { 0x1c1c23 };
         p.fill(layout.back_btn.left, layout.back_btn.top, layout.back_btn.right - layout.back_btn.left, layout.back_btn.bottom - layout.back_btn.top, 6., back_bg);
         p.outline_icon("left", layout.back_btn.left + 8., layout.back_btn.top + 6., 12., 0x9ca3af);
-        p.text("Kembali", layout.back_btn.left + 24., layout.back_btn.top + 4., 48., 16., 11., 0xf3f3f5, true);
+        p.text(crate::i18n::t("qc.back", &self.settings.language), layout.back_btn.left + 24., layout.back_btn.top + 4., 48., 16., 11., 0xf3f3f5, true);
         if self.hit_enabled {
             self.hits.push(Hit { rect: layout.back_btn, action: Action::QuickControlsBack });
         }
 
         // Title: Kontrol cepat
-        p.text("Kontrol cepat", 98., 14., 90., 18., 13.5, 0xffffff, true);
-        // This panel does not change hardware yet; say so instead of implying live control.
-        p.fill_alpha(194., 14., 52., 18., 4., 0x2a2110, 1.0);
-        p.stroke(194., 14., 52., 18., 4., 0xeab308, 1.0);
-        p.text_centered(crate::i18n::t("quick.preview_badge", lang), 194., 14., 52., 18., 8.5, 0xeab308, 1.0, true);
-        p.text_ellipsis(crate::i18n::t("quick.preview_notice", lang), 98., 32., 260., 9., 8.5, 0xeab308, false);
+        p.text(crate::i18n::t("qc.title", &self.settings.language), 98., 14., 90., 18., 13.5, 0xffffff, true);
+        // Badge: KONTROL
+        p.fill_alpha(194., 14., 52., 18., 4., 0x1c212d, 1.0);
+        p.stroke(194., 14., 52., 18., 4., 0xd8d8de, 1.0);
+        p.text_centered(crate::i18n::t("qc.badge", &self.settings.language), 194., 14., 52., 18., 9.5, 0xd8d8de, 1.0, true);
 
         // Header right controls: Pin, Chevron up (Fold to Stage 1), Settings
         let y_hdr = 10.;
@@ -41,7 +39,7 @@ impl Shell {
         let (wifi_on, wifi_avail, wifi_name, wifi_status, wifi_sub) = if let Some(r) = self.quick_controls.selected_radio(crate::quick_controls::RadioKind::WiFi) {
             (r.state == crate::quick_controls::RadioState::On, r.availability.clone(), r.name.clone(), r.status_text.clone(), r.sub_status_text.clone())
         } else {
-            (false, crate::quick_controls::RadioAvailability::Absent, "Wi-Fi".to_string(), crate::i18n::t("quick.no_wifi", lang).to_string(), "".to_string())
+            (false, crate::quick_controls::RadioAvailability::Absent, "Wi-Fi".to_string(), crate::i18n::t("qc.no_wifi", &self.settings.language).to_string(), "".to_string())
         };
 
         // Icon badge
@@ -54,7 +52,7 @@ impl Shell {
         if self.quick_controls.radios_of_kind(crate::quick_controls::RadioKind::WiFi).len() > 1 {
             p.fill(58., 66., 180., 16., 4., 0x181b22);
             p.stroke(58., 66., 180., 16., 4., 0x2b2e3a, 1.0);
-            p.text_ellipsis("Klik untuk ganti radio", 64., 67., 168., 14., 9.5, 0x9ca3af, false);
+            p.text_ellipsis(crate::i18n::t("qc.switch_radio", &self.settings.language), 64., 67., 168., 14., 9.5, 0x9ca3af, false);
             if self.hit_enabled {
                 self.hits.push(Hit { rect: layout.wifi_selector, action: Action::QuickControlsSelectRadio(crate::quick_controls::RadioKind::WiFi, 0) });
             }
@@ -74,7 +72,7 @@ impl Shell {
 
         p.fill(layout.wifi_settings_btn.left, layout.wifi_settings_btn.top, 88., 20., 5., 0x1c1c23);
         p.stroke(layout.wifi_settings_btn.left, layout.wifi_settings_btn.top, 88., 20., 5., 0x2d3242, 1.0);
-        p.text("Pengaturan", layout.wifi_settings_btn.left + 8., layout.wifi_settings_btn.top + 3., 60., 14., 10., 0x9ca3af, false);
+        p.text(crate::i18n::t("qc.settings", &self.settings.language), layout.wifi_settings_btn.left + 8., layout.wifi_settings_btn.top + 3., 60., 14., 10., 0x9ca3af, false);
         p.outline_icon("right", layout.wifi_settings_btn.left + 70., layout.wifi_settings_btn.top + 4., 11., 0x9ca3af);
         if self.hit_enabled {
             self.hits.push(Hit { rect: layout.wifi_settings_btn, action: Action::OpenSettingsPage("ms-settings:network-wifi") });
@@ -89,7 +87,7 @@ impl Shell {
         let (bt_on, bt_avail, bt_name, bt_status, bt_sub) = if let Some(r) = self.quick_controls.selected_radio(crate::quick_controls::RadioKind::Bluetooth) {
             (r.state == crate::quick_controls::RadioState::On, r.availability.clone(), r.name.clone(), r.status_text.clone(), r.sub_status_text.clone())
         } else {
-            (false, crate::quick_controls::RadioAvailability::Absent, "Bluetooth".to_string(), crate::i18n::t("quick.no_bluetooth", lang).to_string(), "".to_string())
+            (false, crate::quick_controls::RadioAvailability::Absent, "Bluetooth".to_string(), crate::i18n::t("qc.no_bluetooth", &self.settings.language).to_string(), "".to_string())
         };
 
         let badge2_bg = if bt_on { 0x1b1e26 } else { 0x16181f };
@@ -100,7 +98,7 @@ impl Shell {
         if self.quick_controls.radios_of_kind(crate::quick_controls::RadioKind::Bluetooth).len() > 1 {
             p.fill(58., 140., 180., 16., 4., 0x181b22);
             p.stroke(58., 140., 180., 16., 4., 0x2b2e3a, 1.0);
-            p.text_ellipsis("Klik untuk ganti radio", 64., 141., 148., 14., 9.5, 0x9ca3af, false);
+            p.text_ellipsis(crate::i18n::t("qc.switch_radio", &self.settings.language), 64., 141., 148., 14., 9.5, 0x9ca3af, false);
             if self.hit_enabled {
                 self.hits.push(Hit { rect: layout.bt_selector, action: Action::QuickControlsSelectRadio(crate::quick_controls::RadioKind::Bluetooth, 0) });
             }
@@ -118,7 +116,7 @@ impl Shell {
 
         p.fill(layout.bt_settings_btn.left, layout.bt_settings_btn.top, 88., 20., 5., 0x1c1c23);
         p.stroke(layout.bt_settings_btn.left, layout.bt_settings_btn.top, 88., 20., 5., 0x2d3242, 1.0);
-        p.text("Pengaturan", layout.bt_settings_btn.left + 8., layout.bt_settings_btn.top + 3., 60., 14., 10., 0x9ca3af, false);
+        p.text(crate::i18n::t("qc.settings", &self.settings.language), layout.bt_settings_btn.left + 8., layout.bt_settings_btn.top + 3., 60., 14., 10., 0x9ca3af, false);
         p.outline_icon("right", layout.bt_settings_btn.left + 70., layout.bt_settings_btn.top + 4., 11., 0x9ca3af);
         if self.hit_enabled {
             self.hits.push(Hit { rect: layout.bt_settings_btn, action: Action::OpenSettingsPage("ms-settings:bluetooth") });
@@ -133,13 +131,13 @@ impl Shell {
         let (disp_name, disp_percent, disp_target, disp_status, disp_sub, disp_unsupported) = if let Some(d) = self.quick_controls.selected_display() {
             (d.name.clone(), d.current_percent, d.target_percent, d.status_text.clone(), d.sub_status_text.clone(), d.kind == crate::quick_controls::DisplayKind::Unsupported)
         } else {
-            ("Kecerahan".to_string(), 0, None, crate::i18n::t("quick.no_display", lang).to_string(), "".to_string(), true)
+            ("Kecerahan".to_string(), 50, None, crate::i18n::t("qc.no_monitor", &self.settings.language).to_string(), "".to_string(), true)
         };
 
         p.fill(22., 196., 28., 28., 7., 0x1b1e26);
         p.outline_icon("sun", 28., 202., 16., if disp_unsupported { 0x555966 } else { 0xd8d8de });
 
-        p.text("Kecerahan", 58., 196., 70., 18., 12.5, 0xf3f3f5, true);
+        p.text(crate::i18n::t("qc.brightness", &self.settings.language), 58., 196., 70., 18., 12.5, 0xf3f3f5, true);
 
         // Display selector button
         p.fill(130., 196., 210., 18., 4., 0x181b22);
@@ -150,8 +148,7 @@ impl Shell {
         }
 
         let display_val = disp_target.unwrap_or(disp_percent);
-        let value_text = if disp_unsupported { "--%".to_string() } else { format!("{display_val}%") };
-        p.text_centered(&value_text, 404., 196., 32., 18., 11., 0xffffff, 1.0, true);
+        p.text_centered(&format!("{display_val}%"), 404., 196., 32., 18., 11., 0xffffff, 1.0, true);
 
         // Slider track
         let slider_track_w = 408.0;
@@ -182,7 +179,7 @@ impl Shell {
 
         p.fill(layout.display_settings_btn.left, layout.display_settings_btn.top, 88., 20., 5., 0x1c1c23);
         p.stroke(layout.display_settings_btn.left, layout.display_settings_btn.top, 88., 20., 5., 0x2d3242, 1.0);
-        p.text("Tampilan", layout.display_settings_btn.left + 12., layout.display_settings_btn.top + 3., 56., 14., 10., 0x9ca3af, false);
+        p.text(crate::i18n::t("qc.display", &self.settings.language), layout.display_settings_btn.left + 12., layout.display_settings_btn.top + 3., 56., 14., 10., 0x9ca3af, false);
         p.outline_icon("right", layout.display_settings_btn.left + 70., layout.display_settings_btn.top + 4., 11., 0x9ca3af);
         if self.hit_enabled {
             self.hits.push(Hit { rect: layout.display_settings_btn, action: Action::OpenSettingsPage("ms-settings:display") });

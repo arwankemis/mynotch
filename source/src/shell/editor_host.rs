@@ -19,10 +19,11 @@ impl Shell {
         match result{Ok(changes)=>{self.editors.unsaved|=changes>0;true},Err(_)=>{self.editors.unsaved=true;false}}
     }
     pub(super) fn flush_editors_barrier(&mut self)->bool{
-        if !self.commit_editors(){self.activity_feedback("Edit belum dapat disimpan; tindakan ditahan".into(),5000);return false;}
+        let lang=self.settings.language.clone();
+        if !self.commit_editors(){self.activity_feedback(crate::i18n::t("notice.edit_held",&lang).into(),5000);return false;}
         let result=self.store.save("state.json",&self.state);
         self.editors.unsaved=result.is_err();
-        if result.is_err(){self.activity_feedback("Belum tersimpan — coba simpan lagi".into(),5000);return false;}true
+        if result.is_err(){self.activity_feedback(crate::i18n::t("notice.save_hold",&lang).into(),5000);return false;}true
     }
     pub(super) fn retire_panel(&mut self)->bool{
         if !self.commit_editors(){return false;}
@@ -51,9 +52,9 @@ impl Shell {
         if let Some((_,hwnd))=self.editors.floats.get(&note.id){unsafe{let _=ShowWindow(*hwnd,SW_SHOWNORMAL);let _=SetForegroundWindow(*hwnd);}return;}
         if !self.retire_panel(){return;}
         let lease=match self.editors.registry.acquire(&self.state,note.id,EditorOwner::Popout){Ok(Acquisition::New(l)|Acquisition::Existing(l))=>l,Err(_)=>{self.editors.unsaved=true;return;}};
-        match sticky_window::spawn_owned_note(&note,lease,self.editors.source.clone(),self.hwnd){
+        match sticky_window::spawn_owned_note(&note,lease,self.editors.source.clone(),self.hwnd,&self.settings.language){
             Ok(h)=>{self.editors.floats.insert(note.id,(lease,h));self.make_inputs();},
-            Err(_)=>{self.editors.registry.cancel_unbound(lease);self.editors.unsaved=true;self.activity_feedback("Editor tidak tersedia".into(),5000);},
+            Err(_)=>{self.editors.registry.cancel_unbound(lease);self.editors.unsaved=true;self.activity_feedback(crate::i18n::t("notice.editor_unavailable",&self.settings.language).into(),5000);},
         }
     }
     pub(super) fn sync_popout_privacy(&mut self){unsafe{

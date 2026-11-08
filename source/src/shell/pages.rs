@@ -809,7 +809,7 @@ impl Shell {
 
         if total_notes == 0 {
             p.text_centered("✎", right_x, 82., right_w, 28., 24., 0xfef08a, 0.8, false);
-            p.text_centered("Quick Sticky Notes", right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
+            p.text_centered(crate::i18n::t("notes.empty_title", &lang), right_x, 114., right_w, 20., 13., 0xffffff, 1.0, true);
             p.text_centered(crate::i18n::t("notes.empty_desc1", &lang), right_x, 138., right_w, 16., 10.5, 0x8a9291, 1.0, false);
             p.text_centered(crate::i18n::t("notes.empty_desc2", &lang), right_x, 154., right_w, 16., 10.5, 0x8a9291, 1.0, false);
         } else if let Some(note) = self.state.sticky_notes.get(self.state.selected_note).cloned() {
@@ -1012,7 +1012,7 @@ impl Shell {
                 return;
             },
             Action::QuickControlsToggleRadio(kind) => {
-                let _ = self.quick_controls.toggle_radio(kind);
+                let _ = self.quick_controls.toggle_radio(kind, &self.settings.language);
                 self.invalidate();
                 return;
             },
@@ -1027,7 +1027,7 @@ impl Shell {
                 return;
             },
             Action::QuickControlsSetBrightness(pct, commit) => {
-                self.quick_controls.set_brightness(pct, commit);
+                self.quick_controls.set_brightness(pct, commit, &self.settings.language);
                 self.invalidate();
                 return;
             },
@@ -1642,7 +1642,7 @@ impl Shell {
             Action::PrayerLead(d)=>self.settings.prayer_lead=(self.settings.prayer_lead as i32+d).clamp(0,30)as u32,
 
             Action::FocusStart=>{self.focus.start(self.settings.focus_minutes,false);self.start_activity_run(false);},Action::FocusBreak=>{self.focus.start(self.settings.break_minutes,true);self.start_activity_run(false);},Action::FocusPause=>{if self.focus.running(){self.focus.pause();}else{self.focus.resume();}},Action::FocusReset=>{self.focus.reset();self.activities.focus=Default::default();},Action::FocusLength(delta)=>{self.settings.focus_minutes=(self.settings.focus_minutes as i32+delta).clamp(1,180)as u32;self.save();},Action::BreakLength(delta)=>{self.settings.break_minutes=(self.settings.break_minutes as i32+delta).clamp(1,60)as u32;self.save();},
-            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};let id=match self.state.allocate_todo_id(){Ok(id)=>id,Err(_)=>{self.notice("Identitas tugas habis");return}};self.state.todos.push(Todo{id,text,done:false,due,reminded:false,note_id:None});self.clear_input(10);self.clear_input(11);self.save();},Action::Todo(id)=>{if !crate::todo_notes::todo_is_unambiguous(&self.state,id){self.notice("Identitas tugas tidak tersedia");return}if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
+            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};let id=match self.state.allocate_todo_id(){Ok(id)=>id,Err(_)=>{self.notice(crate::i18n::t("notice.task_ids_exhausted", &self.settings.language));return}};self.state.todos.push(Todo{id,text,done:false,due,reminded:false,note_id:None});self.clear_input(10);self.clear_input(11);self.save();},Action::Todo(id)=>{if !crate::todo_notes::todo_is_unambiguous(&self.state,id){self.notice(crate::i18n::t("notice.task_unavailable", &self.settings.language));return}if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
             Action::Water=>{self.state.water.push(Drink{date:Local::now().date_naive(),ml:self.settings.water_serving});self.last_water=Instant::now();},Action::UndoWater=>{if let Some(index)=self.state.water.iter().rposition(|d|d.date==Local::now().date_naive()){self.state.water.remove(index);}},Action::WaterTarget(delta)=>self.settings.water_target=(self.settings.water_target as i32+delta).clamp(250,10000)as u32,Action::WaterServing(delta)=>self.settings.water_serving=(self.settings.water_serving as i32+delta).clamp(50,2000)as u32,
             Action::WaterInterval(delta)=>{self.settings.water_interval=(self.settings.water_interval as i32+delta).clamp(5,180)as u32;self.save();},
             Action::MoveInterval(delta)=>{self.settings.move_interval=(self.settings.move_interval as i32+delta).clamp(5,180)as u32;self.save();},
@@ -1970,7 +1970,7 @@ impl Shell {
                 if self.state.sticky_notes.len() >= 20 {
                     self.notice(crate::i18n::t("notice.notes_max", &self.settings.language));
                 } else {
-                    let new_id = match self.state.allocate_note_id(){Ok(id)=>id,Err(_)=>{self.notice("Identitas catatan habis");return}};
+                    let new_id = match self.state.allocate_note_id(){Ok(id)=>id,Err(_)=>{self.notice(crate::i18n::t("notice.note_ids_exhausted", &self.settings.language));return}};
                     let now_str = Local::now().format("%Y-%m-%d %H:%M").to_string();
                     let new_note = crate::sticky::StickyNote {
                         id: new_id,
@@ -1998,7 +1998,7 @@ impl Shell {
                 }
             },
             Action::NoteDelete(id) => {
-                if self.editors.registry.panel_read_only(id)||!self.retire_panel(){self.notice("Tutup editor catatan sebelum menghapus");return;}
+                if self.editors.registry.panel_read_only(id)||!self.retire_panel(){self.notice(crate::i18n::t("notice.close_editor_before_delete", &self.settings.language));return;}
                 self.state.sticky_notes.retain(|n| n.id != id);
                 if self.state.selected_note >= self.state.sticky_notes.len() {
                     self.state.selected_note = self.state.sticky_notes.len().saturating_sub(1);
@@ -2371,7 +2371,7 @@ impl Shell {
                             body_y = draw_headline(p, headline, body_y, self.width);
                         }
                         if output.ranked_left.is_some() || output.ranked_right.is_some() {
-                            draw_ranked(p, output.ranked_left.as_ref(), output.ranked_right.as_ref(), body_y, self.width);
+                            draw_ranked(p, output.ranked_left.as_ref(), output.ranked_right.as_ref(), body_y, self.width, &self.settings.language);
                             return;
                         }
                         if output.gauge.is_some() || output.metrics.is_some() || output.history.is_some() {
@@ -2681,7 +2681,7 @@ unsafe fn draw_headline(p: &mut Painter, headline: &LuaHeadline, y: f32, width: 
 
 /// Two ranked lanes separated by a hairline. Rows are fixed at 32 px so five entries fit the
 /// Stage 2 panel under the headline.
-unsafe fn draw_ranked(p: &mut Painter, left: Option<&LuaRanked>, right: Option<&LuaRanked>, y: f32, width: f32) { unsafe {
+unsafe fn draw_ranked(p: &mut Painter, left: Option<&LuaRanked>, right: Option<&LuaRanked>, y: f32, width: f32, lang: &str) { unsafe {
     let margin = 18.;
     let gap = 14.;
     let content_w = width - margin * 2.;
@@ -2690,7 +2690,7 @@ unsafe fn draw_ranked(p: &mut Painter, left: Option<&LuaRanked>, right: Option<&
     let count = left.map(|l| l.rows.len()).unwrap_or(0).max(right.map(|r| r.rows.len()).unwrap_or(0)).min(5);
     let lane_h = 18. + count as f32 * 32.;
     if let Some(lane) = left {
-        draw_ranked_lane(p, lane, margin, y, lane_w, true);
+        draw_ranked_lane(p, lane, margin, y, lane_w, true, lang);
     }
     if both {
         let divider_x = margin + lane_w + gap * 0.5;
@@ -2698,18 +2698,18 @@ unsafe fn draw_ranked(p: &mut Painter, left: Option<&LuaRanked>, right: Option<&
     }
     if let Some(lane) = right {
         let x = if left.is_some() { margin + lane_w + gap } else { margin };
-        draw_ranked_lane(p, lane, x, y, lane_w, false);
+        draw_ranked_lane(p, lane, x, y, lane_w, false, lang);
     }
 }}
 
-unsafe fn draw_ranked_lane(p: &mut Painter, lane: &LuaRanked, x: f32, y: f32, width: f32, positive: bool) { unsafe {
+unsafe fn draw_ranked_lane(p: &mut Painter, lane: &LuaRanked, x: f32, y: f32, width: f32, positive: bool, lang: &str) { unsafe {
     let color = if positive { LANE_GREEN } else { LANE_RED };
     let arrow = if positive { "▲" } else { "▼" };
     let title = format!("{arrow} {}", lane.title.to_uppercase());
     p.text_ellipsis(&title, x, y, width - 112., 12., 9., color, true);
     p.text_ellipsis(&lane.meta, x + width - 108., y + 1., 108., 12., 8., color, false);
     if lane.rows.is_empty() {
-        p.text("Tidak ada data", x, y + 26., width, 16., 9., MUTED, false);
+        p.text(crate::i18n::t("notice.mods_no_data", lang), x, y + 26., width, 16., 9., MUTED, false);
         return;
     }
     let max = lane.rows.iter().map(|r| r.change.abs()).fold(0.0_f64, f64::max).max(0.0001);
