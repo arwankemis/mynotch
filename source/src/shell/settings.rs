@@ -15,9 +15,9 @@ pub(super) fn prayer_lead_summary_i18n(city:&str,lead:u32,lang:&str)->String{
 }
 impl Shell{
     fn settings_content_bottom(&self)->f32{match self.settings_cat{
-        0=>if self.settings_subpage_privacy{280.}else{526.},
+        0=>if self.settings_subpage_privacy{280.}else{568.},
         1=>if self.settings.hw_monitor_enabled{610.}else{466.},2=>116.+self.settings.settings_tab_order().len()as f32*36.,
-        3=>570.,4=>354.,5=>420.,_=>self.height-20.
+        3=>570.,4=>399.,5=>420.,_=>self.height-20.
     }}
     pub(super) fn scroll_settings(&mut self,delta:f32){
         if self.settings_cat==5{self.scroll_catalog(delta.signum()as i32);return}
@@ -145,16 +145,18 @@ impl Shell{
         self.st_select(p,"language",crate::i18n::language_name(&lang),418.,278.,124.,true);
         self.st_row_compact(p,314.,t("general.fullscreen",&lang),t("general.fullscreen.desc",&lang));
         self.st_toggle(p,512.,325.,self.settings.hide_fullscreen,Action::Toggle("fullscreen"),true);
-        self.st_row_compact(p,356.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
-        self.st_toggle(p,512.,367.,self.settings.minimal,Action::Minimal,true);
-        self.st_row_compact(p,398.,t("general.startup",&lang),t("general.startup.desc",&lang));
-        self.st_toggle(p,512.,409.,self.settings.run_at_startup,Action::Toggle("startup"),true);
-        self.st_row_compact(p,440.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
+        self.st_row_compact(p,356.,t("general.screenshot",&lang),t("general.screenshot.desc",&lang));
+        self.st_toggle(p,512.,367.,self.settings.hide_screenshot,Action::Toggle("screenshot"),true);
+        self.st_row_compact(p,398.,t("general.minimal",&lang),t("general.minimal.desc",&lang));
+        self.st_toggle(p,512.,409.,self.settings.minimal,Action::Minimal,true);
+        self.st_row_compact(p,440.,t("general.startup",&lang),t("general.startup.desc",&lang));
+        self.st_toggle(p,512.,451.,self.settings.run_at_startup,Action::Toggle("startup"),true);
+        self.st_row_compact(p,482.,t("general.default_tab",&lang),t("general.default_tab.desc",&lang));
         let current=crate::i18n::tab_name(&self.settings.default_tab, &lang).to_string();
         let has_tabs = !self.settings.active_tab_order().is_empty();
-        self.st_select(p,"default_tab",&current,418.,446.,124.,has_tabs);
-        self.st_row_compact(p,482.,t("general.privacy",&lang),t("general.privacy.desc",&lang));
-        self.st_button(p,t("general.privacy_open",&lang),448.,486.,94.,Action::OpenPrivacySettings,true);
+        self.st_select(p,"default_tab",&current,418.,488.,124.,has_tabs);
+        self.st_row_compact(p,524.,t("general.privacy",&lang),t("general.privacy.desc",&lang));
+        self.st_button(p,t("general.privacy_open",&lang),448.,528.,94.,Action::OpenPrivacySettings,true);
     }}
     fn settings_appearance(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
@@ -214,8 +216,10 @@ impl Shell{
         }
     }}
     fn settings_tabs(&mut self,p:&mut Painter){unsafe{
+        // Catatan (Simpan) permanen — bukan mod, tidak bisa dimatikan/diurutkan di sini.
         let order=self.settings.settings_tab_order();
         let mods=self.mods();
+        let order:Vec<String>=order.iter().filter(|m|m.as_str()!="Catatan").cloned().collect();
         let count=order.len();let active=self.settings.active_tab_order().len();
         for (i,module) in order.iter().enumerate(){let y=116.+i as f32*36.;let on=self.settings.enabled(module);
             let icon=mods.iter().find(|m|&m.tab_name==module).map(|m|m.icon.clone()).unwrap_or_else(||ui::module_icon(module).to_string());
@@ -269,6 +273,20 @@ impl Shell{
         ];
         let row_h=if enabled{53.}else{45.};
         for (i,(name,icon,summary,on)) in rows.iter().enumerate(){let y=top+i as f32*row_h;p.outline_icon(icon,196.,y+10.,18.,0xa8a8b2);p.text(name,224.,y+1.,164.,22.,12.,FG,false);p.text_ellipsis(summary,224.,y+23.,198.,17.,10.,MUTED,false);p.text(if *on{t("reminders.active",&lang)}else{t("reminders.inactive",&lang)},423.,y+11.,42.,16.,10.,if *on{ACCENT}else{MUTED},false);self.st_button(p,t("reminders.configure",&lang),474.,y+4.,68.,Action::SettingsOpenTab("Reminder".into(),i),enabled);if i<3{p.fill(196.,y+row_h-1.,346.,1.,0.,0x222229);}}
+        // Intensitas aksen pill Stage 1 (F2): Netral/Halus/Nyala, disimpan di settings.
+        let accent_y=top+4.*row_h;
+        p.fill(196.,accent_y-1.,346.,1.,0.,0x222229);
+        let title=if lang=="en"{"Reminder accent"}else{"Aksen pengingat"};
+        let mode=self.accent_mode();
+        let (mode_label,desc)=match mode{
+            super::activity_host::AccentMode::Netral=>(if lang=="en"{"Neutral"}else{"Netral"},if lang=="en"{"No accent — classic look"}else{"Tanpa warna — tampilan lama"}),
+            super::activity_host::AccentMode::Halus=>(if lang=="en"{"Soft"}else{"Halus"},if lang=="en"{"Colored icon chip + progress ring"}else{"Chip ikon berwarna + ring progres"}),
+            super::activity_host::AccentMode::Nyala=>(if lang=="en"{"Glow"}else{"Nyala"},if lang=="en"{"Soft + accent gradient sweeping the pill"}else{"Halus + gradasi aksen menjalar kiri ke kanan"}),
+        };
+        p.outline_icon("star",196.,accent_y+10.,18.,0xa8a8b2);
+        p.text(title,224.,accent_y+1.,164.,22.,12.,FG,false);
+        p.text_ellipsis(desc,224.,accent_y+23.,198.,17.,10.,MUTED,false);
+        self.st_button(p,mode_label,474.,accent_y+4.,68.,Action::Toggle("reminder_accent"),true);
     }}
     fn settings_mods(&mut self,p:&mut Painter){self.draw_catalog(p);}
     #[allow(dead_code)]

@@ -70,40 +70,6 @@ pub fn flush_for_transition(transition:&Transition,editors:&mut impl EditorFlush
 }
 pub fn persist(base:&Settings,store:&mut Store)->Result<(),&'static str>{store.save("settings.json",base).map_err(|_|"Preset belum tersimpan")}
 
-/// One silent backlog activity. Presentation time advances only while that group
-/// was actually primary; dismissing its summary never discards its occurrences.
-#[derive(Default)]
-pub struct QuietBacklog {last_ms:Option<i64>,was_primary_visible:bool}
-impl QuietBacklog {
-    pub fn reconcile(&mut self,state:&mut State,inputs:&mut ActivityInputs,now_ms:i64,policy:PresentationPolicy,previous:Option<&ActivitySnapshot>){
-        if policy.quiet{
-            for p in &mut state.pending_local_reminders{
-                if !p.deferred_quiet||p.deferred_count<p.coalesced_count{state.quiet_backlog_remaining_ms=8_000;}
-                p.deferred_quiet=true;p.silent=true;p.deferred_count=p.coalesced_count;
-            }
-        }
-        if self.was_primary_visible&&policy.visible&&!policy.quiet&&previous.is_some_and(|s|s.primary.id==ActivityId::Backlog){
-            let elapsed=now_ms.saturating_sub(self.last_ms.unwrap_or(now_ms)).max(0).min(u32::MAX as i64) as u32;
-            state.quiet_backlog_remaining_ms=state.quiet_backlog_remaining_ms.saturating_sub(elapsed);
-        }
-        // Replace rather than accumulate a duplicate group in reused input buffers.
-        inputs.candidates.retain(|c|c.id!=ActivityId::Backlog);
-        let pending:Vec<_>=state.pending_local_reminders.iter().filter(|p|p.deferred_quiet).collect();
-        if pending.is_empty(){state.quiet_backlog_remaining_ms=0;}
-        if !policy.quiet&&policy.reminders&&state.quiet_backlog_remaining_ms>0&&!pending.is_empty(){
-            inputs.candidates.push(Candidate{id:ActivityId::Backlog,priority:2,created_ms:pending.iter().map(|p|p.due_at_unix_ms).min().unwrap_or(now_ms),expires_ms:None,
-                target:Some(ActivityTarget::PendingReminders),text:format!("{} pengingat tertahan",pending.len()),progress:None});
-        }
-        self.last_ms=Some(now_ms);self.was_primary_visible=policy.visible&&!policy.quiet;
-    }
-    pub fn dismiss_summary(&mut self,state:&mut State){state.quiet_backlog_remaining_ms=0;self.was_primary_visible=false;}
-    pub fn open_occurrence(state:&mut State,id:&ActivityId,quiet:bool)->Option<ActivityTarget>{
-        if quiet{return None;}
-        let p=state.pending_local_reminders.iter_mut().find(|p|&p.id==id&&p.deferred_quiet&&p.target!=ActivityTarget::Unavailable)?;
-        p.deferred_quiet=false;p.silent=true;Some(p.target.clone())
-    }
-}
-
 #[cfg(test)]
 #[path="presets_tests.rs"]
 mod tests;

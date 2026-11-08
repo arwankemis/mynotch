@@ -4,6 +4,7 @@ use crate::shell::{Action, Hit, Shell};
 impl Shell {
     pub(super) unsafe fn draw_quick_controls(&mut self, p: &mut Painter) { unsafe {
         let layout = crate::quick_controls::calculate_layout();
+        let lang = if self.settings.language == "en" { "en" } else { "id" };
         let bg_col = 0x000000;
         p.fill(0., 0., self.width, self.height, 18., bg_col);
 
@@ -19,10 +20,11 @@ impl Shell {
 
         // Title: Kontrol cepat
         p.text("Kontrol cepat", 98., 14., 90., 18., 13.5, 0xffffff, true);
-        // Badge: KONTROL
-        p.fill_alpha(194., 14., 52., 18., 4., 0x1c212d, 1.0);
-        p.stroke(194., 14., 52., 18., 4., 0xd8d8de, 1.0);
-        p.text_centered("KONTROL", 194., 14., 52., 18., 9.5, 0xd8d8de, 1.0, true);
+        // This panel does not change hardware yet; say so instead of implying live control.
+        p.fill_alpha(194., 14., 52., 18., 4., 0x2a2110, 1.0);
+        p.stroke(194., 14., 52., 18., 4., 0xeab308, 1.0);
+        p.text_centered(crate::i18n::t("quick.preview_badge", lang), 194., 14., 52., 18., 8.5, 0xeab308, 1.0, true);
+        p.text_ellipsis(crate::i18n::t("quick.preview_notice", lang), 98., 32., 260., 9., 8.5, 0xeab308, false);
 
         // Header right controls: Pin, Chevron up (Fold to Stage 1), Settings
         let y_hdr = 10.;
@@ -39,7 +41,7 @@ impl Shell {
         let (wifi_on, wifi_avail, wifi_name, wifi_status, wifi_sub) = if let Some(r) = self.quick_controls.selected_radio(crate::quick_controls::RadioKind::WiFi) {
             (r.state == crate::quick_controls::RadioState::On, r.availability.clone(), r.name.clone(), r.status_text.clone(), r.sub_status_text.clone())
         } else {
-            (false, crate::quick_controls::RadioAvailability::Absent, "Wi-Fi".to_string(), "Tidak ada adaptor Wi-Fi".to_string(), "".to_string())
+            (false, crate::quick_controls::RadioAvailability::Absent, "Wi-Fi".to_string(), crate::i18n::t("quick.no_wifi", lang).to_string(), "".to_string())
         };
 
         // Icon badge
@@ -87,7 +89,7 @@ impl Shell {
         let (bt_on, bt_avail, bt_name, bt_status, bt_sub) = if let Some(r) = self.quick_controls.selected_radio(crate::quick_controls::RadioKind::Bluetooth) {
             (r.state == crate::quick_controls::RadioState::On, r.availability.clone(), r.name.clone(), r.status_text.clone(), r.sub_status_text.clone())
         } else {
-            (false, crate::quick_controls::RadioAvailability::Absent, "Bluetooth".to_string(), "Tidak ada adaptor Bluetooth".to_string(), "".to_string())
+            (false, crate::quick_controls::RadioAvailability::Absent, "Bluetooth".to_string(), crate::i18n::t("quick.no_bluetooth", lang).to_string(), "".to_string())
         };
 
         let badge2_bg = if bt_on { 0x1b1e26 } else { 0x16181f };
@@ -131,7 +133,7 @@ impl Shell {
         let (disp_name, disp_percent, disp_target, disp_status, disp_sub, disp_unsupported) = if let Some(d) = self.quick_controls.selected_display() {
             (d.name.clone(), d.current_percent, d.target_percent, d.status_text.clone(), d.sub_status_text.clone(), d.kind == crate::quick_controls::DisplayKind::Unsupported)
         } else {
-            ("Kecerahan".to_string(), 50, None, "Tidak ada monitor terdeteksi".to_string(), "".to_string(), true)
+            ("Kecerahan".to_string(), 0, None, crate::i18n::t("quick.no_display", lang).to_string(), "".to_string(), true)
         };
 
         p.fill(22., 196., 28., 28., 7., 0x1b1e26);
@@ -148,7 +150,8 @@ impl Shell {
         }
 
         let display_val = disp_target.unwrap_or(disp_percent);
-        p.text_centered(&format!("{display_val}%"), 404., 196., 32., 18., 11., 0xffffff, 1.0, true);
+        let value_text = if disp_unsupported { "--%".to_string() } else { format!("{display_val}%") };
+        p.text_centered(&value_text, 404., 196., 32., 18., 11., 0xffffff, 1.0, true);
 
         // Slider track
         let slider_track_w = 408.0;

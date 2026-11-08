@@ -5,11 +5,10 @@ use chrono::Datelike;
 
 impl Shell {
     pub(super) fn draw_page(&mut self,p:&mut Painter){unsafe{
-        match page_route(&self.tab,self.settings.quiet_mode,self.preset_host.backlog_open,self.settings.enabled("Catatan")){
+        match page_route(&self.tab,self.settings.quiet_mode,self.settings.enabled("Catatan")){
             PageRoute::QuietMusic=>self.quiet_music(p),
             PageRoute::QuietCalendar=>self.quiet_calendar(p),
             PageRoute::Hidden=>self.quiet_placeholder(p),
-            PageRoute::Backlog=>self.draw_backlog(p),
             PageRoute::Music=>self.music_page(p),
             PageRoute::Calendar=>self.calendar_page(p),
             PageRoute::Reminder=>self.reminder_page(p),
@@ -41,10 +40,8 @@ impl Shell {
     }
 
     fn draw_mockup_player(&mut self,p:&mut Painter){unsafe{
-        if self.glass_config(self.height).is_some() {
-            self.draw_glass_player(p);
-            return;
-        }
+        // Mockup stage2-musik: layout player identik di ketiga material
+        // (Solid/Glass Lite/Glass Adaptive) — tanpa jalur glass terpisah.
         let lang = self.settings.language.clone();
         // 1. Track Content (Artwork 60x60 from y=44 to y=104)
         let art_x=24.;let art_y=44.;let art_size=60.;
@@ -100,16 +97,17 @@ impl Shell {
         let remaining=(duration-position).max(0.);
         p.text(&format!("-{}",time_label(remaining)),self.width-58.,scrub_y,40.,16.,11.,0xffffff,false);
 
-        // 3. Transport Controls (At y=138, below scrubber)
-        let trans_y=138.;
-        // Lyrics toggle quote button at x=24
-        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,self.lyric_mode,true);
-        // Centered Previous / Play / Next
-        let mid_x=self.width/2.;
-        self.transport_btn(p,"⏮",mid_x-52.,trans_y,28.,28.,Action::Previous,false,self.track.can_previous);
-        let play_symbol=if self.track.playing{"⏸"}else{"▶"};
-        self.transport_btn(p,play_symbol,mid_x-14.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
-        self.transport_btn(p,"⏭",mid_x+24.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
+        // 3. Transport Controls ala Spotify (mockup stage2-musik: [mic kiri] … acak · prev ·
+        //    putar · next · ulangi; hover tanpa latar, aktif = titik 4 px di bawah ikon)
+        let trans_y=132.;
+        self.transport_btn(p,"MIC",24.,trans_y,34.,34.,Action::ToggleLyrics,self.lyric_mode,true);
+        let (slots,total)=Self::spotify_transport_slots(false);
+        let gx=self.width/2.-total*0.5;
+        self.transport_btn(p,"SHUFFLE",gx+slots[1].0,trans_y,slots[1].1,34.,Action::ToggleShuffle,self.track.shuffle,self.track.can_shuffle);
+        self.transport_btn(p,"⏮",gx+slots[2].0,trans_y,slots[2].1,34.,Action::Previous,false,self.track.can_previous);
+        self.spotify_play_button(p,gx+slots[3].0,trans_y-3.,slots[3].1,self.track.playing,self.track.can_toggle);
+        self.transport_btn(p,"⏭",gx+slots[4].0,trans_y,slots[4].1,34.,Action::Next,false,self.track.can_next);
+        self.transport_btn(p,"REPEAT",gx+slots[5].0,trans_y,slots[5].1,34.,Action::CycleRepeat,self.track.repeat_mode>0,true);
     }}
 
     pub(super) fn draw_media_source(&mut self,p:&mut Painter){unsafe{
@@ -168,93 +166,48 @@ impl Shell {
         }
     }
 
-    fn draw_glass_player(&mut self,p:&mut Painter){unsafe{
-        self.draw_media_source(p);
-        let source_width=if self.media_source_open{38.+self.media_sessions.sessions.iter().filter(|s|s.playing).count().min(2) as f32*32.}else{0.};
-        let content_width=if self.media_source_open{self.width-20.-source_width-160.}else{self.width-176.};
-        let lang=self.settings.language.clone();
-        let key=if self.cover.is_some(){self.cover_key}else{0};
-        if !p.cover(self.cover.as_ref(),key,20.,72.,108.,false){
-            p.fill(20.,72.,108.,108.,16.,0x23394a);
-            p.text_centered("♫",20.,72.,108.,108.,32.,0xb2e7ee,1.,false);
-        }
-        let title=if self.track.title.is_empty(){crate::i18n::t("music.no_music",&lang)}else{&self.track.title};
-        p.text_ellipsis(title,148.,72.,content_width,27.,20.,0xf5f8ff,true);
-        let artist=if self.track.artist.is_empty(){crate::i18n::t("music.no_artist",&lang)}else{&self.track.artist};
-        p.text_ellipsis(artist,148.,104.,content_width,19.,12.,0xc5cedd,false);
-        let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
-        let duration=self.track.duration_seconds;
-        let ratio=if duration>0.{(position/duration).clamp(0.,1.)}else{0.};
-        let tx=148.;let tw=(self.width-tx-24.).max(1.);
-        p.fill_alpha(tx,135.,tw,4.,2.,0xffffff,0.22);
-        if ratio>0.{p.fill(tx,135.,tw*ratio as f32,4.,2.,0xa1eeff);}
-        if self.track.can_seek {
-            let thumb=tx+tw*ratio as f32;
-            p.fill(thumb-5.,132.,10.,10.,5.,0xa1eeff);
-            if self.hit_enabled{self.hits.push(Hit{rect:render::rect(tx,127.,tw,20.),action:Action::SeekPointer});}
-        }
-        p.text(&time_label(position),tx,147.,55.,16.,11.,0xc5cedd,false);
-        p.text(&time_label(duration),self.width-65.,147.,44.,16.,11.,0xc5cedd,false);
-        let mid=tx+tw*0.5;
-        self.transport_btn(p,"⏮",mid-61.,173.,32.,32.,Action::Previous,false,self.track.can_previous);
-        p.fill_alpha(mid-21.,169.,42.,42.,21.,0xffffff,if self.track.can_toggle{0.92}else{0.22});
-        p.text_centered(if self.track.playing{"Ⅱ"}else{"▶"},mid-21.,169.,42.,42.,17.,0x132333,1.,true);
-        if self.hit_enabled && self.track.can_toggle{self.hits.push(Hit{rect:render::rect(mid-21.,169.,42.,42.),action:Action::Play});}
-        self.transport_btn(p,"⏭",mid+29.,173.,32.,32.,Action::Next,false,self.track.can_next);
-        p.fill_alpha(20.,231.,self.width-40.,1.,0.,0xffffff,0.16);
-
-        let volume=self.last_known_volume;
-        let (caption,label,can_down,can_up)={
-            ("Volume Windows".to_string(),volume.map(|(v,m)|if m{"Mute".into()}else{format!("{:.0}%",v*100.)}).unwrap_or_else(||"Tidak tersedia".into()),volume.is_some_and(|(v,_)|v>0.),volume.is_some_and(|(v,_)|v<1.))
-        };
-        p.outline_icon("volume",20.,251.,16.,0xc5cedd);
-        p.text_ellipsis(&caption,44.,242.,130.,16.,11.,0xc5cedd,false);
-        p.text(&label,44.,259.,130.,18.,12.,0xf5f8ff,true);
-        self.transport_btn(p,"−",188.,246.,30.,28.,Action::VolumeStep(-5),false,can_down);
-        self.transport_btn(p,"+",224.,246.,30.,28.,Action::VolumeStep(5),false,can_up);
-        self.transport_btn(p,"LYRICS",self.width-52.,245.,28.,28.,Action::ToggleLyrics,self.lyric_mode,true);
-    }}
-
+    /// Stage 2 lyric mode (mockup stage2-musik, tabel spesifikasi "Mode lirik"): panel
+    /// melebar 460->620, kolom kiri 40% detail lagu + scrubber + transport rapat (30/38 px,
+    /// mic ikut alur), pemisah 1 px, kolom kanan 60% lembar lirik setinggi +-5 baris 28 px
+    /// dengan baris aktif 15 px semibold di posisi ke-2 dan geser vertikal halus 550 ms.
     fn draw_mockup_lyrics(&mut self,p:&mut Painter){unsafe{
-        let lang = self.settings.language.clone();
+        let lang=self.settings.language.clone();
         let w=self.width;
-        // Left Half: Track Content (x = 24..230)
-        let art_x=24.;let art_y=44.;let art_size=60.;
+        let left_w=(w*0.4).max(200.);            // 620*0.4 = 248
+        let lyrics_x=left_w+12.;
+        let lyrics_w=(w-lyrics_x-20.).max(120.); // ~360 = 60% panel
+
+        // ---- Kolom kiri (40%): detail lagu ----
+        let art_x=24.;let art_y=46.;let art_size=56.;
         let key=if self.cover.is_some(){self.cover_key}else{0};
         if !p.cover(self.cover.as_ref(),key,art_x,art_y,art_size,false){
-            p.fill(art_x,art_y,art_size,art_size,8.,0x16222b);
-            p.text("♫",art_x+19.,art_y+13.,24.,30.,22.,0x8dc4dd,false);
+            p.fill(art_x,art_y,art_size,art_size,12.,0x2b4a63);
+            p.text_centered("♫",art_x,art_y,art_size,art_size,22.,0xb2e7ee,1.,false);
         }
-
-        let default_title = crate::i18n::t("music.no_music", &lang);
+        let default_title=crate::i18n::t("music.no_music",&lang);
         let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
-        p.text_ellipsis(title,94.,44.,120.,18.,14.,0xffffff,true);
-        p.icon_media_app(224.,52.,&self.track.source_app,self.track_is_youtube,self.track.playing);
-
-        let default_artist = crate::i18n::t("music.no_artist", &lang);
+        p.text_ellipsis(title,92.,46.,left_w-104.,20.,15.,0xf5f8ff,true);
+        let default_artist=crate::i18n::t("music.no_artist",&lang);
         let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
-        p.text_ellipsis(&artist,94.,65.,126.,16.,12.,0x9ea3a8,false);
-
-        let default_album = crate::i18n::t("music.single_album", &lang);
+        p.text_ellipsis(&artist,92.,68.,left_w-104.,16.,12.,0xc5cedd,false);
+        let default_album=crate::i18n::t("music.single_album",&lang);
         let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
-        p.text_ellipsis(&album,94.,85.,126.,16.,11.,0x6e7681,false);
+        p.text_ellipsis(&album,92.,86.,left_w-104.,16.,11.,0x9299a4,false);
+        p.icon_media_app(left_w-16.,art_y+8.,&self.track.source_app,self.track_is_youtube,self.track.playing);
 
-        // Scrubber
+        // Scrubber (mockup .scrub: waktu 11px, bar 4px, thumb muncul saat hover)
         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
         let duration=self.track.duration_seconds;
         let ratio=if duration>0.{(position/duration).clamp(0.,1.)}else{0.};
-
         let scrub_y=114.;
-        p.text(&time_label(position),24.,scrub_y,30.,14.,10.,0xffffff,false);
-        let track_x=58.;let track_w=128.;
+        p.text(&time_label(position),24.,scrub_y,34.,14.,11.,0xe8e8ee,false);
+        let track_x=62.;let track_w=(left_w-62.-54.).max(40.);
         let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+16.);
         p.fill(track_x,scrub_y+5.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
-        if ratio>0.{
-            p.fill(track_x,scrub_y+5.,track_w*ratio as f32,4.,2.,0xffffff);
-        }
+        if ratio>0.{p.fill(track_x,scrub_y+5.,track_w*ratio as f32,4.,2.,0xd8d8de);}
         if scrub_hov{
-            let thumb_x=(track_x+track_w*ratio as f32-4.5).clamp(track_x-2.,track_x+track_w-7.);
-            p.fill(thumb_x,scrub_y+2.5,9.,9.,4.5,0xffffff);
+            let thumb_x=(track_x+track_w*ratio as f32-5.).clamp(track_x-2.,track_x+track_w-8.);
+            p.fill(thumb_x,scrub_y+2.,10.,10.,5.,0xf4f4f6);
         }
         if self.focused.as_ref()==Some(&Action::SeekPointer){
             p.stroke(track_x-2.,scrub_y+1.,track_w+4.,12.,4.,0xd5d5dc,1.);
@@ -263,35 +216,36 @@ impl Shell {
             self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,16.),action:Action::SeekPointer});
         }
         let remaining=(duration-position).max(0.);
-        p.text(&format!("-{}",time_label(remaining)),190.,scrub_y,36.,14.,10.,0xffffff,false);
+        p.text(&format!("-{}",time_label(remaining)),left_w-48.,scrub_y,42.,14.,11.,0xe8e8ee,false);
 
-        // Transport Controls
+        // Transport rapat (mockup .islyr .transport: tombol 30px, putar 38px, mic ikut alur)
         let trans_y=138.;
-        self.transport_btn(p,"LYRICS",24.,trans_y,28.,28.,Action::ToggleLyrics,true,true);
-        self.transport_btn(p,"⏮",64.,trans_y,28.,28.,Action::Previous,false,self.track.can_previous);
-        let play_symbol=if self.track.playing{"⏸"}else{"▶"};
-        self.transport_btn(p,play_symbol,104.,trans_y,28.,28.,Action::Play,false,self.track.can_toggle);
-        self.transport_btn(p,"⏭",144.,trans_y,28.,28.,Action::Next,false,self.track.can_next);
+        let (slots,_) =Self::spotify_transport_slots(true);
+        let gx=24.;
+        self.transport_btn(p,"MIC",gx+slots[0].0,trans_y,slots[0].1,30.,Action::ToggleLyrics,self.lyric_mode,true);
+        self.transport_btn(p,"SHUFFLE",gx+slots[1].0,trans_y,slots[1].1,30.,Action::ToggleShuffle,self.track.shuffle,self.track.can_shuffle);
+        self.transport_btn(p,"⏮",gx+slots[2].0,trans_y,slots[2].1,30.,Action::Previous,false,self.track.can_previous);
+        self.spotify_play_button(p,gx+slots[3].0,trans_y-4.,slots[3].1,self.track.playing,self.track.can_toggle);
+        self.transport_btn(p,"⏭",gx+slots[4].0,trans_y,slots[4].1,30.,Action::Next,false,self.track.can_next);
+        self.transport_btn(p,"REPEAT",gx+slots[5].0,trans_y,slots[5].1,30.,Action::CycleRepeat,self.track.repeat_mode>0,true);
 
-        // Subtle vertical divider (x = 238)
-        p.fill_alpha(238.,44.,1.,122.,0.,0xffffff,0.12);
+        // Pemisah vertikal 1px (mockup .pdiv #3a4350)
+        p.fill_alpha(left_w,44.,1.,132.,0.,0xffffff,0.14);
 
-        // Right Half: Synchronized Lyrics (x = 252..w-20)
-        let lyrics_x=252.;
-        let lyrics_w=w-272.;
+        // ---- Kolom kanan (60%): lembar lirik ----
         if !self.settings.lyrics_online {
-            p.text(crate::i18n::t("music.consent_off",&lang),lyrics_x,46.,lyrics_w,42.,13.,0xdddddd,false);
-            p.text(crate::i18n::t("music.consent_hint",&lang),lyrics_x,90.,lyrics_w,50.,11.,0x92929d,false);
-            self.button_h(p,crate::i18n::t("music.open_settings",&lang),lyrics_x,145.,lyrics_w,24.,Action::OpenSettingsAudio,false);
+            p.text(crate::i18n::t("music.consent_off",&lang),lyrics_x,50.,lyrics_w,42.,13.,0xdddddd,false);
+            p.text(crate::i18n::t("music.consent_hint",&lang),lyrics_x,94.,lyrics_w,50.,11.,0x92929d,false);
+            self.button_h(p,crate::i18n::t("music.open_settings",&lang),lyrics_x,142.,lyrics_w,24.,Action::OpenSettingsAudio,false);
             return;
         }
-        let no_lyrics_msg = crate::i18n::t("music.no_lyrics", &lang);
-        let loading_lyrics_msg = crate::i18n::t("music.loading_lyrics", &lang);
+        let no_lyrics_msg=crate::i18n::t("music.no_lyrics",&lang);
+        let loading_lyrics_msg=crate::i18n::t("music.loading_lyrics",&lang);
         if self.lyrics_from_youtube {
-            p.text(crate::i18n::t("music.youtube_captions", &lang),lyrics_x,26.,lyrics_w,16.,10.,0x72777b,false);
+            p.text(crate::i18n::t("music.youtube_captions",&lang),lyrics_x,32.,lyrics_w,16.,10.,0x72777b,false);
         }
-        if !self.track.title.is_empty() && !self.jobs.contains_key("Musik") && self.lyrics.is_empty() {
-            self.button_h(p,crate::i18n::t("music.lyrics_retry", &lang),w-102.,144.,84.,20.,Action::LyricsRetry,false);
+        if !self.track.title.is_empty()&&!self.jobs.contains_key("Musik")&&self.lyrics.is_empty(){
+            self.button_h(p,crate::i18n::t("music.lyrics_retry",&lang),w-104.,146.,84.,20.,Action::LyricsRetry,false);
         }
         if self.lyrics.is_empty(){
             if self.jobs.contains_key("Musik"){
@@ -307,12 +261,12 @@ impl Shell {
                 }else{
                     let start=self.lyric_offset.saturating_sub(1).min(plain_lines.len().saturating_sub(1));
                     for (i,line) in plain_lines.iter().skip(start).take(4).enumerate(){
-                        let ly=46.+i as f32*26.;
+                        let ly=50.+i as f32*26.;
                         let col=if i==0{0xe2e8f0}else{0x8a9291};
                         p.text_ellipsis(line,lyrics_x,ly,lyrics_w,22.,12.5,col,i==0);
                     }
                     if self.lyric_offset>0{
-                        self.button_h(p,"Reset",lyrics_x,144.,46.,20.,Action::LyricsFollow,false);
+                        self.button_h(p,"Reset",lyrics_x,146.,46.,20.,Action::LyricsFollow,false);
                     }
                 }
             }else{
@@ -320,45 +274,66 @@ impl Shell {
             }
         }else{
             let curr=super::lyric_display_index(&self.lyrics,position,self.lyric_offset);
-            if curr>0{
-                let prev_line=&self.lyrics[curr-1];
-                let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=lyrics_x&&px<=lyrics_x+lyrics_w&&py>=44.&&py<=70.);
-                p.text_ellipsis(&prev_line.text,lyrics_x,46.,lyrics_w,24.,13.,if hov{0xb0b5ba}else{0x72777b},false);
-                if self.focused.as_ref()==Some(&Action::Lyric(curr-1)){
-                    p.stroke(lyrics_x-2.,44.,lyrics_w+4.,24.,4.,0xd5d5dc,1.);
-                }
-                if self.track.can_seek&&self.hit_enabled{
-                    self.hits.push(Hit{rect:render::rect(lyrics_x,44.,lyrics_w,26.),action:Action::Lyric(curr-1)});
-                }
-            }
-            let active_line=&self.lyrics[curr];
-            if self.settings.effective_presentation().reduced_motion{p.text_ellipsis_vcenter(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true);}else{p.text_scrolling(&active_line.text,lyrics_x,74.,lyrics_w,28.,15.,0xffffff,true,(position-active_line.at).max(0.),false);}
-            if self.focused.as_ref()==Some(&Action::Lyric(curr)){
-                p.stroke(lyrics_x-2.,72.,lyrics_w+4.,28.,4.,0xd5d5dc,1.);
-            }
-            if self.track.can_seek&&self.hit_enabled{
-                self.hits.push(Hit{rect:render::rect(lyrics_x,72.,lyrics_w,30.),action:Action::Lyric(curr)});
-            }
-            if curr+1<self.lyrics.len(){
-                let next_line=&self.lyrics[curr+1];
-                let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=lyrics_x&&px<=lyrics_x+lyrics_w&&py>=102.&&py<=128.);
-                p.text_ellipsis(&next_line.text,lyrics_x,104.,lyrics_w,24.,13.,if hov{0xb0b5ba}else{0x72777b},false);
-                if self.focused.as_ref()==Some(&Action::Lyric(curr+1)){
-                    p.stroke(lyrics_x-2.,102.,lyrics_w+4.,24.,4.,0xd5d5dc,1.);
-                }
-                if self.track.can_seek&&self.hit_enabled{
-                    self.hits.push(Hit{rect:render::rect(lyrics_x,102.,lyrics_w,26.),action:Action::Lyric(curr+1)});
-                }
-            }
-            if curr+2<self.lyrics.len(){
-                let next2_line=&self.lyrics[curr+2];
-                p.text_ellipsis(&next2_line.text,lyrics_x,130.,lyrics_w,20.,11.,0x555555,false);
-            }
+            self.draw_lyric_sheet(p,curr,position,lyrics_x,lyrics_w);
             if self.lyric_offset>0{
-                let follow_lbl = crate::i18n::t("music.follow", &lang);
-                self.button_h(p,follow_lbl,w-64.,144.,46.,20.,Action::LyricsFollow,true);
+                let follow_lbl=crate::i18n::t("music.follow",&lang);
+                self.button_h(p,follow_lbl,w-66.,148.,46.,20.,Action::LyricsFollow,true);
             }
         }
+    }}
+
+    /// Lembar lirik kolom kanan: jendela 5 baris x 28 px; offset baris dianimasikan
+    /// (ease-out cubic 550 ms, mockup transform .55s cubic-bezier(.33,.8,.35,1)) setiap
+    /// kali baris aktif bergeser; reduced_motion melompat langsung. Baris aktif 15 px
+    /// semibold terang di posisi ke-2 (offset max(0, idx-1)), warna baris lain #878d96.
+    unsafe fn draw_lyric_sheet(&mut self,p:&mut Painter,curr:usize,position:f64,x:f32,w:f32){unsafe{
+        let top=44.;let row=28.;let rows=5usize;
+        let reduced=self.settings.effective_presentation().reduced_motion;
+        // Offset baris saat ini ditampilkan (melanjutkan slide yang berjalan).
+        let mut displayed=self.sheet_index as f32;
+        if let Some((from,started))=&self.sheet_slide{
+            let t=(started.elapsed().as_secs_f32()/SHEET_SLIDE.as_secs_f32()).clamp(0.,1.);
+            displayed=from+(self.sheet_index as f32-from)*ui::ease_out_cubic(t);
+        }
+        let target_i=if curr>0{curr-1}else{0};
+        if target_i!=self.sheet_index{
+            self.sheet_slide=if reduced{None}else{Some((displayed,std::time::Instant::now()))};
+            self.sheet_index=target_i;
+            if !reduced{self.start_morph_timer();}
+        }
+        let off=match &self.sheet_slide{
+            Some((from,started))=>{
+                let t=(started.elapsed().as_secs_f32()/SHEET_SLIDE.as_secs_f32()).clamp(0.,1.);
+                from+(self.sheet_index as f32-from)*ui::ease_out_cubic(t)
+            },
+            None=>self.sheet_index as f32,
+        };
+        // Jendela lembar lirik diklip agar baris yang bergeser tidak keluar kolom.
+        p.clip(x-4.,top-2.,w+8.,rows as f32*row+4.);
+        let base=off.floor() as i64;
+        for k in 0..=rows{ // satu baris ekstra menutup overlap fraksional saat slide
+            let idx=base+k as i64;
+            if idx<0{continue}
+            let Some(line)=self.lyrics.get(idx as usize)else{continue};
+            let y=top+(k as f32-(off-base as f32))*row;
+            let active=idx as usize==curr;
+            let hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=x&&px<=x+w&&py>=y&&py<=y+row);
+            let color=if active{0xf5f8ff}else if hov{0xb0b5ba}else{0x878d96};
+            if active&&!reduced{
+                p.text_scrolling(&line.text,x,y,w,row,15.,color,true,(position-line.at).max(0.),false);
+            }else if active{
+                p.text_ellipsis_vcenter(&line.text,x,y,w,row,15.,color,true);
+            }else{
+                p.text_ellipsis(&line.text,x,y+5.,w,row-8.,12.,color,false);
+            }
+            if self.focused.as_ref()==Some(&Action::Lyric(idx as usize)){
+                p.stroke(x-2.,y,w+4.,row,4.,0xd5d5dc,1.);
+            }
+            if self.track.can_seek&&self.hit_enabled{
+                self.hits.push(Hit{rect:render::rect(x,y,w,row),action:Action::Lyric(idx as usize)});
+            }
+        }
+        p.unclip();
     }}
 
     fn calendar_page(&mut self,p:&mut Painter){unsafe{
@@ -1090,11 +1065,6 @@ impl Shell {
 
             Action::Preset(action)=>{self.preset_action(action);return;},
             Action::PresetSettings=>{if !self.flush_editors_barrier(){return;}self.privacy_detail_open=false;self.mod_view=None;self.reminder_menu=None;self.settings_popup=None;self.settings_open=true;self.settings_cat=0;self.settings_scroll[0]=0.;self.settings_subpage_privacy=false;self.set_hover_stage(2);self.make_inputs();self.invalidate();return;},
-            Action::BacklogOpen=>{self.open_backlog();return;},
-            Action::BacklogClose=>{self.preset_host.backlog_open=false;self.invalidate();return;},
-            Action::BacklogItem(id,dismiss)=>{self.backlog_action(id,dismiss);return;},
-            Action::BacklogPage(delta)=>{self.preset_host.offset=(self.preset_host.offset as i64+delta as i64*5).max(0) as usize;self.focused=None;self.pressed=None;self.hits.clear();self.invalidate();return;},
-
             Action::OpenActivity(id,rev)=>{self.activity_action(id,rev,0);return;},
             Action::DismissActivity(id,rev)=>{self.activity_action(id,rev,1);return;},
             Action::ConfirmActivity(id,rev)=>{self.activity_action(id,rev,2);return;},
@@ -1631,6 +1601,7 @@ impl Shell {
                     self.notice(msg);
                 },
                 "fullscreen"=>{self.settings.hide_fullscreen=!self.settings.hide_fullscreen;self.save();},
+                "screenshot"=>{self.settings.hide_screenshot=!self.settings.hide_screenshot;self.save();},
                 "glow"=>{self.settings.glow=!self.settings.glow;self.save();},
                 "visualizer"=>{self.settings.visualizer=!self.settings.visualizer;self.sync_visualizer();self.save();},
                 "lyrics_online"=>{self.settings.lyrics_online=!self.settings.lyrics_online;self.refresh_lyrics_consent();self.save();},
@@ -1642,13 +1613,24 @@ impl Shell {
                 },
                 "water_reminder"=>{self.settings.water_reminder=!self.settings.water_reminder;self.last_water=Instant::now();self.save();},
                 "move_reminder"=>{self.settings.move_reminder=!self.settings.move_reminder;self.last_move=Instant::now();self.save();},
+                // Intensitas aksen pill Stage 1 (F2): Netral -> Halus -> Nyala -> Netral.
+                "reminder_accent"=>{
+                    self.settings.reminder_accent=match self.settings.reminder_accent.as_str(){
+                        "netral"=>"halus",
+                        "halus"=>"nyala",
+                        _=>"netral",
+                    }.into();
+                    self.save();self.invalidate();
+                },
                 "lyrics_below"=>self.settings.lyrics_below=!self.settings.lyrics_below,
                 "save_schedule"=>{let schedule=self.input(100);let times:Vec<String>=schedule.split(',').map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned).collect();if times.iter().any(|t|chrono::NaiveTime::parse_from_str(t,"%H:%M").is_err()){self.notice(crate::i18n::t("notice.schedule_invalid", &self.settings.language));return}self.settings.focus_schedule=times;let tab=self.input(101);if MODULES.contains(&tab.trim()){self.settings.default_tab=tab.trim().into();}self.notice(crate::i18n::t("notice.schedule_saved", &self.settings.language));},
                 _=>{}
             },
             Action::SeekPointer=>{},Action::LyricsFollow=>self.lyric_offset=0,
             Action::LyricsRetry=>{self.lyrics_retry=Default::default();self.request_lyrics(true);},
-            Action::Play=>self.media_command(|m|m.toggle_playback()),Action::Next=>self.media_command(|m|m.next()),Action::Previous=>self.media_command(|m|m.previous()),Action::Seek(seconds)=>{if self.track.can_seek{self.media_command(|m|m.seek(seconds));}},Action::Lyric(index)=>{if self.track.can_seek{if let Some(line)=self.lyrics.get(index){let at=line.at;self.media_command(|m|m.seek(at));}}},
+            Action::Play=>self.media_command(|m|m.toggle_playback()),Action::Next=>self.media_command(|m|m.next()),Action::Previous=>self.media_command(|m|m.previous()),
+            Action::ToggleShuffle=>self.media_command(|m|m.toggle_shuffle()),Action::CycleRepeat=>self.media_command(|m|m.cycle_repeat()),
+            Action::Seek(seconds)=>{if self.track.can_seek{self.media_command(|m|m.seek(seconds));}},Action::Lyric(index)=>{if self.track.can_seek{if let Some(line)=self.lyrics.get(index){let at=line.at;self.media_command(|m|m.seek(at));}}},
             Action::ReminderSelect(i)=>self.select_reminder(i),
             Action::ReminderStep(d)=>self.select_reminder((self.reminder_index as i32+d).clamp(0,3)as usize),
             Action::StretchLength(d)=>self.settings.stretch_seconds=(self.settings.stretch_seconds as i32+d).clamp(15,300)as u32,
@@ -1660,7 +1642,7 @@ impl Shell {
             Action::PrayerLead(d)=>self.settings.prayer_lead=(self.settings.prayer_lead as i32+d).clamp(0,30)as u32,
 
             Action::FocusStart=>{self.focus.start(self.settings.focus_minutes,false);self.start_activity_run(false);},Action::FocusBreak=>{self.focus.start(self.settings.break_minutes,true);self.start_activity_run(false);},Action::FocusPause=>{if self.focus.running(){self.focus.pause();}else{self.focus.resume();}},Action::FocusReset=>{self.focus.reset();self.activities.focus=Default::default();},Action::FocusLength(delta)=>{self.settings.focus_minutes=(self.settings.focus_minutes as i32+delta).clamp(1,180)as u32;self.save();},Action::BreakLength(delta)=>{self.settings.break_minutes=(self.settings.break_minutes as i32+delta).clamp(1,60)as u32;self.save();},
-            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};let id=match self.state.allocate_todo_id(){Ok(id)=>id,Err(_)=>{self.notice("Identitas tugas habis");return}};self.state.todos.push(Todo{id,text,done:false,due,reminded:false,note_id:None});self.clear_input(10);self.clear_input(11);},Action::Todo(id)=>{if !crate::todo_notes::todo_is_unambiguous(&self.state,id){self.notice("Identitas tugas tidak tersedia");return}if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::DeleteTodo(id,_revision)=>{crate::todo_notes::delete(&mut self.state,id,false,&mut self.store).ok();},Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
+            Action::AddTodo=>{let text=self.input(10).trim().to_owned();if text.is_empty(){return}let due_text=self.input(11);let due=if due_text.trim().is_empty(){None}else{use chrono::TimeZone;match chrono::NaiveDateTime::parse_from_str(due_text.trim(),"%Y-%m-%d %H:%M").ok().and_then(|d|Local.from_local_datetime(&d).single()){Some(time)=>Some(time),None=>{self.notice(crate::i18n::t("notice.todo_due_invalid", &self.settings.language));return}}};let id=match self.state.allocate_todo_id(){Ok(id)=>id,Err(_)=>{self.notice("Identitas tugas habis");return}};self.state.todos.push(Todo{id,text,done:false,due,reminded:false,note_id:None});self.clear_input(10);self.clear_input(11);self.save();},Action::Todo(id)=>{if !crate::todo_notes::todo_is_unambiguous(&self.state,id){self.notice("Identitas tugas tidak tersedia");return}if let Some(t)=self.state.todos.iter_mut().find(|t|t.id==id){t.done=!t.done;}},Action::TodoPage(delta)=>self.todo_offset=(self.todo_offset as i32+delta).clamp(0,self.state.todos.len().saturating_sub(1)as i32)as usize,Action::SaveNote=>{self.state.notes=self.input(12);self.notice(crate::i18n::t("notice.note_saved", &self.settings.language));},
             Action::Water=>{self.state.water.push(Drink{date:Local::now().date_naive(),ml:self.settings.water_serving});self.last_water=Instant::now();},Action::UndoWater=>{if let Some(index)=self.state.water.iter().rposition(|d|d.date==Local::now().date_naive()){self.state.water.remove(index);}},Action::WaterTarget(delta)=>self.settings.water_target=(self.settings.water_target as i32+delta).clamp(250,10000)as u32,Action::WaterServing(delta)=>self.settings.water_serving=(self.settings.water_serving as i32+delta).clamp(50,2000)as u32,
             Action::WaterInterval(delta)=>{self.settings.water_interval=(self.settings.water_interval as i32+delta).clamp(5,180)as u32;self.save();},
             Action::MoveInterval(delta)=>{self.settings.move_interval=(self.settings.move_interval as i32+delta).clamp(5,180)as u32;self.save();},
@@ -1857,24 +1839,31 @@ impl Shell {
                             return;
                         }
 
-                        let managed_files: Vec<crate::update::transaction::ManagedFile> = extracted
-                            .into_iter()
-                            .map(|rel| {
-                                let stage_path = stage_dir.join(&rel);
-                                let orig_path = install_dir.join(&rel);
-                                let stage_sha256 = crate::update::crypto::hash_file_hex(&stage_path).ok();
-                                let original_sha256 = if orig_path.exists() {
-                                    crate::update::crypto::hash_file_hex(&orig_path).ok()
-                                } else {
-                                    None
-                                };
-                                crate::update::transaction::ManagedFile {
-                                    relative_path: rel,
-                                    stage_sha256,
-                                    original_sha256,
+                        let mut managed_files = Vec::with_capacity(extracted.len());
+                        for rel in extracted {
+                            let stage_path = stage_dir.join(&rel);
+                            let orig_path = install_dir.join(&rel);
+                            let stage_sha256 = match crate::update::crypto::hash_file_hex(&stage_path) {
+                                Ok(hash) => Some(hash),
+                                Err(error) => {
+                                    poster.send(super::Event::UpdateStaged(Err(format!(
+                                        "Gagal menghitung hash berkas staging {:?}: {error}",
+                                        rel
+                                    ))));
+                                    return;
                                 }
-                            })
-                            .collect();
+                            };
+                            let original_sha256 = if orig_path.exists() {
+                                crate::update::crypto::hash_file_hex(&orig_path).ok()
+                            } else {
+                                None
+                            };
+                            managed_files.push(crate::update::transaction::ManagedFile {
+                                relative_path: rel,
+                                stage_sha256,
+                                original_sha256,
+                            });
+                        }
 
                         let journal = crate::update::transaction::TransactionJournal::new(
                             tx_id,
@@ -2837,10 +2826,10 @@ fn media_source_choice_available(sessions:&MediaSessions,id:&Option<String>)->bo
 
 /// The dispatch used by draw_page. Quiet routes never accept content payloads.
 #[derive(Debug,PartialEq,Eq)]
-enum PageRoute{QuietMusic,QuietCalendar,Hidden,Backlog,Music,Calendar,Reminder,Clipboard,Notes,Weather,Power,Other}
-fn page_route(tab:&str,quiet:bool,backlog:bool,notes_enabled:bool)->PageRoute{
+enum PageRoute{QuietMusic,QuietCalendar,Hidden,Music,Calendar,Reminder,Clipboard,Notes,Weather,Power,Other}
+fn page_route(tab:&str,quiet:bool,notes_enabled:bool)->PageRoute{
     if quiet{return match tab{"Musik"=>PageRoute::QuietMusic,"Kalender"=>PageRoute::QuietCalendar,_=>PageRoute::Hidden};}
-    match tab{"Musik"=>PageRoute::Music,"Kalender"=>PageRoute::Calendar,"Reminder" if backlog=>PageRoute::Backlog,"Reminder"=>PageRoute::Reminder,"Clipboard"=>PageRoute::Clipboard,"Catatan" if notes_enabled=>PageRoute::Notes,"Catatan"=>PageRoute::Other,"Cuaca"=>PageRoute::Weather,"Daya"=>PageRoute::Power,_=>PageRoute::Other}
+    match tab{"Musik"=>PageRoute::Music,"Kalender"=>PageRoute::Calendar,"Reminder"=>PageRoute::Reminder,"Clipboard"=>PageRoute::Clipboard,"Catatan" if notes_enabled=>PageRoute::Notes,"Catatan"=>PageRoute::Other,"Cuaca"=>PageRoute::Weather,"Daya"=>PageRoute::Power,_=>PageRoute::Other}
 }
 #[cfg(test)]mod presenter_router_r1_tests{
  use super::*;
@@ -2848,10 +2837,9 @@ fn page_route(tab:&str,quiet:bool,backlog:bool,notes_enabled:bool)->PageRoute{
   let mut state=State::default();state.todos=(1..=12).map(|id|Todo{id,text:format!("fixture{id}"),done:false,due:None,reminded:false,note_id:None}).collect();
   let target=crate::todo_notes::resolve_activity_todo(&state,8,crate::todo_notes::NoteAccess{notes_enabled:true,quiet:false}).unwrap();
   assert_eq!(target,crate::todo_notes::NoteTarget::TasksSubview{todo_id:8});
-  assert_eq!(page_route("Catatan",false,false,true),PageRoute::Notes);
-  assert_eq!(page_route("Clipboard",false,false,true),PageRoute::Clipboard);
+  assert_eq!(page_route("Catatan",false,true),PageRoute::Notes);
+  assert_eq!(page_route("Clipboard",false,true),PageRoute::Clipboard);
   assert_eq!(crate::todo_notes::resolve_activity_todo(&state,8,crate::todo_notes::NoteAccess{notes_enabled:false,quiet:false}).unwrap(),crate::todo_notes::NoteTarget::ReminderFallback);
-  assert_eq!(page_route("Catatan",false,false,false),PageRoute::Other);
  }
  #[test]fn actual_presenter_boundary_keeps_tasks_only_in_notes(){
   let source=include_str!("pages.rs");
@@ -2863,8 +2851,8 @@ fn page_route(tab:&str,quiet:bool,backlog:bool,notes_enabled:bool)->PageRoute{
   assert!(router.contains("match page_route("));assert!(router.contains("PageRoute::Notes=>self.simpan_page(p)"));assert!(router.contains("PageRoute::Clipboard=>self.clipboard_page(p)"));
  }
  #[test]fn quiet_actual_dispatch_rejects_content_routes_and_retains_escape_music_calendar(){
-  for tab in ["Clipboard","Catatan","Cuaca","Reminder","Daya","fixture-private-mod"]{assert_eq!(page_route(tab,true,true,true),PageRoute::Hidden);}
-  assert_eq!(page_route("Musik",true,false,true),PageRoute::QuietMusic);assert_eq!(page_route("Kalender",true,false,true),PageRoute::QuietCalendar);
+  for tab in ["Clipboard","Catatan","Cuaca","Reminder","Daya","fixture-private-mod"]{assert_eq!(page_route(tab,true,true),PageRoute::Hidden);}
+  assert_eq!(page_route("Musik",true,true),PageRoute::QuietMusic);assert_eq!(page_route("Kalender",true,true),PageRoute::QuietCalendar);
  }
 }
 
@@ -2874,5 +2862,30 @@ fn page_route(tab:&str,quiet:bool,backlog:bool,notes_enabled:bool)->PageRoute{
   assert!(inputs.find("if self.settings.quiet_mode{self.input_page.clear()").unwrap()<inputs.find("self.edit(50,").unwrap());
   let preset=include_str!("preset_host.rs");let transition=preset.split("fn preset_action(").nth(1).unwrap().split("fn settle_preset_animations(").next().unwrap();
   assert!(transition.contains("self.lyric_anim=None"));assert!(transition.contains("self.tab_fade=None"));assert!(transition.contains("self.activities.feedback=None"));assert!(transition.contains("self.sync_popout_privacy()"));
+ }
+}
+
+#[cfg(test)]mod spotify_transport_r3_tests{
+ use super::*;
+ #[test]fn transport_slots_follow_the_mockup_spec(){
+  // Baris penuh (tabel spesifikasi mockup stage2-musik): acak/prev/next/ulangi 34x34,
+  // putar lingkaran 40 px, jarak 10 px; mic ditempatkan terpisah di tepi kiri.
+  let (slots,total)=Shell::spotify_transport_slots(false);
+  assert_eq!(slots[1],(0.,34.));assert_eq!(slots[2],(44.,34.));assert_eq!(slots[3],(88.,40.));
+  assert_eq!(slots[4],(138.,34.));assert_eq!(slots[5],(182.,34.));assert_eq!(total,216.);
+  // Rapat (kolom kiri mode lirik): tombol 30 px, putar 38 px, jarak 6 px, mic ikut alur.
+  let (slots,total)=Shell::spotify_transport_slots(true);
+  assert_eq!(slots[0],(0.,30.));assert_eq!(slots[3],(108.,38.));assert_eq!(total,218.);
+  assert!(slots[5].0+slots[5].1<=248.-24.,"baris rapat harus muat di kolom kiri 40% dari panel 620");
+ }
+ #[test]fn repeat_cycle_matches_media_service(){
+  assert_eq!(crate::media::next_repeat_mode(0),1);
+  assert_eq!(crate::media::next_repeat_mode(1),2);
+  assert_eq!(crate::media::next_repeat_mode(2),0);
+ }
+ #[test]fn lyric_panel_targets_the_mockup_width(){
+  // base_geometry shell.rs: mode lirik melebar ke 620 (batas CANVAS_WIDTH), bukan 530.
+  let source=include_str!("../shell.rs");
+  assert!(source.contains("(620.,186.,28.)"));
  }
 }

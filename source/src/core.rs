@@ -43,7 +43,7 @@ fn default_u8_90() -> u8 {
 #[serde(default)]
 pub struct Settings {
     pub bottom: bool, pub edge_gap: i32, pub scale: f32, pub opacity: u8, pub minimal: bool,
-    pub hide_fullscreen: bool, pub lyrics_below: bool, pub glow: bool, pub visualizer: bool, pub romanize_lyrics: bool,
+    pub hide_fullscreen: bool, #[serde(default = "default_true")] pub hide_screenshot: bool, pub lyrics_below: bool, pub glow: bool, pub visualizer: bool, pub romanize_lyrics: bool,
     pub lyrics_online: bool, pub lyrics_youtube_fallback: bool,
     #[serde(default)] pub quiet_mode: bool,
     #[serde(default)] pub power_saver_mode: bool,
@@ -97,9 +97,15 @@ pub struct Settings {
     pub hw_threshold_high: u8,
     #[serde(default = "default_u8_90")]
     pub hw_threshold_critical: u8,
+    /// Intensitas aksen pill Stage 1: "netral" (tampilan lama), "halus", atau "nyala".
+    #[serde(default = "default_reminder_accent")]
+    pub reminder_accent: String,
 }
 fn default_true() -> bool {
     true
+}
+fn default_reminder_accent() -> String {
+    "nyala".to_string()
 }
 fn default_theme_color() -> String {
     "dark".to_string()
@@ -110,9 +116,9 @@ fn default_theme_material() -> String {
 impl Default for Settings {
     fn default()->Self { Self {
         quiet_mode:false,power_saver_mode:false,
-        bottom:false,edge_gap:0,scale:1.,opacity:250,minimal:false,hide_fullscreen:true,lyrics_below:true,glow:true,visualizer:true,romanize_lyrics:true,lyrics_online:false,lyrics_youtube_fallback:false,
-        default_tab:"Musik".into(), modules: MODULES.iter().map(|&m|(m.to_owned(),m!="Clipboard")).collect(),
-        tab_order: MODULES.iter().map(|&m| m.to_string()).collect(),
+        bottom:false,edge_gap:0,scale:1.,opacity:250,minimal:false,hide_fullscreen:true,hide_screenshot:true,lyrics_below:true,glow:true,visualizer:true,romanize_lyrics:true,lyrics_online:false,lyrics_youtube_fallback:false,
+        default_tab:"Musik".into(), modules: MODULES.iter().map(|&m|(m.to_owned(),m!="Clipboard")).chain([("Catatan".to_owned(),true)]).collect(),
+        tab_order: MODULES.iter().map(|&m| m.to_string()).chain(["Catatan".to_owned()]).collect(),
         installed_mods: vec![],
         disabled_mods: vec![],
         mod_tabs: vec![],
@@ -133,6 +139,7 @@ impl Default for Settings {
         hw_metrics: vec![HwMetric::Ram, HwMetric::Cpu],
         hw_threshold_high: 80,
         hw_threshold_critical: 90,
+        reminder_accent: "nyala".into(),
         focus_minutes:25,break_minutes:5,focus_enabled:true,stretch_after_focus:true,prayer_city:"Jakarta".into(),prayer_sound:false,auto_break:false,stretch_seconds:60,prayer_enabled:false,prayer_lead:5,prayer_times:vec![String::new();5],prayer_date:String::new(),water_target:2000,water_serving:250,water_interval:45,move_interval:45,eye_interval:25,
         water_reminder:true,move_reminder:true,eye_reminder:false,
         latitude:-6.2088,longitude:106.8456,weather_city:"Jakarta".into(),weather_configured:false,
@@ -163,7 +170,7 @@ impl Settings {
         self.is_mod_installed(id) && !self.disabled_mods.iter().any(|m| m == id)
     }
     pub fn is_known_module(&self, m: &str) -> bool {
-        MODULES.contains(&m) || self.installed_mod_tabs().iter().any(|t| t == m) || self.mod_tabs.iter().any(|t| t == m)
+        m == "Catatan" || MODULES.contains(&m) || self.installed_mod_tabs().iter().any(|t| t == m) || self.mod_tabs.iter().any(|t| t == m)
     }
     pub fn active_tab_order(&self) -> Vec<String> {
         let mut order = self.tab_order.clone();
@@ -171,6 +178,10 @@ impl Settings {
             if !order.iter().any(|t| t == m) {
                 order.push(m.to_string());
             }
+        }
+        // Catatan (Simpan) adalah tab permanen bawaan — bukan mod, tidak bisa dihapus.
+        if !order.iter().any(|t| t == "Catatan") {
+            order.push("Catatan".to_string());
         }
         for m in self.installed_mod_tabs() {
             if !order.iter().any(|t| t == &m) {
@@ -289,10 +300,13 @@ impl Settings {
     /// Saved tab preference is independent of whether the package is currently active.
     pub fn mod_tab_enabled(&self,m:&str)->bool{self.is_known_module(m)&&self.modules.get(m).copied().unwrap_or(false)}
     pub fn enabled(&self,m:&str)->bool{
-        let owner=match m{"Catatan"=>Some("sticky_notes"),"Cuaca"=>Some("weather"),"Daya"=>Some("daya"),_=>None};
+        // Catatan (Simpan) adalah tab permanen bawaan — selalu aktif, bukan mod.
+        if m=="Catatan"{return true}
+        let owner=match m{"Cuaca"=>Some("weather"),"Daya"=>Some("daya"),_=>None};
         self.mod_tab_enabled(m)&&owner.is_none_or(|id|!self.disabled_mods.iter().any(|m|m==id))
     }
     pub fn set_module_enabled(&mut self,module:&str,on:bool)->bool{
+        if module=="Catatan"{return false}
         if !self.is_known_module(module){return false}
         if !on&&self.enabled(module)&&self.active_tab_order().len()<=1{return false}
         self.modules.insert(module.into(),on);
@@ -327,6 +341,9 @@ impl Settings {
         self.focus_minutes=self.focus_minutes.clamp(1,180);self.break_minutes=self.break_minutes.clamp(1,60);
         self.theme_material = crate::glass::MaterialMode::from_str(&self.theme_material).as_str().into();
         self.theme_color = if crate::glass::is_light_mode(&self.theme_color) { "light".into() } else { "dark".into() };
+        if !["netral", "halus", "nyala"].contains(&self.reminder_accent.as_str()) {
+            self.reminder_accent = "nyala".into();
+        }
         self.water_serving=self.water_serving.clamp(50,2000);self.water_target=self.water_target.clamp(100,10000);
         self.water_interval=self.water_interval.clamp(5,360);self.move_interval=self.move_interval.clamp(5,360);self.eye_interval=self.eye_interval.clamp(5,120);
         if let Some(enabled)=self.modules.remove("Fokus"){self.modules.insert("Reminder".into(),enabled);}
@@ -337,6 +354,9 @@ impl Settings {
         self.prayer_times.resize(5,String::new());self.prayer_times.truncate(5);
         for time in &mut self.prayer_times {if chrono::NaiveTime::parse_from_str(time,"%H:%M").is_err(){time.clear();}}
         self.mod_tabs.retain(|t| !t.is_empty() && !MODULES.contains(&t.as_str()) && !BUILTIN_MOD_TABS.contains(&t.as_str()));
+        // Migrasi: Catatan bukan mod lagi — entri paket lama dibersihkan, tabnya permanen.
+        self.installed_mods.retain(|m| m != "sticky_notes");
+        self.disabled_mods.retain(|m| m != "sticky_notes");
         let mut seen_tabs=std::collections::BTreeSet::new();
         self.mod_tabs.retain(|t| seen_tabs.insert(t.clone()));
         let mut seen_network=std::collections::BTreeSet::new();
@@ -345,12 +365,17 @@ impl Settings {
         let mut seen_hosts=std::collections::BTreeSet::new();
         self.net_allowed_hosts.retain(|h| !h.is_empty() && seen_hosts.insert(h.clone()));
         let mod_tabs=self.installed_mod_tabs(); for &m in MODULES {self.modules.entry(m.to_owned()).or_insert(true);} for m in &mod_tabs {self.modules.entry(m.clone()).or_insert(true);}
-        self.modules.retain(|m,_|MODULES.contains(&m.as_str())||mod_tabs.iter().any(|t|t==m)||self.mod_tabs.iter().any(|t|t==m));
+        self.modules.entry("Catatan".to_owned()).or_insert(true);
+        self.modules.retain(|m,_|m=="Catatan"||MODULES.contains(&m.as_str())||mod_tabs.iter().any(|t|t==m)||self.mod_tabs.iter().any(|t|t==m));
 
         for &m in MODULES {
             if !self.tab_order.iter().any(|t| t == m) {
                 self.tab_order.push(m.to_string());
             }
+        }
+        // Catatan (Simpan) permanen: slot selalu ada meski mod sticky_notes tak terinstall.
+        if !self.tab_order.iter().any(|t| t == "Catatan") {
+            self.tab_order.push("Catatan".to_string());
         }
         // Built-in tab names stay in the order even while the mod is uninstalled, so installing
         // it again restores the slot the user chose instead of appending it to the end.
@@ -361,7 +386,7 @@ impl Settings {
             self.language = "id".into();
         }
 
-        if self.default_tab=="Sistem"||(!MODULES.contains(&self.default_tab.as_str())&&!mod_tabs.iter().any(|t|t==&self.default_tab)&&!self.mod_tabs.iter().any(|t|t==&self.default_tab)){self.default_tab="Musik".into();}
+        if self.default_tab!="Catatan"&&(self.default_tab=="Sistem"||(!MODULES.contains(&self.default_tab.as_str())&&!mod_tabs.iter().any(|t|t==&self.default_tab)&&!self.mod_tabs.iter().any(|t|t==&self.default_tab))){self.default_tab="Musik".into();}
     }
 }
 
@@ -376,7 +401,6 @@ pub struct State {
     pub todos: Vec<Todo>,
     #[serde(default)] pub next_note_id: u64,
     #[serde(default)] pub next_todo_id: u64,
-    #[serde(default)] pub quiet_backlog_remaining_ms: u32,
     #[serde(default)] pub pending_local_reminders: Vec<crate::activity::PendingReminder>,
     #[serde(default = "crate::activity::initial_sequence")] pub next_activity_sequence: u64,
     #[serde(default)] pub local_reminder_latches: std::collections::BTreeSet<crate::activity::ActivityId>,
@@ -488,8 +512,15 @@ impl Store {
         use windows::core::PCWSTR;
         use std::os::windows::ffi::OsStrExt;
         let src:Vec<u16>=tmp.as_os_str().encode_wide().chain(Some(0)).collect();let dst:Vec<u16>=path.as_os_str().encode_wide().chain(Some(0)).collect();
-        unsafe {MoveFileExW(PCWSTR(src.as_ptr()),PCWSTR(dst.as_ptr()),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)}
-            .map_err(|_|"Penyimpanan atomik gagal; data lama dipertahankan".to_owned())?;
+        let mut move_res = unsafe {MoveFileExW(PCWSTR(src.as_ptr()),PCWSTR(dst.as_ptr()),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)};
+        if move_res.is_err() {
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+                move_res = unsafe {MoveFileExW(PCWSTR(src.as_ptr()),PCWSTR(dst.as_ptr()),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)};
+                if move_res.is_ok() { break; }
+            }
+        }
+        move_res.map_err(|_|"Penyimpanan atomik gagal; data lama dipertahankan".to_owned())?;
         self.last_error=None;Ok(())
     }
 }
@@ -581,28 +612,29 @@ impl WorkPolicy {pub fn visualize(&self)->bool{self.enabled&&self.visible&&!self
 
  use super::*;
 
- #[test]fn settings_keep_default_visible_and_reject_disabling_last_tab(){let mut s=Settings::default();s.default_tab="Musik".into();assert!(s.set_module_enabled("Musik",false));assert!(s.enabled(&s.default_tab));let order=s.active_tab_order();for tab in &order[1..]{assert!(s.set_module_enabled(tab,false));}assert_eq!(s.active_tab_order().len(),1);assert!(!s.set_module_enabled(&order[0],false));assert!(!s.set_module_enabled("invalid",true));}
+ #[test]fn settings_keep_default_visible_and_reject_disabling_last_tab(){let mut s=Settings::default();s.default_tab="Musik".into();assert!(s.set_module_enabled("Musik",false));assert!(s.enabled(&s.default_tab));let order=s.active_tab_order();for tab in &order[1..]{if tab.as_str()!="Catatan"{assert!(s.set_module_enabled(tab,false));}}assert!(s.active_tab_order().contains(&"Catatan".to_string()));assert!(!s.set_module_enabled("Catatan",false));assert!(!s.set_module_enabled("invalid",true));}
  #[test]fn prayer_location_defaults_to_jakarta_and_rejects_unknown_city(){let mut s:Settings=serde_json::from_str("{}").unwrap();assert_eq!(s.prayer_city,"Jakarta");s.prayer_city="not-a-city".into();s.normalize();assert_eq!(s.prayer_city,"Jakarta");s.prayer_city="Bandung".into();s.normalize();assert_eq!(s.prayer_city,"Bandung");}
 
  #[test]fn visualization_stops_for_every_inactive_condition(){for mask in 0..16{let p=WorkPolicy{enabled:mask&1!=0,visible:mask&2!=0,fullscreen:mask&4!=0,playing:mask&8!=0};assert_eq!(p.visualize(),mask==11);}}
  #[test]fn settings_sanitize_corrupt_values(){let mut s=Settings::default();s.scale=f32::NAN;s.focus_minutes=0;s.normalize();assert_eq!(s.scale,1.);assert_eq!(s.focus_minutes,1);}
  #[test]fn focus_pause_retains_time(){let mut f=FocusClock::default();f.start(25,false);f.pause();let remaining=f.remaining();assert!(!f.running());assert!(remaining.as_secs()>1490);f.resume();assert!(f.running());f.reset();assert!(f.remaining().is_zero());}
- #[test]fn normalize_does_not_inject_legacy_non_alpha_modules(){let mut s=Settings::default();s.normalize();assert_eq!(s.modules.len(),MODULES.len());assert!(!s.modules.contains_key("Tugas"));assert!(!s.modules.contains_key("Cuaca"));assert!(!s.modules.contains_key("AI"));assert!(!s.modules.contains_key("WhatsApp"));}
+ #[test]fn normalize_does_not_inject_legacy_non_alpha_modules(){let mut s=Settings::default();s.normalize();assert_eq!(s.modules.len(),MODULES.len()+1);assert!(s.modules.contains_key("Catatan"));assert!(!s.modules.contains_key("Tugas"));assert!(!s.modules.contains_key("Cuaca"));assert!(!s.modules.contains_key("AI"));assert!(!s.modules.contains_key("WhatsApp"));}
     #[test]
     fn mod_tab_installation_lifecycle_in_settings() {
         let mut s = Settings::default();
-        assert!(!s.enabled("Catatan"));
-        assert!(!s.is_known_module("Catatan"));
+        // Catatan (Simpan) permanen: selalu dikenal & aktif tanpa mod.
+        assert!(s.enabled("Catatan"));
+        assert!(s.is_known_module("Catatan"));
+        assert!(s.active_tab_order().contains(&"Catatan".to_string()));
+        assert!(!s.set_module_enabled("Catatan", false));
 
+        // Migrasi: entri paket lama dibersihkan normalize, tabnya tetap ada.
         s.installed_mods.push("sticky_notes".into());
         s.normalize();
+        assert!(!s.installed_mods.contains(&"sticky_notes".to_string()));
         assert!(s.is_known_module("Catatan"));
         assert!(s.enabled("Catatan"));
         assert!(s.active_tab_order().contains(&"Catatan".to_string()));
-
-        assert!(s.set_module_enabled("Catatan", false));
-        assert!(!s.enabled("Catatan"));
-        assert!(!s.active_tab_order().contains(&"Catatan".to_string()));
 
         s.installed_mods.push("weather".into());
         s.normalize();
@@ -612,8 +644,8 @@ impl WorkPolicy {pub fn visualize(&self)->bool{self.enabled&&self.visible&&!self
 
         s.installed_mods.clear();
         s.normalize();
-        assert!(!s.is_known_module("Catatan"));
-        assert!(!s.enabled("Catatan"));
+        assert!(s.is_known_module("Catatan"));
+        assert!(s.enabled("Catatan"));
         assert!(!s.is_known_module("Cuaca"));
         assert!(!s.enabled("Cuaca"));
     }
@@ -658,13 +690,15 @@ impl WorkPolicy {pub fn visualize(&self)->bool{self.enabled&&self.visible&&!self
     #[test]
     fn settings_tab_order_lists_the_tabs_the_user_can_manage() {
         let mut s = Settings::default();
-        let expected: Vec<String> = MODULES.iter().map(|m| m.to_string()).collect();
+        let mut expected: Vec<String> = MODULES.iter().map(|m| m.to_string()).collect();
+        expected.push("Catatan".into());
         assert_eq!(s.settings_tab_order(), expected);
 
-        s.installed_mods = vec!["sticky_notes".into()];
+        s.installed_mods = vec!["weather".into()];
         s.normalize();
         let order = s.settings_tab_order();
         assert!(order.contains(&"Catatan".to_string()));
+        assert!(order.contains(&"Cuaca".to_string()));
 
         s.tab_order.push("Kontrol".into());
         s.modules.insert("Kontrol".into(), true);

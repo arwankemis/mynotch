@@ -145,8 +145,9 @@ fn convert(s:&mut State,reg:&mut EditorRegistry,source:&mut Source,store:&mut St
     assert_eq!(convert(&mut s,&mut reg,&mut source,&mut db),CreateResult::SourceSaveFailed);assert!(s.todos.is_empty());assert!(s.sticky_notes[0].content.is_empty());
 }
 #[test]fn access_adapter_uses_effective_quiet_and_actual_mod_availability(){
-    let mut settings=crate::core::Settings::default();assert!(!NoteAccess::from_settings(&settings).notes_enabled);
-    settings.installed_mods.push("sticky_notes".into());settings.normalize();assert!(NoteAccess::from_settings(&settings).allowed());
+    // Catatan (Simpan) permanen: akses catatan selalu aktif kecuali mode tenang.
+    let mut settings=crate::core::Settings::default();assert!(NoteAccess::from_settings(&settings).notes_enabled);
+    settings.normalize();assert!(NoteAccess::from_settings(&settings).allowed());
     crate::presets::apply(&mut settings,crate::presets::PresetAction::SetQuiet(true));assert!(!NoteAccess::from_settings(&settings).allowed());
 }
 #[test]fn partial_panel_capture_is_not_mistaken_for_intentional_empty_input(){

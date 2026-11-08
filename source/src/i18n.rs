@@ -42,6 +42,21 @@ pub fn mod_name<'a>(id: &str, raw_name: &'a str, lang: &str) -> &'a str {
     }
 }
 
+
+/// Nama hari singkat untuk bar idle Stage 1 (mockup "Sab, 7 Nov").
+pub fn weekday_short(idx: u32, lang: &str) -> &'static str {
+    let en = lang == "en";
+    match idx {
+        0 => if en { "Mon" } else { "Sen" },
+        1 => if en { "Tue" } else { "Sel" },
+        2 => if en { "Wed" } else { "Rab" },
+        3 => if en { "Thu" } else { "Kam" },
+        4 => if en { "Fri" } else { "Jum" },
+        5 => if en { "Sat" } else { "Sab" },
+        _ => if en { "Sun" } else { "Ming" },
+    }
+}
+
 pub fn month_name(month: u32, lang: &str) -> &'static str {
     let en = lang == "en";
     match month {
@@ -257,6 +272,8 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "general.language.desc" => if en { "Select application interface language." } else { "Pilih bahasa antarmuka aplikasi." },
         "general.fullscreen" => if en { "Hide in fullscreen" } else { "Sembunyikan saat layar penuh" },
         "general.fullscreen.desc" => if en { "When gaming or watching videos." } else { "Saat bermain game atau menonton video." },
+        "general.screenshot" => if en { "Hide when screenshot" } else { "Sembunyikan saat screenshot" },
+        "general.screenshot.desc" => if en { "Hide notch during screen capture (Ctrl+Shift+S)." } else { "Sembunyikan notch saat screenshot (Ctrl+Shift+S)." },
         "general.minimal" => if en { "Minimal bar mode" } else { "Mode bar kecil" },
         "general.minimal.desc" => if en { "Use a sleek mini bar when notch is collapsed." } else { "Gunakan bar kecil saat notch ditutup." },
         "general.default_tab" => if en { "Startup tab" } else { "Tab saat dibuka" },
@@ -367,6 +384,13 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "music.lyrics_error" => if en { "Lyrics failed to load. Check your connection and try again." } else { "Lirik gagal dimuat. Periksa koneksi lalu coba lagi." },
         "music.follow" => if en { "Follow" } else { "Ikuti" },
         "music.open_player_first" => if en { "Open music player first." } else { "Buka pemutar musik terlebih dahulu." },
+
+        // Quick controls
+        "quick.preview_badge" => if en { "PREVIEW" } else { "PRATINJAU" },
+        "quick.preview_notice" => if en { "Preview — device state is not changed yet" } else { "Pratinjau — status perangkat belum diubah" },
+        "quick.no_wifi" => if en { "No Wi-Fi adapter detected" } else { "Tidak ada adaptor Wi-Fi terdeteksi" },
+        "quick.no_bluetooth" => if en { "No Bluetooth adapter detected" } else { "Tidak ada adaptor Bluetooth terdeteksi" },
+        "quick.no_display" => if en { "No display detected" } else { "Tidak ada monitor terdeteksi" },
 
         // Calendar
         "calendar.national_holiday" => if en { "National holiday" } else { "Libur nasional" },
@@ -670,7 +694,7 @@ mod tests {
         let keys = [
             "settings.title", "settings.auto_saved", "settings.back",
             "cat.general", "cat.appearance", "cat.tabs", "cat.audio", "cat.reminders", "cat.mods",
-            "general.language", "general.fullscreen", "general.minimal", "general.default_tab", "general.startup",
+            "general.language", "general.fullscreen", "general.screenshot", "general.minimal", "general.default_tab", "general.startup",
             "appearance.position", "appearance.top", "appearance.bottom", "appearance.scale",
             "appearance.gap", "appearance.opacity", "appearance.material", "appearance.material.desc", "color.dark", "color.light", "material.solid", "material.lite", "material.adaptive", "material.fallback.reduced", "material.fallback.contrast", "material.fallback.software", "material.fallback.unavailable",
             "audio.visualizer", "audio.glow", "audio.romanize", "audio.open_music",

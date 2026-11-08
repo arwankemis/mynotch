@@ -285,43 +285,37 @@ impl BrightnessAdapter for MockBrightnessAdapter {
     }
 }
 
-/// Real Windows runtime adapter for Radios with safe fallback.
-pub struct WindowsRadioAdapter {
-    fallback: MockRadioAdapter,
-}
+/// Preview-only radio adapter. No Windows radio API is implemented yet, so it reports no
+/// devices instead of presenting a mock list as if real hardware were detected.
+pub struct WindowsRadioAdapter;
 
 impl WindowsRadioAdapter {
     pub fn new() -> Self {
-        Self {
-            fallback: MockRadioAdapter::new_default(),
-        }
+        Self
     }
 }
 
 impl RadioAdapter for WindowsRadioAdapter {
     fn enumerate_radios(&self) -> Vec<RadioDevice> {
-        self.fallback.enumerate_radios()
+        Vec::new()
     }
 
-    fn set_radio_state(&self, id: &str, on: bool) -> Result<RadioState, String> {
-        self.fallback.set_radio_state(id, on)
+    fn set_radio_state(&self, _id: &str, _on: bool) -> Result<RadioState, String> {
+        Err("Kontrol radio belum diimplementasikan".to_string())
     }
 
-    fn request_access(&self, id: &str) -> Result<RadioAccess, String> {
-        self.fallback.request_access(id)
+    fn request_access(&self, _id: &str) -> Result<RadioAccess, String> {
+        Err("Kontrol radio belum diimplementasikan".to_string())
     }
 }
 
-/// Real Windows runtime adapter for Internal Display via WMI (`ROOT\\WMI`).
-pub struct WindowsBrightnessAdapter {
-    fallback: MockBrightnessAdapter,
-}
+/// Reads the internal panel brightness through WMI (`ROOT\\WMI`). Changing brightness is not
+/// implemented yet, so the value is read-only and unavailable displays are not fabricated.
+pub struct WindowsBrightnessAdapter;
 
 impl WindowsBrightnessAdapter {
     pub fn new() -> Self {
-        Self {
-            fallback: MockBrightnessAdapter::new_default(),
-        }
+        Self
     }
 
     /// Attempts to query WMI `WmiMonitorBrightness` from `ROOT\\WMI`.
@@ -375,7 +369,7 @@ impl WindowsBrightnessAdapter {
             let key_cur: Vec<u16> = "CurrentBrightness".encode_utf16().chain(Some(0)).collect();
             let mut v_cur = VARIANT::default();
             obj.Get(PCWSTR(key_cur.as_ptr()), 0, &mut v_cur, None, None).ok()?;
-            let current = f64::try_from(&v_cur).ok().map(|n| n as u32).unwrap_or(75);
+            let current = f64::try_from(&v_cur).ok().map(|n| n as u32)?;
 
             let key_lvl: Vec<u16> = "Level".encode_utf16().chain(Some(0)).collect();
             let mut v_lvl = VARIANT::default();
@@ -390,18 +384,24 @@ impl WindowsBrightnessAdapter {
 
 impl BrightnessAdapter for WindowsBrightnessAdapter {
     fn enumerate_displays(&self) -> Vec<DisplayDevice> {
-        let mut displays = self.fallback.enumerate_displays();
-        if let Some((cur, lvls)) = Self::query_wmi_brightness() {
-            if let Some(int_disp) = displays.iter_mut().find(|d| d.id == "disp_internal") {
-                int_disp.current_percent = cur;
-                int_disp.supported_levels = lvls;
-                int_disp.status_text = format!("Aktual: {cur}% (Level tersnap WMI)");
-            }
-        }
-        displays
+        let Some((current, levels)) = Self::query_wmi_brightness() else {
+            return Vec::new();
+        };
+        vec![DisplayDevice {
+            id: "disp_internal".to_string(),
+            name: "Layar internal".to_string(),
+            kind: DisplayKind::InternalWmi,
+            current_percent: current,
+            target_percent: None,
+            supported_levels: levels,
+            min_percent: 0,
+            max_percent: 100,
+            status_text: format!("Aktual: {current}%"),
+            sub_status_text: "Nilai dibaca dari WMI. Pengaturan kecerahan belum diimplementasikan.".to_string(),
+        }]
     }
 
-    fn set_brightness(&self, id: &str, percent: u32) -> Result<u32, String> {
-        self.fallback.set_brightness(id, percent)
+    fn set_brightness(&self, _id: &str, _percent: u32) -> Result<u32, String> {
+        Err("Pengaturan kecerahan belum diimplementasikan".to_string())
     }
 }

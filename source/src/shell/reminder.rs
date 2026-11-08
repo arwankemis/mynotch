@@ -12,6 +12,11 @@ fn due_key(now:chrono::DateTime<chrono::FixedOffset>,time:&str,lead:u32)->Option
         if (0..60).contains(&now.signed_duration_since(at).num_seconds()){return Some(format!("{day} {time}"))}
     }None
 }
+/// Effective period in seconds for a minutes-based setting of the given reminder key.
+pub(super) fn period_secs(key:&str,minutes:u32)->u64{let _=key;minutes as u64*60}
+/// Effective stretch countdown in seconds.
+pub(super) fn stretch_secs(seconds:u32)->u64{seconds as u64}
+fn minutes_label(minutes:u32,en:bool)->String{if en{format!("{minutes} min")}else{format!("{minutes} menit")}}
 fn menu_values(key:&str, lang: &str)->Vec<(u32,String)>{
     let en = lang == "en";
     let (values,unit):(&[u32],&str)=match key{
@@ -132,7 +137,6 @@ impl Shell{
     }}
     pub(super) fn reminder_page(&mut self,p:&mut Painter){unsafe{
         let lang = self.settings.language.clone();
-        self.button_h(p,if lang=="en"{"Held reminders"}else{"Pengingat tertahan"},24.,44.,155.,24.,Action::BacklogOpen,false);
         if self.width<440.{
             // The page layout needs 440 px; a narrow notch used to render a blank page
             // with no explanation. Say so instead of silently skipping.
@@ -205,8 +209,8 @@ impl Shell{
                 };
                 self.rw_button(p,btn_lbl,346.,148.,62.,action,true,enabled);
                 self.rw_icon_button(p,"reset",414.,148.,Action::FocusReset,enabled);
-                let focus_dur_val = if lang == "en" { format!("{} min", self.settings.focus_minutes) } else { format!("{} menit", self.settings.focus_minutes) };
-                let break_dur_val = if lang == "en" { format!("{} min", self.settings.break_minutes) } else { format!("{} menit", self.settings.break_minutes) };
+                let focus_dur_val = minutes_label(self.settings.focus_minutes, lang == "en");
+                let break_dur_val = minutes_label(self.settings.break_minutes, lang == "en");
                 self.rw_select(p,"focus",crate::i18n::t("reminder.focus_duration", &lang),&focus_dur_val,229.,224.,146.);
                 self.rw_select(p,"break",crate::i18n::t("reminder.break_duration", &lang),&break_dur_val,386.,224.,146.);
                 self.rw_check(p,crate::i18n::t("reminder.auto_break", &lang),229.,277.,self.settings.auto_break,Action::Toggle("auto_break"),enabled);
@@ -226,7 +230,7 @@ impl Shell{
                 };
                 p.text(&target_desc,346.,126.,186.,16.,10.,0x83838e,false);
                 self.rw_button(p,&format!("+ {} ml",self.settings.water_serving),346.,148.,82.,Action::Water,true,enabled);self.rw_icon_button(p,"undo",434.,148.,Action::UndoWater,water>0);
-                let interval_val = if lang == "en" { format!("{} min", self.settings.water_interval) } else { format!("{} menit", self.settings.water_interval) };
+                let interval_val = minutes_label(self.settings.water_interval, lang == "en");
                 self.rw_select(p,"water_interval",crate::i18n::t("reminder.remind_every", &lang),&interval_val,229.,224.,146.);
                 self.rw_select(p,"target",crate::i18n::t("reminder.daily_target", &lang),&format!("{} ml",ml_label(self.settings.water_target)),386.,224.,146.);
                 p.fill(229.,265.,303.,1.,0.,0x24242a);
@@ -236,7 +240,7 @@ impl Shell{
             2=>{
                 if let Some(deadline)=self.stretch_deadline{
                     let rem=deadline.saturating_duration_since(Instant::now()).as_secs_f32();
-                    let ratio=(rem/(self.settings.stretch_seconds as f32).max(1.)).clamp(0.,1.);
+                    let ratio=(rem/(stretch_secs(self.settings.stretch_seconds) as f32).max(1.)).clamp(0.,1.);
                     p.progress_ring(281.,137.,44.7,ratio,accent);
                     p.text_centered(&time_label(rem as f64),235.,116.,92.,31.,24.,WHITE,1.,false);
                     p.text_centered(crate::i18n::t("reminder.stretching", &lang),239.,148.,84.,15.,9.,0x8d8d99,1.,false);
@@ -244,7 +248,7 @@ impl Shell{
                     p.text(crate::i18n::t("reminder.stretch_tip", &lang),346.,126.,186.,16.,10.,0x83838e,false);
                     self.rw_button(p,crate::i18n::t("reminder.stretch_done", &lang),346.,148.,136.,Action::StretchDone,true,enabled);
                 }else{
-                    let ratio=1.-(self.last_move.elapsed().as_secs_f32()/(self.settings.move_interval as f32*60.)).min(1.);
+                    let ratio=1.-(self.last_move.elapsed().as_secs_f32()/(period_secs("move_interval",self.settings.move_interval) as f32)).min(1.);
                     p.progress_ring(281.,137.,44.7,ratio,accent);p.outline_icon("person",264.5,112.,33.,accent);
                     p.text_centered(crate::i18n::t("reminder.move_break", &lang),239.,151.,84.,15.,9.,0x8d8d99,1.,false);
                     p.text(crate::i18n::t("reminder.stand_up", &lang),346.,101.,186.,20.,12.,0xdddde5,false);
@@ -253,7 +257,7 @@ impl Shell{
                     self.rw_button(p,crate::i18n::t("reminder.start_break", &lang),346.,148.,82.,Action::StretchStart,true,enabled);
                     self.rw_button(p,crate::i18n::t("reminder.done", &lang),434.,148.,64.,Action::StretchDone,false,enabled);
                 }
-                let move_interval_val = if lang == "en" { format!("{} min", self.settings.move_interval) } else { format!("{} menit", self.settings.move_interval) };
+                let move_interval_val = minutes_label(self.settings.move_interval, lang == "en");
                 self.rw_select(p,"move_interval",crate::i18n::t("reminder.remind_every", &lang),&move_interval_val,229.,224.,146.);
                 let stretch_val = if self.settings.stretch_seconds < 60 {
                     if lang == "en" { format!("{} sec", self.settings.stretch_seconds) } else { format!("{} detik", self.settings.stretch_seconds) }
@@ -613,4 +617,17 @@ impl DropdownLayout {
 
     use super::*;
     #[test]fn prayer_window_uses_wib_and_handles_midnight(){use chrono::TimeZone;let tz=chrono::FixedOffset::east_opt(7*3600).unwrap();let now=tz.with_ymd_and_hms(2026,10,26,23,56,0).single().unwrap();assert!(due_key(now,"00:01",5).unwrap().starts_with("2026-10-27"));assert!(due_key(now,"23:56",0).is_some());assert!(due_key(now,"23:54",0).is_none());assert!(due_key(now,"23:57",0).is_none());}
+}
+
+#[cfg(test)]mod reminder_period_tests{
+ use super::*;
+ #[test]fn periods_are_plain_minutes_and_menus_have_no_quick_options(){
+  assert_eq!(period_secs("water_interval",45),2700);
+  assert_eq!(period_secs("focus",25),1500);
+  assert_eq!(stretch_secs(60),60);
+  // Pilihan "10 detik"/"1 menit" dihapus dari semua dropdown interval.
+  for key in ["focus","break","water_interval","move_interval","stretch_duration"]{
+    assert!(menu_values(key,"id").iter().all(|(v,l)|*v!=0&&!l.contains("detik")&&!l.contains("sec")));
+  }
+ }
 }

@@ -99,7 +99,7 @@ impl Shell{
     use super::*;
     #[test]fn builtin_open_is_disabled_when_its_tab_is_hidden(){
         let settings=Settings::default();let root=std::env::temp_dir().join("mynotch-open-policy-empty");
-        let mut entry=crate::mods::catalog::get_catalog(&root,&settings).entries.into_iter().find(|e|e.manifest.id=="sticky_notes").unwrap();
+        let mut entry=crate::mods::catalog::get_catalog(&root,&settings).entries.into_iter().find(|e|e.manifest.id=="weather").unwrap();
         entry.is_installed=true;entry.is_active=true;entry.is_tab_enabled=false;assert!(!can_open(&entry));
         entry.is_tab_enabled=true;assert!(can_open(&entry));entry.is_active=false;assert!(!can_open(&entry));
     }

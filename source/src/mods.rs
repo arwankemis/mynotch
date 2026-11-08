@@ -84,30 +84,9 @@ fn default_host_api() -> u32 { 1 }
 fn default_profiles() -> Vec<String> { vec!["public".into(), "personal".into()] }
 
 pub fn builtin_mods() -> Vec<ModManifest> {
+    // Catatan (Simpan) bukan lagi mod — tabnya permanen bawaan.
     #[allow(unused_mut)]
     let mut list = vec![
-        ModManifest {
-            schema: 1,
-            id: "sticky_notes".into(),
-            publisher: "mynotch".into(),
-            name: "Quick Sticky Notes".into(),
-            package_kind: package::PackageKind::Mod,
-            tab_name: "Catatan".into(),
-            description: "Catatan cepat melayang dan ekspor file/Windows Sticky Notes".into(),
-            version: "0.1.0".into(),
-            author: "mynotch".into(),
-            icon: "edit".into(),
-            mod_type: ModType::Builtin,
-            entry: None,
-            min_host_api: 1,
-            profiles: vec!["public".into(), "personal".into()],
-            permissions: vec![],
-            optional_dependencies: vec![],
-            default_tab_enabled: false,
-            endpoint: None,
-            cards: vec![],
-            buttons: vec![],
-        },
         ModManifest {
             schema: 1,
             id: "weather".into(),
@@ -512,10 +491,11 @@ mod tests {
     }
 
     #[test]
-    fn test_available_mods_contains_sticky_notes_and_weather() {
+    fn test_available_mods_contains_weather_but_not_sticky_notes() {
         let temp_dir = std::env::temp_dir().join(format!("mynotch_mod_avail_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let mods = available_mods(&temp_dir);
-        assert!(mods.iter().any(|m| m.id == "sticky_notes" && m.tab_name == "Catatan"));
+        // Catatan bukan mod lagi — tabnya permanen bawaan.
+        assert!(!mods.iter().any(|m| m.id == "sticky_notes"));
         assert!(mods.iter().any(|m| m.id == "weather" && m.tab_name == "Cuaca"));
 
     }

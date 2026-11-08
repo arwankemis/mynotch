@@ -59,39 +59,21 @@ impl EditorFlush for Flush{fn flush_editors(&mut self)->Result<(),&'static str>{
     assert!(!t.effective.capture_allowed(crate::core::WorkPolicy{enabled:true,visible:true,fullscreen:false,playing:true}));
 }
 fn queue(s:&mut State,n:u64){s.enqueue_local_reminder(PendingReminder::new(ActivityId::Focus(n),n as i64).unwrap()).unwrap();}
-fn step(q:&mut QuietBacklog,r:&mut ActivityRuntime,s:&mut State,i:&mut ActivityInputs,now:i64,p:PresentationPolicy)->PresentationEffects{
-    q.reconcile(s,i,now,p,r.snapshot.as_ref());r.reconcile(s,i,now,p)
-}
-#[test]fn quiet_holds_pending_then_produces_one_silent_group_and_keeps_hardware_hud(){
+#[test]fn quiet_holds_presentation_then_reminders_return_individually_after_it_ends(){
     let mut s=State::default();for n in 1..=25{queue(&mut s,n);}
-    let mut q=QuietBacklog::default();let mut r=ActivityRuntime::default();let mut i=ActivityInputs::default();
-    let quiet=PresentationPolicy{quiet:true,..Default::default()};assert!(!step(&mut q,&mut r,&mut s,&mut i,0,quiet).sound);
-    assert!(s.local_reminder_latches.is_empty());assert!(s.pending_local_reminders.iter().all(|p|p.deferred_quiet&&!p.presented_once));
-    i.hud(1,100,40,false);step(&mut q,&mut r,&mut s,&mut i,100,quiet);assert_eq!(r.snapshot.as_ref().unwrap().primary.text,"40%");
-    let mut restored:State=serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();let normal=PresentationPolicy::default();
-    assert!(!step(&mut q,&mut r,&mut restored,&mut i,2_000,normal).sound);assert_eq!(r.snapshot.as_ref().unwrap().primary.id,ActivityId::Backlog);
-    assert_eq!(i.candidates.iter().filter(|c|c.id==ActivityId::Backlog).count(),1);assert_eq!(restored.pending_local_reminders.len(),25);
-}
-#[test]fn backlog_visible_budget_pauses_under_hud_and_dismissal_does_not_discard_pending(){
-    let mut s=State::default();queue(&mut s,1);let mut q=QuietBacklog::default();let mut r=ActivityRuntime::default();let mut i=ActivityInputs::default();let p=PresentationPolicy::default();
-    step(&mut q,&mut r,&mut s,&mut i,0,PresentationPolicy{quiet:true,..p});step(&mut q,&mut r,&mut s,&mut i,0,p);
-    i.hud(1,1_000,40,false);step(&mut q,&mut r,&mut s,&mut i,1_000,p);assert_eq!(s.quiet_backlog_remaining_ms,7_000);
-    step(&mut q,&mut r,&mut s,&mut i,2_800,p);assert_eq!(s.quiet_backlog_remaining_ms,7_000);
-    q.dismiss_summary(&mut s);step(&mut q,&mut r,&mut s,&mut i,2_801,p);assert_eq!(r.snapshot.as_ref().unwrap().primary.id,ActivityId::Clock);
-    assert_eq!(s.pending_local_reminders.len(),1);assert!(s.local_reminder_latches.is_empty());
-    let mut restored:State=serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();step(&mut q,&mut r,&mut restored,&mut i,3_000,p);
+    let mut r=ActivityRuntime::default();let mut i=ActivityInputs::default();
+    let quiet=PresentationPolicy{quiet:true,..Default::default()};
+    assert!(!r.reconcile(&mut s,&mut i,0,quiet).sound);
+    // Saat tenang: tidak ada pengingat yang jadi primary; antrean tetap utuh dan dibungkam.
     assert_eq!(r.snapshot.as_ref().unwrap().primary.id,ActivityId::Clock);
-}
-#[test]fn opening_one_deferred_occurrence_is_silent_and_repeated_toggles_do_not_replay_the_group(){
-    let mut s=State::default();queue(&mut s,1);queue(&mut s,2);let mut q=QuietBacklog::default();let mut r=ActivityRuntime::default();let mut i=ActivityInputs::default();let p=PresentationPolicy::default();
-    step(&mut q,&mut r,&mut s,&mut i,0,PresentationPolicy{quiet:true,..p});step(&mut q,&mut r,&mut s,&mut i,0,p);
-    step(&mut q,&mut r,&mut s,&mut i,2_000,p);assert_eq!(s.quiet_backlog_remaining_ms,6_000);
-    step(&mut q,&mut r,&mut s,&mut i,2_000,PresentationPolicy{quiet:true,..p});step(&mut q,&mut r,&mut s,&mut i,5_000,p);assert_eq!(s.quiet_backlog_remaining_ms,6_000);
-    assert!(QuietBacklog::open_occurrence(&mut s,&ActivityId::Focus(1),true).is_none());
-    assert_eq!(QuietBacklog::open_occurrence(&mut s,&ActivityId::Focus(1),false),Some(ActivityTarget::Reminder(0)));
-    assert!(QuietBacklog::open_occurrence(&mut s,&ActivityId::Focus(1),false).is_none());
-    assert!(!step(&mut q,&mut r,&mut s,&mut i,5_001,p).sound);assert!(s.local_reminder_latches.contains(&ActivityId::Focus(1)));
-    assert!(s.pending_local_reminders.iter().any(|p|p.id==ActivityId::Focus(2)&&p.deferred_quiet));
+    i.hud(1,100,40,false);r.reconcile(&mut s,&mut i,100,quiet);assert_eq!(r.snapshot.as_ref().unwrap().primary.text,"40%");
+    assert_eq!(s.pending_local_reminders.len(),25);assert!(s.pending_local_reminders.iter().all(|p|p.silent&&!p.presented_once));
+    // Persist melintasi restart, lalu setelah tenang mati pengingat tampil individual.
+    let mut restored:State=serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+    let normal=PresentationPolicy::default();
+    assert!(!r.reconcile(&mut restored,&mut i,2_000,normal).sound);
+    assert_eq!(r.snapshot.as_ref().unwrap().primary.id,ActivityId::Focus(1));
+    assert!(restored.pending_local_reminders.iter().any(|p|p.id==ActivityId::Focus(25)));
 }
 #[test]fn failed_settings_save_keeps_effective_runtime_and_retry_persists_only_flags(){
     let root=std::env::temp_dir().join(format!("preset-fixture-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
@@ -100,17 +82,20 @@ fn step(q:&mut QuietBacklog,r:&mut ActivityRuntime,s:&mut State,i:&mut ActivityI
     assert!(s.effective_presentation().hide_sensitive);assert_eq!(stripped(&s),original);store.acknowledge_corrupt("settings.json");persist(&s,&mut store).unwrap();
     let restored:Settings=store.load("settings.json");assert!(restored.quiet_mode);assert_eq!(stripped(&restored),original);
 }
-#[test]fn todo_and_prayer_latches_wait_through_quiet_restart_and_silent_backlog(){
+#[test]fn todo_and_prayer_latches_wait_through_quiet_and_present_after_it_ends(){
     let mut s=State::default();s.todos.push(serde_json::from_value(serde_json::json!({"id":7,"text":"SYNTHETIC_PRIVATE_TODO","done":false,"due":"1970-01-01T00:00:01Z","reminded":false})).unwrap());
     s.collect_due_todos(3_000,true);
     let prayer=ActivityId::Prayer{city:"fixture".into(),date:"2026-01-01".into(),slot:0,time:"12:00".into(),lead:0,latch:"fixture-prayer".into()};
     s.enqueue_local_reminder(PendingReminder::new(prayer.clone(),2_000).unwrap()).unwrap();
-    let mut q=QuietBacklog::default();let mut r=ActivityRuntime::default();let mut i=ActivityInputs::default();let p=PresentationPolicy::default();
-    step(&mut q,&mut r,&mut s,&mut i,3_000,PresentationPolicy{quiet:true,..p});assert!(!s.todos[0].reminded);assert!(s.prayer_delivered.is_empty());
+    let mut r=ActivityRuntime::default();let mut i=ActivityInputs::default();
+    let quiet=PresentationPolicy{quiet:true,..Default::default()};
+    assert!(!r.reconcile(&mut s,&mut i,3_000,quiet).sound);assert!(!s.todos[0].reminded);assert!(s.prayer_delivered.is_empty());
     let mut restored:State=serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
-    assert!(!step(&mut q,&mut r,&mut restored,&mut i,4_000,p).sound);assert!(!restored.todos[0].reminded);assert!(restored.prayer_delivered.is_empty());
-    let todo=ActivityId::TodoDue{todo_id:7,due_ms:1_000};QuietBacklog::open_occurrence(&mut restored,&todo,false).unwrap();
-    assert!(!step(&mut q,&mut r,&mut restored,&mut i,4_001,p).sound);assert!(restored.todos[0].reminded);assert!(!restored.todos[0].done);
-    restored.dismiss_local_reminder(&todo);QuietBacklog::open_occurrence(&mut restored,&prayer,false).unwrap();
-    assert!(!step(&mut q,&mut r,&mut restored,&mut i,4_002,p).sound);assert_eq!(restored.prayer_delivered,vec!["fixture-prayer"]);
+    let normal=PresentationPolicy::default();
+    // Setelah tenang mati: todo terlewat tampil pertama (dan langsung ter-tandai), lalu sholat.
+    assert!(!r.reconcile(&mut restored,&mut i,4_000,normal).sound);assert!(restored.todos[0].reminded);assert!(!restored.todos[0].done);assert!(restored.prayer_delivered.is_empty());
+    let todo=ActivityId::TodoDue{todo_id:7,due_ms:1_000};
+    restored.dismiss_local_reminder(&todo);
+    assert!(!r.reconcile(&mut restored,&mut i,4_001,normal).sound);assert_eq!(restored.prayer_delivered,vec!["fixture-prayer"]);
+    assert_eq!(restored.prayer_delivered,vec!["fixture-prayer"]);
 }

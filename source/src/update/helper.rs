@@ -63,8 +63,112 @@ fn wait_for_pid_exit(_pid: u32, _timeout_secs: u64) -> bool {
     true
 }
 
+fn normalized_path(path: &Path) -> String {
+    let mut text = path.to_string_lossy().replace('/', "\\");
+    while text.len() > 3 && text.ends_with('\\') {
+        text.pop();
+    }
+    if cfg!(windows) {
+        text.to_ascii_lowercase()
+    } else {
+        text
+    }
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    normalized_path(a) == normalized_path(b)
+}
+
+fn path_within(root: &Path, candidate: &Path) -> bool {
+    let root = normalized_path(root);
+    let candidate = normalized_path(candidate);
+    if candidate == root {
+        return true;
+    }
+    let prefix = if root.ends_with('\\') {
+        root
+    } else {
+        format!("{root}\\")
+    };
+    candidate.starts_with(&prefix)
+}
+
+fn safe_absolute(path: &Path) -> bool {
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+fn safe_relative(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+fn validate_journal_paths(journal: &TransactionJournal, tx_dir: &Path) -> Result<(), String> {
+    if !safe_absolute(tx_dir)
+        || !safe_absolute(&journal.install_dir)
+        || !safe_absolute(&journal.stage_dir)
+        || !safe_absolute(&journal.backup_dir)
+        || !safe_absolute(&journal.target_exe)
+    {
+        return Err("Path transaksi harus absolut dan tidak memuat '..'.".to_string());
+    }
+    let update_root = journal.install_dir.join(".mynotch-update");
+    if !tx_dir
+        .parent()
+        .is_some_and(|parent| same_path(parent, &update_root))
+    {
+        return Err("Folder transaksi tidak berada di dalam folder pembaruan instalasi.".to_string());
+    }
+    let tx_name = tx_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if tx_name.is_empty() || !tx_name.eq_ignore_ascii_case(&journal.tx_id) {
+        return Err("Identitas transaksi tidak cocok dengan foldernya.".to_string());
+    }
+    if journal.tx_id.is_empty()
+        || journal.tx_id.chars().any(|c| c == '/' || c == '\\')
+        || journal.tx_id == "."
+        || journal.tx_id == ".."
+    {
+        return Err("Identitas transaksi tidak valid.".to_string());
+    }
+    if !path_within(tx_dir, &journal.stage_dir) || same_path(&journal.stage_dir, tx_dir) {
+        return Err("Folder staging berada di luar folder transaksi.".to_string());
+    }
+    if !path_within(tx_dir, &journal.backup_dir) || same_path(&journal.backup_dir, tx_dir) {
+        return Err("Folder cadangan berada di luar folder transaksi.".to_string());
+    }
+    if !path_within(&journal.install_dir, &journal.target_exe) {
+        return Err("Target executable berada di luar folder instalasi.".to_string());
+    }
+    if !journal
+        .target_exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("mynotch.exe"))
+    {
+        return Err("Target executable bukan mynotch.exe.".to_string());
+    }
+    for file in &journal.managed_files {
+        if !safe_relative(&file.relative_path) {
+            return Err(format!(
+                "Path tidak aman di jurnal transaksi: {:?}",
+                file.relative_path
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn run_helper(tx_dir: &Path) -> Result<TransactionPhase, String> {
-    run_helper_with_timeout(tx_dir, 30)
+    // Covers a slow first start plus the stability window before the healthy ACK.
+    run_helper_with_timeout(tx_dir, 45)
 }
 
 pub fn run_helper_with_timeout(
@@ -83,15 +187,10 @@ pub fn run_helper_with_timeout(
         return Err(err);
     }
 
-    // Validate journal paths safety
-    for m in &journal.managed_files {
-        if m.relative_path.is_absolute()
-            || m.relative_path.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::Prefix(_)))
-        {
-            let err = format!("Path tidak aman di jurnal transaksi: {:?}", m.relative_path);
-            journal.record_error(tx_dir, err.clone())?;
-            return Err(err);
-        }
+    // Validate every path field, not just the managed file list.
+    if let Err(err) = validate_journal_paths(&journal, tx_dir) {
+        journal.record_error(tx_dir, err.clone())?;
+        return Err(err);
     }
 
     // Verify staging file hashes before any swap
@@ -128,7 +227,11 @@ pub fn run_helper_with_timeout(
 
     // Remove any previous health ACK
     let ack_path = health_ack_file(tx_dir);
-    let _ = fs::remove_file(&ack_path);
+    if let Err(error) = fs::remove_file(&ack_path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("Gagal menghapus health ACK lama: {error}");
+        }
+    }
 
     // Step 4: Relaunch new binary
     journal.set_phase(tx_dir, TransactionPhase::Relaunching)?;
@@ -202,15 +305,25 @@ pub fn run_helper_with_timeout(
 
     // Step 6: Commit
     journal.set_phase(tx_dir, TransactionPhase::Committed)?;
-    let _ = write_receipt(
+    if let Err(error) = write_receipt(
         &journal.install_dir,
         &journal.target_version,
         &journal.target_profile,
-    );
+    ) {
+        eprintln!("Gagal menulis receipt pembaruan: {error}");
+    }
 
     // Clean up temporary stage directory, keep backup until verified
-    let _ = fs::remove_dir_all(&journal.stage_dir);
-    let _ = fs::remove_file(&ack_path);
+    if let Err(error) = fs::remove_dir_all(&journal.stage_dir) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("Gagal menghapus folder staging: {error}");
+        }
+    }
+    if let Err(error) = fs::remove_file(&ack_path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("Gagal menghapus health ACK: {error}");
+        }
+    }
 
     Ok(TransactionPhase::Committed)
 }
@@ -259,5 +372,52 @@ mod tests {
         assert!(health_ack_file(&temp).exists());
 
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    fn test_journal(install: &Path, tx: &Path) -> TransactionJournal {
+        TransactionJournal::new(
+            tx.file_name().unwrap().to_string_lossy().to_string(),
+            install.to_path_buf(),
+            tx.join("stage"),
+            tx.join("backup"),
+            install.join("mynotch.exe"),
+            0,
+            vec![crate::update::transaction::ManagedFile {
+                relative_path: PathBuf::from("mynotch.exe"),
+                stage_sha256: None,
+                original_sha256: None,
+            }],
+            "0.0.0-test".into(),
+            "public".into(),
+        )
+    }
+
+    #[test]
+    fn journal_paths_must_stay_inside_the_transaction() {
+        let install = std::env::temp_dir()
+            .join("mynotch-journal-paths")
+            .join("app");
+        let tx = install.join(".mynotch-update").join("tx-1");
+        assert!(validate_journal_paths(&test_journal(&install, &tx), &tx).is_ok());
+
+        let mut outside_install = test_journal(&install, &tx);
+        outside_install.install_dir = std::env::temp_dir();
+        assert!(validate_journal_paths(&outside_install, &tx).is_err());
+
+        let mut outside_stage = test_journal(&install, &tx);
+        outside_stage.stage_dir = std::env::temp_dir().join("elsewhere");
+        assert!(validate_journal_paths(&outside_stage, &tx).is_err());
+
+        let mut outside_target = test_journal(&install, &tx);
+        outside_target.target_exe = std::env::temp_dir().join("mynotch.exe");
+        assert!(validate_journal_paths(&outside_target, &tx).is_err());
+
+        let mut traversal = test_journal(&install, &tx);
+        traversal.managed_files[0].relative_path = PathBuf::from("..").join("escape.dll");
+        assert!(validate_journal_paths(&traversal, &tx).is_err());
+
+        let mut parent_install = test_journal(&install, &tx);
+        parent_install.install_dir = install.join("..").join("app");
+        assert!(validate_journal_paths(&parent_install, &tx).is_err());
     }
 }

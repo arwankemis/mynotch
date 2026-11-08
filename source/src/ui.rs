@@ -108,6 +108,40 @@ pub fn ease_out_back(t: f32) -> f32 {
     1. + C3 * u * u * u + C1 * u * u
 }
 
+// --- F2 sweep aksen Nyala (mockup notifikasi-reminder-mockups.html:125-141) ---
+
+/// Satu siklus sweep pita aksen pill Stage 1 (mockup `animation:sweep 3s ... infinite`).
+pub const ACCENT_SWEEP_PERIOD_MS: u64 = 3000;
+/// Decimasi repaint sweep pada timer morph 8 ms: ~40 fps cukup untuk pita lambat
+/// 3 dtk sekaligus membatasi biaya render kontinyu (philosophy ui.rs: "never keeps
+/// a render loop alive" — timer morph hanya hidup selama animasi berjalan).
+pub const ACCENT_SWEEP_FRAME_MS: u64 = 25;
+/// Rentang gerak pusat pita, sebagai pecahan lebar pill. Turunan CSS mockup:
+/// background-size 240% (pita 2.4w), posisi 170% -> -70% memetakan offset
+/// `p/100*(w-2.4w) = -1.4w*p/100`; pinggir gradasi (24%..68% dari 2.4w) bergeser
+/// dari [-1.804w,-0.748w] ke [1.556w,2.612w], jadi pusatnya -1.276w -> 2.084w.
+pub const ACCENT_SWEEP_CENTER_FROM: f32 = -1.276;
+pub const ACCENT_SWEEP_CENTER_TO: f32 = 2.084;
+/// Setengah lebar pita sebagai pecahan lebar pill (68% - 24% = 44% dari 2.4w).
+pub const ACCENT_SWEEP_HALF: f32 = 0.528;
+
+/// Easing persis mockup: `cubic-bezier(.55,.1,.45,.9)`. Solusi bisection atas
+/// kurva parameter (cukup untuk 1 panggilan per frame).
+pub fn ease_accent_sweep(t: f32) -> f32 {
+    const X1: f32 = 0.55; const Y1: f32 = 0.10;
+    const X2: f32 = 0.45; const Y2: f32 = 0.90;
+    let t = t.clamp(0., 1.);
+    if t <= 0. || t >= 1. { return t; }
+    let bez=|a: f32, b: f32, u: f32| 3.*u*(1.-u)*(1.-u)*a + 3.*u*u*(1.-u)*b + u*u*u;
+    let mut lo = 0.; let mut hi = 1.;
+    for _ in 0..24 {
+        let mid = 0.5 * (lo + hi);
+        if bez(X1, X2, mid) < t { lo = mid; } else { hi = mid; }
+    }
+    let u = 0.5 * (lo + hi);
+    bez(Y1, Y2, u)
+}
+
 /// Continuous spring motion coordinator for shell width, height, corner radius, and ear fillets.
 #[derive(Clone)]
 pub struct Morph {
@@ -437,7 +471,6 @@ pub struct IdleClockPlan {
     pub status: IdlePlanStatus,
     pub width: f32,
     pub height: f32,
-    pub icon_rect: (f32, f32, f32, f32),
     pub date_rect: (f32, f32, f32, f32),
     pub date_trimmed: bool,
     pub separator_rect: (f32, f32, f32, f32),
@@ -503,12 +536,10 @@ pub fn plan_idle_clock(
     let has_secondary = tws_present || power_present || preset_active || privacy_rail_w > 0.;
 
     let left_x = 10.;
-    let icon_rect = (left_x, (height - STAGE1_ICON_SIZE) * 0.5, STAGE1_ICON_SIZE, STAGE1_ICON_SIZE);
-    let date_x = left_x + STAGE1_ICON_SIZE + STAGE1_DATE_GAP;
+    // Tanpa ikon kalender: tanggal mulai tepat di tepi kiri konten pill.
+    let date_x = left_x;
 
     let fixed_without_date = left_x
-        + STAGE1_ICON_SIZE
-        + STAGE1_DATE_GAP
         + STAGE1_INFO_GAP
         + STAGE1_SEPARATOR_W
         + STAGE1_INFO_GAP
@@ -645,7 +676,6 @@ pub fn plan_idle_clock(
         status,
         width,
         height,
-        icon_rect,
         date_rect,
         date_trimmed,
         separator_rect,
@@ -683,9 +713,8 @@ pub fn calculate_idle_clock_target_width(
     preset_active: bool,
 ) -> f32 {
     let left_x = 10.;
+    // Tanpa ikon kalender: lebar pill tidak lagi menyisakan ruang untuk ikon.
     let fixed_without_date = left_x
-        + STAGE1_ICON_SIZE
-        + STAGE1_DATE_GAP
         + STAGE1_INFO_GAP
         + STAGE1_SEPARATOR_W
         + STAGE1_INFO_GAP
@@ -1445,21 +1474,22 @@ pub fn plan_hardware_monitor(
         assert!(p_narrow.calendar_hit.is_none());
     }
     #[test] fn stage1_calculate_target_width_exact_table(){
-        // Values from 025a-integration-plan.md Section 2.3 Table:
-        // D38/T36, no status -> 149 (content-driven adaptive on desktop without secondary elements)
-        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Unavailable, 0., 0., TwsPresentation::Absent, 0., 0., 0., false), 149.);
-        // D38/T36, charging B34 -> 211
-        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(100), 0., 34., TwsPresentation::Absent, 0., 0., 0., false), 211.);
-        // D38/T36, charging B34 + TWS group 46 (glyph 12 + gap 5 + label 29) -> 272
-        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(100), 0., 34., TwsPresentation::Known(80), 12., 29., 0., false), 272.);
-        // Plus privacy2 (R=40) + preset -> 364
-        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(100), 0., 34., TwsPresentation::Known(80), 12., 29., 40., true), 364.);
+        // Values from 025a-integration-plan.md Section 2.3 Table, minus the 17 px
+        // calendar icon slot removed from the idle plan (12 icon + 5 gap).
+        // D38/T36, no status -> 132 (content-driven adaptive on desktop without secondary elements)
+        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Unavailable, 0., 0., TwsPresentation::Absent, 0., 0., 0., false), 132.);
+        // D38/T36, charging B34 -> 194
+        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(100), 0., 34., TwsPresentation::Absent, 0., 0., 0., false), 194.);
+        // D38/T36, charging B34 + TWS group 46 (glyph 12 + gap 5 + label 29) -> 255
+        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(100), 0., 34., TwsPresentation::Known(80), 12., 29., 0., false), 255.);
+        // Plus privacy2 (R=40) + preset -> 347
+        assert_eq!(calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(100), 0., 34., TwsPresentation::Known(80), 12., 29., 40., true), 347.);
     }
     #[test] fn stage1_desktop_adaptive_content_driven_layout(){
         // Desktop profile: no battery, no TWS, no privacy rail, no preset
         let target_w = calculate_idle_clock_target_width(38., 36., PowerPresentation::Unavailable, 0., 0., TwsPresentation::Absent, 0., 0., 0., false);
-        // Must be compact between 140 and 160 DIP
-        assert!(target_w >= 140. && target_w <= 160., "target width was {target_w}, expected 140-160");
+        // Must be compact between 125 and 140 DIP (icon slot removed from the plan)
+        assert!(target_w >= 125. && target_w <= 140., "target width was {target_w}, expected 125-140");
 
         let plan = plan_idle_clock(target_w, 30., "5 Nov", 38., "10:45", 36., PowerPresentation::Unavailable, 0., 0., TwsPresentation::Absent, 0., 0., 0., false);
         assert_eq!(plan.status, IdlePlanStatus::Full);
@@ -1476,7 +1506,7 @@ pub fn plan_hardware_monitor(
     #[test] fn stage1_laptop_battery_preserves_slot_without_clipping(){
         // Laptop profile: battery charging 85%, no TWS
         let target_w = calculate_idle_clock_target_width(38., 36., PowerPresentation::Charging(85), 0., 30., TwsPresentation::Absent, 0., 0., 0., false);
-        assert!(target_w >= 200., "laptop target width must expand for battery, got {target_w}");
+        assert!(target_w >= 190., "laptop target width must expand for battery, got {target_w}");
 
         let plan = plan_idle_clock(target_w, 30., "5 Nov", 38., "10:45", 36., PowerPresentation::Charging(85), 0., 30., TwsPresentation::Absent, 0., 0., 0., false);
         assert_eq!(plan.status, IdlePlanStatus::Full);
@@ -1596,5 +1626,39 @@ pub fn media_source_range(count:usize,cursor:usize)->std::ops::Range<usize>{
             assert!(94.+(left-106.)<left);
         }
         assert_eq!(PLAYER_HEIGHT,180.);
+    }
+}
+#[cfg(test)]mod accent_sweep_tests{
+    use super::*;
+    #[test]fn sweep_easing_hits_endpoints_and_stays_in_range(){
+        assert_eq!(ease_accent_sweep(0.),0.);
+        assert_eq!(ease_accent_sweep(1.),1.);
+        assert_eq!(ease_accent_sweep(-0.5),0.);
+        assert_eq!(ease_accent_sweep(1.5),1.);
+        let mut prev=0.;
+        for i in 0..=100{
+            let t=i as f32/100.;
+            let y=ease_accent_sweep(t);
+            assert!((0.0..=1.0).contains(&y),"ease keluar [0,1] di t={t}: {y}");
+            assert!(y>=prev-1e-6,"ease tidak monotonik di t={t}: {y} < {prev}");
+            prev=y;
+        }
+    }
+    #[test]fn sweep_easing_matches_mockup_bezier_midpoints(){
+        // cubic-bezier(.55,.1,.45,.9): simetris — y(0.25)+y(0.75)=1, y(0.5)=0.5.
+        let y25=ease_accent_sweep(0.25);let y75=ease_accent_sweep(0.75);let y50=ease_accent_sweep(0.5);
+        assert!((y50-0.5).abs()<1e-3,"y(0.5)={y50}");
+        assert!((y25+y75-1.).abs()<1e-3,"y(0.25)+y(0.75)={}",y25+y75);
+        // Lambat di awal (ease-in): kuartal pertama di bawah garis lurus.
+        assert!(y25<0.25+1e-6,"y(0.25)={y25} harus < 0.25");
+        assert!(y75>0.75-1e-6,"y(0.75)={y75} harus > 0.75");
+    }
+    #[test]fn sweep_travel_covers_pill_with_offscreen_entry_and_exit(){
+        // Pusat dari -1.276w ke 2.084w dengan setengah pita 0.528w: seluruh pita
+        // berada di luar pill di kedua ujung siklus.
+        let from=ACCENT_SWEEP_CENTER_FROM+ACCENT_SWEEP_HALF;
+        let to=ACCENT_SWEEP_CENTER_TO-ACCENT_SWEEP_HALF;
+        assert!(from<0.,"pita belum keluar dari kiri saat t=0: {from}");
+        assert!(to>1.,"pita belum keluar dari kanan saat t=1: {to}");
     }
 }

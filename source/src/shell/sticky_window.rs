@@ -122,8 +122,10 @@ unsafe extern "system" fn sticky_wndproc(
                 let ptr=GetWindowLongPtrW(hwnd,GWLP_USERDATA) as *mut FloatBinding;
                 if !ptr.is_null(){
                     let context=&*ptr;
-                    if context.source.borrow_mut().capture_close(context.lease).is_err(){return LRESULT(0);}
-                    let _=PostMessageW(Some(context.shell),NOTE_SAVED,WPARAM(0),LPARAM(0));
+                    match context.source.borrow_mut().capture_close(context.lease){
+                        Ok(()) => {let _=PostMessageW(Some(context.shell),NOTE_SAVED,WPARAM(0),LPARAM(0));}
+                        Err(error) => {eprintln!("Gagal membaca catatan pop-out ({}); jendela tetap ditutup.",error.message());}
+                    }
                 }
                 let _=DestroyWindow(hwnd);LRESULT(0)
             }

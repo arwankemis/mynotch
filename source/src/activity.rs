@@ -14,7 +14,7 @@ pub enum ActivityId {
     Prayer { city: String, date: String, slot: u8, time: String, lead: u32, latch: String },
     TodoDue { todo_id: u64, due_ms: i64 },
     Water(u64), Move(u64), Eye(u64),
-    Media(u64), Hud(u64), Feedback(u64), Preview(u64), Backlog, Clock,
+    Media(u64), Hud(u64), Feedback(u64), Preview(u64), Clock,
 }
 impl ActivityId {
     pub fn kind(&self) -> Option<ReminderKind> { Some(match self {
@@ -29,13 +29,12 @@ impl ActivityId {
     fn recurring(&self) -> bool { matches!(self, Self::Water(_)|Self::Move(_)|Self::Eye(_)) }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ActivityTarget { AudioSettings, Reminder(u8), Todo(u64), Music, Calendar, PendingReminders, Unavailable }
+pub enum ActivityTarget { AudioSettings, Reminder(u8), Todo(u64), Music, Calendar, Unavailable }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingReminder {
     pub id: ActivityId, pub kind: ReminderKind, pub target: ActivityTarget,
     pub due_at_unix_ms: i64, pub remaining_visible_ms: u32,
     #[serde(default)] pub presented_once: bool,
-    #[serde(default)] pub deferred_quiet: bool,
     #[serde(default = "one")] pub coalesced_count: u32,
     #[serde(default)] pub silent: bool,
     #[serde(default)] pub deferred_count: u32,
@@ -50,7 +49,7 @@ impl PendingReminder {
         };
         Some(Self { id, kind, target, due_at_unix_ms: due_ms,
             remaining_visible_ms: if matches!(kind, ReminderKind::Water|ReminderKind::Prayer) { 12_000 } else { 8_000 },
-            presented_once: false, deferred_quiet: false, coalesced_count: 1, silent: false, deferred_count: 0 })
+            presented_once: false, coalesced_count: 1, silent: false, deferred_count: 0 })
     }
 }
 
@@ -73,7 +72,7 @@ impl State {
                 else if p.target != ActivityTarget::Todo(todo_id) { p.target = ActivityTarget::Unavailable; }
             }
             seen.entry(p.id.clone()).and_modify(|old| {
-                old.presented_once |= p.presented_once; old.deferred_quiet |= p.deferred_quiet;
+                old.presented_once |= p.presented_once;
                 old.silent |= p.silent; old.remaining_visible_ms = old.remaining_visible_ms.min(p.remaining_visible_ms);
             }).or_insert(p);
         }
@@ -192,25 +191,25 @@ pub struct ActivityRuntime { last_ms: Option<i64>, last_visible: bool, pub snaps
 fn select(state: &State, inputs: &ActivityInputs, now_ms: i64, policy: PresentationPolicy) -> (Candidate, usize) {
     let mut candidates: BTreeMap<ActivityId, Candidate> = BTreeMap::new();
     for c in &inputs.candidates {
-        if c.id==ActivityId::Backlog&&(state.quiet_backlog_remaining_ms==0||!state.pending_local_reminders.iter().any(|p|p.deferred_quiet)){continue;}
         if c.id == ActivityId::Clock || c.expires_ms.is_some_and(|end| now_ms >= end) { continue; }
         if matches!(c.id, ActivityId::Media(_)) && !policy.media { continue; }
         if matches!(c.target,Some(ActivityTarget::Reminder(_)|ActivityTarget::Todo(_))) && !policy.reminders {continue;}
-        if policy.quiet && matches!(c.id, ActivityId::Feedback(_)|ActivityId::Preview(_)|ActivityId::Backlog) { continue; }
+        if policy.quiet && matches!(c.id, ActivityId::Feedback(_)|ActivityId::Preview(_)) { continue; }
         let mut c = c.clone().bounded();
         if policy.quiet && !matches!(c.id, ActivityId::Hud(_)|ActivityId::Focus(_)|ActivityId::Stretch(_)) { c.text = "Aktivitas".into(); }
         candidates.entry(c.id.clone()).and_modify(|old| if (c.priority,c.created_ms) < (old.priority,old.created_ms) { *old=c.clone(); }).or_insert(c);
     }
     if policy.reminders && !policy.quiet {
         for p in &state.pending_local_reminders {
-            if p.remaining_visible_ms == 0 || p.deferred_quiet { continue; }
+            if p.remaining_visible_ms == 0 { continue; }
             candidates.insert(p.id.clone(),Candidate { id:p.id.clone(),priority:2,created_ms:p.due_at_unix_ms,expires_ms:None,
                 target:Some(p.target.clone()),text:format!("{:?}",p.kind),progress:None });
         }
     }
-    let other_count=candidates.len().saturating_sub(1);
-    let primary=candidates.into_values().min_by(|a,b| (a.priority,a.created_ms,a.id.kind(),&a.id).cmp(&(b.priority,b.created_ms,b.id.kind(),&b.id)))
+    let primary=candidates.values().min_by(|a,b| (a.priority,a.created_ms,a.id.kind(),&a.id).cmp(&(b.priority,b.created_ms,b.id.kind(),&b.id)))
+        .cloned()
         .unwrap_or(Candidate {id:ActivityId::Clock,priority:5,created_ms:0,expires_ms:None,target:Some(ActivityTarget::Calendar),text:String::new(),progress:None});
+    let other_count=candidates.values().filter(|c| c.priority <= 2 && c.id != primary.id).count();
     (primary,other_count)
 }
 impl ActivityRuntime {
@@ -229,7 +228,7 @@ impl ActivityRuntime {
         }
         let expired:Vec<_>=state.pending_local_reminders.iter().filter(|p|p.remaining_visible_ms==0).map(|p|p.id.clone()).collect();
         for id in expired { state.dismiss_local_reminder(&id); }
-        if policy.quiet { for p in &mut state.pending_local_reminders {p.deferred_quiet=true;p.silent=true;} }
+        if policy.quiet { for p in &mut state.pending_local_reminders {p.silent=true;} }
         let (primary,other_count)=select(state,inputs,now_ms,policy);
         let revision=self.snapshot.as_ref().map(|s|s.revision).unwrap_or(0);
         let animate=policy.visible&&!policy.reduced_motion;

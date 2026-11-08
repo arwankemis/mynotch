@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.0.2.4] - 2026-11-08
+
+This release adds the approved startup sequence and Stage 1 reminder accents, a Spotify-style Stage 2 music transport with a two-column lyric mode, mirrored now-playing bars, persistent reminder interval options, and makes the Saved (Simpan) tab a permanent built-in tab.
+
+### Added
+- **Stage 1 startup sequence:** the notch now boots into the tiny Stage 0 notch (fade + drop) and springs into the idle clock after 2.5 seconds, exactly like the approved mockup; hover still skips straight to Stage 1.
+- **Stage 1 reminder accents:** reminder pills get a per-kind accent color (hydration cyan, prayer violet, movement green, focus amber) with an icon chip and progress ring, plus a soft accent gradient on the pill background.
+- **Accent gradient sweep:** in the "Glow" accent mode a light band sweeps across the reminder pill every 3 seconds with the mockup easing; "Soft" keeps a static gradient, "Neutral" keeps the classic look.
+- **Mirrored now-playing bars:** the lyric stretch view on Stage 1 shows a 4-bar waveform centered on its middle axis (matching the mockup) instead of bottom-aligned bars.
+- **Persistent reminder intervals:** the Focus, Hydration, and Movement reminder menus now store the chosen interval in settings again, so a picked value survives restarts.
+
+### Changed
+- **Spotify-style transport:** the Stage 2 player uses the approved transport row (shuffle/previous/play/next/repeat, 4 px active dot, hover without background) driven by real Windows SMTC state, with a dedicated lyrics button.
+- **Two-column lyric mode:** the lyric view widens the panel and splits lyrics into 40/60 columns with a smooth sheet-slide animation.
+- **Saved tab is permanent:** the Notes/Simpan tab is now a built-in tab (no longer installed through the mod catalog), so a fresh install starts with Musik, Kalender, Reminder, and Simpan. Existing notes data is untouched, and the old `sticky_notes` package entry is migrated automatically.
+- **Reminder quick tests removed:** the "Held reminders" backlog, the prayer test button, and the reminder test mode toggle are removed; reminders held during Quiet mode now simply reappear one by one (still silent) after Quiet is turned off.
+
+### Fixed
+- **Quick Controls honesty:** the panel is now labeled as a preview and no longer presents fictitious Wi-Fi/Bluetooth adapters or mock brightness values as real device state. Missing radios are reported as not detected, and unsupported displays show `--%` instead of a fabricated percentage.
+- **Updater health signal:** the updated build reports itself healthy only after five seconds of stable rendering, not immediately after the first frame. The helper timeout is 45 seconds to cover startup plus the stability window.
+- **Staging integrity:** a failure to hash a staged file now aborts staging instead of silently skipping verification for that file.
+- **Transaction journal paths:** `install_dir`, `stage_dir`, `backup_dir`, and `target_exe` are validated against the transaction and installation roots, not just each managed file's relative path.
+- **Icons:** added `close`, `lock`, and `headphones` outline icons so the reminder Dismiss button, Quiet indicator, and TWS battery indicator no longer fall back to a package icon.
+- **Pop-out notes:** a pop-out window now closes even when capturing its editor fails, instead of refusing to close indefinitely.
+- **New tasks:** `AddTodo` persists immediately, matching task deletion.
+
+### Documentation
+- Refreshed `SHA256SUMS.txt` to the 0.0.2.3 release digests; it previously held 0.0.2-era hashes.
+
+---
+
 ## [0.0.2.3] - 2026-11-06
 
 This release stabilizes Stage 1 routing, adds the Stage 1 hardware monitor and weather preview, merges Clipboard and Notes into one Saved tab, and removes the custom theme system in favor of the three built-in looks.
@@ -30,6 +61,10 @@ This release stabilizes Stage 1 routing, adds the Stage 1 hardware monitor and w
 - Clipboard/Notes text and task actions stay consistent with the selected language.
 - **Reminder action buttons:** Stage 1 activity pills drew the literal icon names ("cl…", "ri…", "ch…") instead of glyphs. Close, open, and confirm now render proper outline icons for Focus, Stretch, hydration, prayer, and task-due reminders.
 - **Clipboard glyphs:** the clear (broom) and pin buttons now render icons instead of clipped text.
+
+### Security
+- **YouTube lyrics fallback:** the previous "not Spotify/VLC" gate was replaced by positive session evidence plus double consent (off by default). Candidate videos are verified by duration, title, and artist, and caption URLs are restricted to YouTube/Google Video hosts.
+- **Update recovery:** a failed rollback now surfaces a `RollbackFailed` phase and manual-reinstall message instead of being reported as success. Staging hashes are verified before the swap, `RestartNow` keeps the pending record, and the provider downloader refuses packages without a SHA-256 digest.
 
 ### Removed
 - **Custom themes:** Cyberpunk Neon, OLED Pure Black, and Retro Classic examples and the theme loader are removed. Only Solid, Glass Lite, and Glass Adaptive remain, plus the light/dark switch.

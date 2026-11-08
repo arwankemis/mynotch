@@ -3,7 +3,7 @@ use super::*;
 use crate::{activity::*,presets::*};
 
 #[derive(Default)]
-pub(super) struct PresetHost { pub(super) backlog:QuietBacklog, pub(super) backlog_open:bool, pub(super) offset:usize,pub(super) settings_unsaved:bool }
+pub(super) struct PresetHost { pub(super) settings_unsaved:bool }
 impl Shell {
     pub(super) fn preset_action(&mut self,action:PresetAction){
         // Flush before hiding native HWNDs. Failure leaves the preset unchanged.
@@ -14,7 +14,6 @@ impl Shell {
         self.lyric_anim=None;self.tab_fade=None;self.reminder_anim=None;self.media_source_open=false;
         self.focused=None;self.pressed=None;self.hits.clear();self.settings_popup=None;self.reminder_menu=None;self.weather_menu_open=false;self.storage_dropdown_open=false;self.cover_key=0;
         self.activities.feedback=None;self.toast_queue.clear();
-        if self.settings.quiet_mode {self.preset_host.backlog_open=false;}
         self.sync_popout_privacy();
         if transition.effective.reduced_motion{self.settle_preset_animations();}
         self.sync_visualizer();self.glass_settings_changed();self.make_inputs();
@@ -68,47 +67,15 @@ impl Shell {
         p.text(if self.settings.language=="en"{"Event content hidden while Quiet is on"}else{"Isi agenda disembunyikan saat Tenang"},340.,92.,self.width-364.,80.,12.,render::TEXT,false);
         self.button_h(p,if self.settings.language=="en"{"Settings"}else{"Pengaturan"},340.,190.,150.,28.,Action::PresetSettings,true);
     }}
-    pub(super) fn open_backlog(&mut self){
-        if self.settings.quiet_mode{return;}
-        self.preset_host.backlog_open=true;self.preset_host.offset=0;self.settings_open=false;self.tab="Reminder".into();
-        self.focused=None;self.pressed=None;self.hits.clear();self.set_hover_stage(2);self.make_inputs();self.invalidate();
-    }
-    pub(super) fn backlog_action(&mut self,id:ActivityId,dismiss:bool){
-        if self.settings.quiet_mode||!self.preset_host.backlog_open{return;}
-        if dismiss{self.state.dismiss_local_reminder(&id);}else if let Some(target)=QuietBacklog::open_occurrence(&mut self.state,&id,false){self.preset_host.backlog_open=false;self.open_activity_target(target);}
-        self.persist_activities();self.reconcile_activities();self.invalidate();
-    }
-    pub(super) fn draw_backlog(&mut self,p:&mut Painter){unsafe{
-        p.text(if self.settings.language=="en"{"Held reminders"}else{"Pengingat tertahan"},24.,53.,300.,24.,16.,render::TEXT,true);
-        self.button_h(p,"←",self.width-55.,50.,30.,24.,Action::BacklogClose,false);
-        let pending:Vec<_>=self.state.pending_local_reminders.iter().filter(|r|r.deferred_quiet).cloned().collect();
-        self.preset_host.offset=self.preset_host.offset.min(pending.len().saturating_sub(1)/5*5);
-        for (i,item) in pending.iter().skip(self.preset_host.offset).take(5).enumerate(){
-            let y=86.+i as f32*39.;
-            let label=if let ActivityId::TodoDue{todo_id,..}=item.id{self.state.todos.iter().find(|t|t.id==todo_id).map(|t|t.text.clone()).unwrap_or_else(||"Tugas tidak tersedia".into())}else{format!("{:?} · {}",item.kind,item.coalesced_count)};
-            p.text_ellipsis(&label,24.,y+6.,self.width-180.,24.,12.,render::TEXT,false);
-            self.button_h(p,if self.settings.language=="en"{"Open"}else{"Buka"},self.width-135.,y,65.,28.,Action::BacklogItem(item.id.clone(),false),false);
-            self.button_h(p,"×",self.width-62.,y,30.,28.,Action::BacklogItem(item.id.clone(),true),false);
-        }
-        self.button_h(p,"‹",24.,self.height-36.,32.,24.,Action::BacklogPage(-1),false);
-        self.button_h(p,"›",62.,self.height-36.,32.,24.,Action::BacklogPage(1),false);
-    }}
 }
 pub(super) fn quiet_action_allowed(action:&Action)->bool{
-    !matches!(action,Action::NotesSubview(..)|Action::ConvertNote(..)|Action::NoteSelectId(..)|Action::NoteCommand(..)|Action::TaskSelect(..)|Action::TaskDone(..)|Action::OpenTodoNote(..)|Action::DetachTodoNote(..)|Action::TasksPage(..)|Action::SelectClip(..)|Action::CopyClip(..)|Action::DeleteClip(..)|Action::ClearClips|Action::ClipPage(..)|Action::TogglePinClip(..)|Action::ToggleClipSearch|Action::WeatherToggleCustom|Action::WeatherSave|Action::WeatherSetCity(..)|Action::CalendarSave|Action::AiSave|Action::AiSend|Action::AiClear|Action::ModButtonClick(..)|Action::NoteAdd|Action::NoteSelect(..)|Action::NoteDelete(..)|Action::NoteColor(..)|Action::NoteExport(..)|Action::NotePopout|Action::AddTodo|Action::Todo(..)|Action::DeleteTodo(..)|Action::SaveNote|Action::BacklogItem(..)|Action::BacklogOpen)
+    !matches!(action,Action::NotesSubview(..)|Action::ConvertNote(..)|Action::NoteSelectId(..)|Action::NoteCommand(..)|Action::TaskSelect(..)|Action::TaskDone(..)|Action::OpenTodoNote(..)|Action::DetachTodoNote(..)|Action::TasksPage(..)|Action::SelectClip(..)|Action::CopyClip(..)|Action::DeleteClip(..)|Action::ClearClips|Action::ClipPage(..)|Action::TogglePinClip(..)|Action::ToggleClipSearch|Action::WeatherToggleCustom|Action::WeatherSave|Action::WeatherSetCity(..)|Action::CalendarSave|Action::AiSave|Action::AiSend|Action::AiClear|Action::ModButtonClick(..)|Action::NoteAdd|Action::NoteSelect(..)|Action::NoteDelete(..)|Action::NoteColor(..)|Action::NoteExport(..)|Action::NotePopout|Action::AddTodo|Action::Todo(..)|Action::DeleteTodo(..)|Action::SaveNote)
 }
 
 #[cfg(test)]mod tests{
  use super::*;
  #[test]fn quiet_dispatch_blocks_content_but_keeps_escape_transport_and_base_controls(){
-  for a in [Action::NotePopout,Action::NoteExport(2),Action::AddTodo,Action::CopyClip(0),Action::CalendarSave,Action::WeatherSave,Action::BacklogOpen]{assert!(!quiet_action_allowed(&a));}
+  for a in [Action::NotePopout,Action::NoteExport(2),Action::AddTodo,Action::CopyClip(0),Action::CalendarSave,Action::WeatherSave]{assert!(!quiet_action_allowed(&a));}
   for a in [Action::PresetSettings,Action::Preset(PresetAction::Reset),Action::Settings,Action::Play,Action::Seek(1.),Action::SelectMediaSource(None),Action::VolumeStep(1),Action::SettingsValue("material",1)]{assert!(quiet_action_allowed(&a));}
- }
- #[test]fn host_backlog_open_and_explicit_dismiss_do_not_complete_source(){
-  let mut state=State::default();state.enqueue_local_reminder(PendingReminder::new(ActivityId::Water(1),0).unwrap()).unwrap();
-  let mut host=PresetHost::default();let mut inputs=ActivityInputs::default();let policy=PresentationPolicy{quiet:true,..Default::default()};
-  host.backlog.reconcile(&mut state,&mut inputs,0,policy,None);
-  host.backlog.reconcile(&mut state,&mut inputs,1,PresentationPolicy::default(),None);
-  assert_eq!(inputs.candidates.len(),1);assert_eq!(state.water.len(),0);state.dismiss_local_reminder(&ActivityId::Water(1));assert_eq!(state.water.len(),0);
  }
 }

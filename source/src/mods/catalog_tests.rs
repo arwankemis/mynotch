@@ -46,7 +46,8 @@ fn package_uninstall_removes_tab_registration_without_deleting_observed_history(
 
 #[test]
 fn builtin_catalog_matches_install_tab_toggle_and_uninstall_after_restart() {
-    for (id,tab) in [("sticky_notes","Catatan"),("weather","Cuaca")] {
+    // Catatan (Simpan) bukan mod lagi — hanya mod bawaan ber-tab yang diuji di sini.
+    for (id,tab) in [("weather","Cuaca")] {
         let root=std::env::temp_dir().join(format!("mynotch-catalog-roundtrip-{id}-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&root).unwrap();
         let pm=PackageManager::new(&root);let mut settings=Settings::default();
@@ -83,7 +84,7 @@ fn registered_community_tab_off_is_reported_off_in_catalog() {
 
 #[test]
 fn builtin_active_switch_suspends_tab_without_losing_tab_preference() {
-    for (id,tab) in [("sticky_notes","Catatan"),("weather","Cuaca")] {
+    for (id,tab) in [("weather","Cuaca")] {
         let mut settings=Settings::default();settings.installed_mods.push(id.into());settings.modules.insert(tab.into(),true);
         settings.disabled_mods.push(id.into());
         assert!(!settings.enabled(tab));
@@ -184,7 +185,7 @@ fn test_catalog_separates_mods_and_extensions_and_marks_planned() {
     let extensions = catalog.filter(PackageKind::Extension, CatalogFilter::All, "");
 
     assert!(mods.iter().any(|p| p.manifest.id == "weather"));
-    assert!(mods.iter().any(|p| p.manifest.id == "sticky_notes"));
+    assert!(!mods.iter().any(|p| p.manifest.id == "sticky_notes"));
     assert!(mods.iter().any(|p| p.manifest.id == "daya"));
 
     // Extensions that have no real implementation must display as Planned (not available for install)

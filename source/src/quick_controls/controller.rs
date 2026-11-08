@@ -177,7 +177,15 @@ impl QuickControlsController {
             disp.target_percent = Some(raw_percent.min(100));
         } else {
             let id = disp.id.clone();
-            let _ = self.brightness_adapter.set_brightness(&id, raw_percent);
+            match self.brightness_adapter.set_brightness(&id, raw_percent) {
+                Ok(_) => {}
+                Err(error) => {
+                    self.feedback_toast = Some((
+                        format!("Gagal mengubah kecerahan: {error}"),
+                        Instant::now(),
+                    ));
+                }
+            }
             self.refresh();
         }
     }

@@ -37,7 +37,7 @@ impl Shell {
     }
     pub(super) fn show_todo(&mut self,id:u64){
         if self.settings.quiet_mode||!self.settings.enabled("Catatan")||!self.notes_host.select(&self.state,id){return;}
-        self.tab="Catatan".into();self.simpan_sub=2;self.notes_host.tasks=true;self.settings_open=false;self.privacy_detail_open=false;self.mod_view=None;self.preset_host.backlog_open=false;
+        self.tab="Catatan".into();self.simpan_sub=2;self.notes_host.tasks=true;self.settings_open=false;self.privacy_detail_open=false;self.mod_view=None;
         self.refresh_notes_host();self.clear_note_hits();self.set_hover_stage(2);self.make_inputs();
         self.focused=Some(Action::TaskSelect(id,self.notes_host.revision));self.invalidate();
     }

@@ -346,6 +346,36 @@ impl Painter {
                 }
         }
     }}
+    /// F2: gradasi horizontal (kiri -> kanan) di dalam kontur notch yang persis —
+    /// aksen latar pill Stage 1. `stops` adalah pasangan (posisi 0..1, alpha) untuk
+    /// satu warna aksen; D2D1_EXTEND_MODE_CLAMP memegang warna stop terakhir.
+    pub unsafe fn fill_notch_gradient_h(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32,stops:&[(f32,f32)]){unsafe{
+        self.fill_notch_band_gradient_h(width,height,ear,radius,rgb,0.,width,stops);
+    }}
+    /// F2: pita sweep Nyala — varian `fill_notch_gradient_h` dengan rentang ABSOLUT
+    /// `x0..x1` (DIP). Di luar rentang, EXTEND_MODE_CLAMP memegang alpha stop ujung
+    /// (0), jadi pita bisa digeser bebas masuk/keluar tepi pill tanpa artefak.
+    pub unsafe fn fill_notch_band_gradient_h(&self,width:f32,height:f32,ear:f32,radius:f32,rgb:u32,x0:f32,x1:f32,stops:&[(f32,f32)]){unsafe{
+        if stops.is_empty()||x1<=0.||x0>=width{return}
+        if let Ok(path)=self.notch_path(width,height,ear,radius){
+            let d2d_stops:Vec<D2D1_GRADIENT_STOP>=stops.iter().map(|(pos,alpha)|D2D1_GRADIENT_STOP{position:*pos,color:color(rgb,*alpha)}).collect();
+            let rt:Result<ID2D1RenderTarget>=self.context.cast();
+            if let Ok(rt)=rt{
+                if let Ok(collection)=rt.CreateGradientStopCollection(&d2d_stops,D2D1_GAMMA_2_2,D2D1_EXTEND_MODE_CLAMP){
+                    if let Ok(brush)=rt.CreateLinearGradientBrush(
+                        &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES{
+                            startPoint:windows_numerics::Vector2{X:x0,Y:0.},
+                            endPoint:windows_numerics::Vector2{X:x1,Y:0.},
+                        },
+                        None,
+                        &collection,
+                    ){
+                        self.context.FillGeometry(&path,&brush,None);
+                    }
+                }
+            }
+        }
+    }}
     pub unsafe fn draw_triangle(&self,p1:(f32,f32),p2:(f32,f32),p3:(f32,f32),rgb:u32){unsafe{
         if let Ok(path)=self.d2d.CreatePathGeometry(){
             let closed=if let Ok(sink)=path.Open(){
@@ -394,6 +424,113 @@ impl Painter {
         self.fill(cx-gap-bw*0.5,cy-bh*0.5,bw,bh,1.,rgb);
         self.fill(cx+gap-bw*0.5,cy-bh*0.5,bw,bh,1.,rgb);
     }}
+    /// Strokes polylines given in the 24-unit icon box used by the approved Stage 2 mockup
+    /// (stage2-musik-mockups.html), scaled to `size` and centered on (cx,cy).
+    unsafe fn stroke_icon_paths(&self,segs:&[&[(f32,f32)]],cx:f32,cy:f32,size:f32,rgb:u32,thickness:f32){unsafe{
+        let s=size/24.;
+        self.brush.SetColor(&color(rgb,1.));
+        for seg in segs{
+            if seg.len()<2{continue}
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx+(seg[0].0-12.)*s,cy+(seg[0].1-12.)*s),D2D1_FIGURE_BEGIN_HOLLOW);
+                    for point in &seg[1..]{sink.AddLine(pt(cx+(point.0-12.)*s,cy+(point.1-12.)*s));}
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                    let _=sink.Close();
+                    self.context.DrawGeometry(&path,&self.brush,thickness,None);
+                }
+            }
+        }
+    }}
+    /// Shuffle icon (mockup `i-shuffle`, 24-box): two crossing diagonals with arrow heads.
+    pub unsafe fn icon_shuffle(&self,cx:f32,cy:f32,size:f32,rgb:u32,thickness:f32){unsafe{
+        self.stroke_icon_paths(&[
+            &[(16.,3.),(21.,3.),(21.,8.)],
+            &[(4.,20.),(21.,3.)],
+            &[(21.,16.),(21.,21.),(16.,21.)],
+            &[(15.,15.),(21.,21.)],
+            &[(4.,4.),(9.,9.)],
+        ],cx,cy,size,rgb,thickness);
+    }}
+    /// Repeat icon (mockup `i-repeat`, 24-box): two rounded loops with arrow heads.
+    /// The 90° corner arcs are approximated with quadratic-style beziers, which at
+    /// 16-18 px renders indistinguishable from the SVG arc.
+    pub unsafe fn icon_repeat(&self,cx:f32,cy:f32,size:f32,rgb:u32,thickness:f32){unsafe{
+        let s=size/24.;
+        self.brush.SetColor(&color(rgb,1.));
+        // Arrow heads are plain polylines.
+        self.stroke_icon_paths(&[&[(17.,2.),(21.,6.),(17.,10.)],&[(7.,22.),(3.,18.),(7.,14.)]],cx,cy,size,rgb,thickness);
+        for (start,corner_to,arc_to,line_to) in [((3.,11.),(3.,6.),(7.,6.),(21.,6.)),((21.,13.),(21.,18.),(17.,18.),(3.,18.))]{
+            if let Ok(path)=self.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx+(start.0-12.)*s,cy+(start.1-12.)*s),D2D1_FIGURE_BEGIN_HOLLOW);
+                    // Straight run into the arc start (3,10)/(21,14) is folded into the corner.
+                    let arc_start=(start.0,if start.0<12.{10.}else{14.});
+                    sink.AddLine(pt(cx+(arc_start.0-12.)*s,cy+(arc_start.1-12.)*s));
+                    // Quarter arc: control point at the corner, end at (7,6)/(17,18).
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(cx+(corner_to.0-12.)*s,cy+(corner_to.1-12.)*s),point2:pt(cx+(corner_to.0-12.)*s,cy+(corner_to.1-12.)*s),point3:pt(cx+(arc_to.0-12.)*s,cy+(arc_to.1-12.)*s)});
+                    sink.AddLine(pt(cx+(line_to.0-12.)*s,cy+(line_to.1-12.)*s));
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                    let _=sink.Close();
+                    self.context.DrawGeometry(&path,&self.brush,thickness,None);
+                }
+            }
+        }
+    }}
+    /// Lyrics microphone (mockup `ly-mic`, 24-box) — replaces icon_lyrics_bubble.
+    /// When `active` the stroke is drawn white with a soft aura (three passes of
+    /// increasing width/decreasing alpha) standing in for the mockup's drop-shadow glow.
+    pub unsafe fn icon_mic(&self,cx:f32,cy:f32,size:f32,rgb:u32,thickness:f32,active:bool){
+        let s=size/24.;
+        // Body: rounded capsule (9,2.5)-(15,13.5) r3.
+        let body=|painter:&Self,rgb:u32,alpha:f32,th:f32|unsafe{
+            painter.brush.SetColor(&color(rgb,alpha));
+            if let Ok(path)=painter.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    let l=cx+(9.-12.)*s;let t=cy+(2.5-12.)*s;let r=cx+(15.-12.)*s;let b=cy+(13.5-12.)*s;let rr=3.*s;
+                    sink.BeginFigure(pt(l+rr,t),D2D1_FIGURE_BEGIN_HOLLOW);
+                    sink.AddLine(pt(r-rr,t));
+                    sink.AddArc(&D2D1_ARC_SEGMENT{point:pt(r,t+rr),size:D2D_SIZE_F{width:rr,height:rr},rotationAngle:0.,sweepDirection:D2D1_SWEEP_DIRECTION_CLOCKWISE,arcSize:D2D1_ARC_SIZE_SMALL});
+                    sink.AddLine(pt(r,b-rr));
+                    sink.AddArc(&D2D1_ARC_SEGMENT{point:pt(r-rr,b),size:D2D_SIZE_F{width:rr,height:rr},rotationAngle:0.,sweepDirection:D2D1_SWEEP_DIRECTION_CLOCKWISE,arcSize:D2D1_ARC_SIZE_SMALL});
+                    sink.AddLine(pt(l+rr,b));
+                    sink.AddArc(&D2D1_ARC_SEGMENT{point:pt(l,b-rr),size:D2D_SIZE_F{width:rr,height:rr},rotationAngle:0.,sweepDirection:D2D1_SWEEP_DIRECTION_CLOCKWISE,arcSize:D2D1_ARC_SIZE_SMALL});
+                    sink.AddLine(pt(l,t+rr));
+                    sink.AddArc(&D2D1_ARC_SEGMENT{point:pt(l+rr,t),size:D2D_SIZE_F{width:rr,height:rr},rotationAngle:0.,sweepDirection:D2D1_SWEEP_DIRECTION_CLOCKWISE,arcSize:D2D1_ARC_SIZE_SMALL});
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    let _=sink.Close();
+                    painter.context.DrawGeometry(&path,&painter.brush,th,None);
+                }
+            }
+            // Cradle: arc under the capsule + stem + base.
+            if let Ok(path)=painter.d2d.CreatePathGeometry(){
+                if let Ok(sink)=path.Open(){
+                    sink.BeginFigure(pt(cx+(5.5-12.)*s,cy+(11.-12.)*s),D2D1_FIGURE_BEGIN_HOLLOW);
+                    // Cradle memakai bezier (bukan AddArc — AddArc di painter ini render-nya
+                    // tidak konsisten; pola sama dengan icon_repeat). Kontrol 4/3*r = 8.67
+                    // menghasilkan setengah lingkaran yang mendekati bawah (12,17.5).
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT{point1:pt(cx+(5.5-12.)*s,cy+(19.67-12.)*s),point2:pt(cx+(18.5-12.)*s,cy+(19.67-12.)*s),point3:pt(cx+(18.5-12.)*s,cy+(11.-12.)*s)});
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                    sink.BeginFigure(pt(cx+(12.-12.)*s,cy+(17.5-12.)*s),D2D1_FIGURE_BEGIN_HOLLOW);
+                    sink.AddLine(pt(cx+(12.-12.)*s,cy+(21.-12.)*s));
+                    sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                    let _=sink.Close();
+                    painter.context.DrawGeometry(&path,&painter.brush,th,None);
+                }
+            }
+        };
+        if active{
+            // Aura putih (mockup .tbtn.lyr.on drop-shadow 5px/13px).
+            body(self,0xffffff,0.16,thickness+3.2);
+            body(self,0xffffff,0.30,thickness+1.6);
+            body(self,0xffffff,1.,thickness);
+        }else{
+            body(self,rgb,1.,thickness);
+        }
+    }
+    /// Superseded by `icon_mic` (mockup stage2-musik: the mic button replaces the bubble);
+    /// kept only so older call sites in external branches still compile.
+    #[allow(dead_code)]
     pub unsafe fn icon_lyrics_bubble(&self,cx:f32,cy:f32,rgb:u32,active:bool){unsafe{
         let left=cx-8.5;let top=cy-7.0;let right=cx+8.5;let bottom=cy+4.5;let r=3.5;
         if let Ok(path)=self.d2d.CreatePathGeometry(){
@@ -890,6 +1027,13 @@ impl Painter {
         if levels.is_empty(){return}let step=width/levels.len()as f32;
         for (i,&value)in levels.iter().enumerate(){let h=(value.clamp(0.,1.)*height).max(2.);self.fill(x+i as f32*step,y+height-h,(step-2.).max(1.),h,1.5,rgb);}
     }}
+    /// Waveform 4 bar mirrored (mockup `.vbars`: flex align-items center) — tiap bar
+    /// ter-center pada sumbu tengah sehingga tumbuh ke atas & bawah sekaligus.
+    /// Dipakai slot kiri lyric stretch Stage 1 saat musik playing.
+    pub unsafe fn bars_mirror(&self,levels:&[f32],x:f32,y:f32,width:f32,height:f32,rgb:u32){unsafe{
+        if levels.is_empty(){return}let step=width/levels.len()as f32;let cy=y+height*0.5;
+        for (i,&value)in levels.iter().enumerate(){let h=(value.clamp(0.,1.)*height).max(2.);self.fill(x+i as f32*step,cy-h*0.5,(step-2.).max(1.),h,1.3,rgb);}
+    }}
     /// Fades a whole scene without touching every draw call inside it.
     /// A layer that cannot be created degrades to fully opaque drawing, never to a crash.
     /// Scales everything drawn afterwards around a logical-space point. Used so the panel
@@ -1049,6 +1193,10 @@ impl Painter {
                 line(&[(5.,19.),(7.5,16.5)]);
                 line(&[(16.5,7.5),(19.,5.)]);
             },
+            "close"=>{line(&[(6.,6.),(18.,18.)]);line(&[(18.,6.),(6.,18.)]);},
+            "lock"=>{line(&[(6.,10.),(18.,10.),(18.,20.),(6.,20.),(6.,10.)]);line(&[(8.,10.),(8.,7.),(10.,4.),(14.,4.),(16.,7.),(16.,10.)]);},
+            "headphones"=>{line(&[(4.,14.),(4.,9.),(7.,4.),(12.,2.),(17.,4.),(20.,9.),(20.,14.)]);line(&[(4.,14.),(4.,18.),(6.,20.),(9.,20.),(9.,14.),(4.,14.)]);line(&[(20.,14.),(20.,18.),(18.,20.),(15.,20.),(15.,14.),(20.,14.)]);},
+            "eye"=>{line(&[(2.,12.),(6.,6.),(12.,4.),(18.,6.),(22.,12.),(18.,18.),(12.,20.),(6.,18.),(2.,12.)]);circle(12.,12.,3.5);},
             // Unknown manifest icons still need an affordance instead of an empty slot.
             _=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
         }

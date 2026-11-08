@@ -4,7 +4,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use windows::{Foundation::TypedEventHandler, Media::Control::*, Storage::Streams::DataReader};
+use windows::{Foundation::TypedEventHandler, Media::{Control::*, MediaPlaybackAutoRepeatMode}, Storage::Streams::DataReader};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MediaSnapshot {
@@ -14,7 +14,20 @@ pub struct MediaSnapshot {
     pub playing: bool,
     pub position_seconds: f64, pub duration_seconds: f64,
     pub can_seek: bool, pub can_next: bool, pub can_previous: bool,pub can_toggle:bool,
+    // Stage 2 transport (mockup stage2-musik): shuffle/repeat read from the Windows
+    // session playback info so the active dot reflects the player's real state.
+    pub can_shuffle: bool, pub shuffle: bool,
+    /// 0 = off, 1 = repeat all, 2 = repeat one (see `next_repeat_mode`).
+    pub repeat_mode: u8,
     pub artwork: Vec<u8>,
+}
+/// Cycle used by the repeat button: off -> all -> one -> off.
+pub fn next_repeat_mode(current: u8) -> u8 { match current { 0 => 1, 1 => 2, _ => 0 } }
+fn repeat_mode_enum(mode: u8) -> MediaPlaybackAutoRepeatMode {
+    match mode { 1 => MediaPlaybackAutoRepeatMode::List, 2 => MediaPlaybackAutoRepeatMode::Track, _ => MediaPlaybackAutoRepeatMode::None }
+}
+fn repeat_mode_number(mode: MediaPlaybackAutoRepeatMode) -> u8 {
+    match mode { MediaPlaybackAutoRepeatMode::List => 1, MediaPlaybackAutoRepeatMode::Track => 2, _ => 0 }
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MediaSession {
@@ -64,7 +77,9 @@ enum Command {
     SelectSession(Option<String>, u64),
     Refresh { metadata: bool },
     Toggle(Sender<Result<(), String>>), Next(Sender<Result<(), String>>),
-    Previous(Sender<Result<(), String>>), Seek(f64, Sender<Result<(), String>>), Stop,
+    Previous(Sender<Result<(), String>>), Seek(f64, Sender<Result<(), String>>),
+    ToggleShuffle(Sender<Result<(), String>>), CycleRepeat(Sender<Result<(), String>>),
+    Stop,
 }
 
 pub struct MediaService {
@@ -100,6 +115,8 @@ impl MediaService {
     pub fn toggle_playback(&self) -> Result<(), String> { self.command(Command::Toggle) }
     pub fn next(&self) -> Result<(), String> { self.command(Command::Next) }
     pub fn previous(&self) -> Result<(), String> { self.command(Command::Previous) }
+    pub fn toggle_shuffle(&self) -> Result<(), String> { self.command(Command::ToggleShuffle) }
+    pub fn cycle_repeat(&self) -> Result<(), String> { self.command(Command::CycleRepeat) }
     /// Queues selection without blocking the UI on a WinRT provider.
     pub fn select_session(&self, id: Option<String>) -> Result<u64, String> {
         let revision = self.selection_revision.fetch_add(1, Ordering::Relaxed) + 1;
@@ -290,6 +307,22 @@ fn media_worker(rx: Receiver<Command>, commands: Sender<Command>, tx: Sender<Med
             Command::Previous(reply) => (reply, with_session(target, |s| {
                 if !s.GetPlaybackInfo()?.Controls()?.IsPreviousEnabled()? { return Ok(false); } s.TrySkipPreviousAsync()?.join()
             })),
+            Command::ToggleShuffle(reply) => (reply, with_session(target, |s| {
+                let info = s.GetPlaybackInfo()?;
+                if !info.Controls()?.IsShuffleEnabled()? { return Ok(false); }
+                let active = info.IsShuffleActive()?.Value()?;
+                s.TryChangeShuffleActiveAsync(!active)?.join()
+            })),
+            Command::CycleRepeat(reply) => (reply, with_session(target, |s| {
+                // SMTC does not expose a repeat capability flag on every provider; an
+                // unsupported provider surfaces as Ok(false) and with_session turns that
+                // into a user notice instead of a silent no-op.
+                let info = s.GetPlaybackInfo()?;
+                if !info.Controls()?.IsRepeatEnabled()? { return Ok(false); }
+                let current = info.AutoRepeatMode()?.Value()?;
+                let next = repeat_mode_enum(next_repeat_mode(repeat_mode_number(current)));
+                s.TryChangeAutoRepeatModeAsync(next)?.join()
+            })),
             Command::Seek(seconds, reply) => (reply, with_session(target, |s| {
                 if !s.GetPlaybackInfo()?.Controls()?.IsPlaybackPositionEnabled()? { return Ok(false); }
                 let timeline = s.GetTimelineProperties()?;
@@ -328,6 +361,9 @@ fn read_state(session: &GlobalSystemMediaTransportControlsSession, metadata: boo
     value.can_seek = controls.IsPlaybackPositionEnabled()? && value.duration_seconds > 0.0;
     value.can_toggle=controls.IsPlayPauseToggleEnabled()?||if value.playing{controls.IsPauseEnabled()?}else{controls.IsPlayEnabled()?};
     value.can_next = controls.IsNextEnabled()?; value.can_previous = controls.IsPreviousEnabled()?;
+    value.can_shuffle = controls.IsShuffleEnabled().unwrap_or(false);
+    value.shuffle = playback.IsShuffleActive().and_then(|r| r.Value()).unwrap_or(false);
+    value.repeat_mode = repeat_mode_number(playback.AutoRepeatMode().and_then(|r| r.Value()).unwrap_or(MediaPlaybackAutoRepeatMode::None));
     let stamp = Instant::now();
     if metadata {
         // Do not retain an old song/cover if the player withdraws metadata during a transition.
@@ -426,6 +462,12 @@ mod tests {
             }
         }
         assert!(service.stop(), "native worker must stop within its grace period");
+    }
+    #[test] fn repeat_button_cycles_off_all_one() {
+        assert_eq!(next_repeat_mode(0), 1);
+        assert_eq!(next_repeat_mode(1), 2);
+        assert_eq!(next_repeat_mode(2), 0);
+        assert_eq!(next_repeat_mode(9), 0);
     }
     #[test] fn positions_are_finite_and_bounded() {
         assert_eq!(clamp_position(f64::NAN, 10.0), 0.0);

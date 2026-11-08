@@ -4,7 +4,7 @@ A portable notch for Windows that keeps music controls, your calendar, reminders
 
 Built with Rust, Direct2D, and DirectWrite. The interface uses native Windows APIs and does not need an Electron or Chromium runtime.
 
-**Current release: v0.0.2.3 (preview)** · [Download for Windows x64](https://github.com/arwankemis/mynotch/releases/tag/v0.0.2.3) · [Changelog](CHANGELOG.md)
+**Current release: v0.0.2.4 (preview)** · [Download for Windows x64](https://github.com/arwankemis/mynotch/releases/tag/v0.0.2.4) · [Changelog](CHANGELOG.md)
 
 ## Three stages
 
@@ -88,7 +88,7 @@ mynotch also has microphone and camera activity indicators. These reflect activi
 
 ## Download and run
 
-1. Download `mynotch-update-public-windows-x64-0.0.2.3.zip` from [Releases](https://github.com/arwankemis/mynotch/releases).
+1. Download `mynotch-update-public-windows-x64-0.0.2.4.zip` from [Releases](https://github.com/arwankemis/mynotch/releases).
 2. Extract it to a folder you can write to. Keep `mynotch.exe` and `libunwind.dll` together.
 3. Run `mynotch.exe`.
 
