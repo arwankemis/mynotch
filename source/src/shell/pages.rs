@@ -1253,6 +1253,14 @@ impl Shell {
                     self.lyric_mode=false;
                     self.tab_fade=if self.settings.effective_presentation().reduced_motion{None}else{Some((self.tab.clone(),Instant::now(),dir))};
                     self.tab=tab;
+                    if self.tab == "Musik" && !self.track_is_youtube && self.track.playing {
+                        let was_yt = self.track_is_youtube;
+                        self.track_is_youtube = crate::youtube::session_allows_captions(&self.track.source_app, &self.track.title, &self.track.album);
+                        if !was_yt && self.track_is_youtube {
+                            self.track_is_twitch = crate::youtube::is_twitch_session(&self.track.source_app, &self.track.title, &self.track.album);
+                            self.request_lyrics(false);
+                        }
+                    }
                     if self.tab == "Cuaca" && self.weather.is_none() {
                         self.refresh_weather(false);
                     }
@@ -1705,7 +1713,11 @@ impl Shell {
                 _=>{}
             },
             Action::SeekPointer=>{},Action::LyricsFollow=>self.lyric_offset=0,
-            Action::LyricsRetry=>{self.lyrics_retry=Default::default();self.request_lyrics(true);},
+            Action::LyricsRetry=>{
+                self.track_is_youtube = crate::youtube::session_allows_captions(&self.track.source_app, &self.track.title, &self.track.album);
+                self.track_is_twitch = crate::youtube::is_twitch_session(&self.track.source_app, &self.track.title, &self.track.album);
+                self.lyrics_retry=Default::default();self.request_lyrics(true);
+            },
             Action::Play=>self.media_command(|m|m.toggle_playback()),Action::Next=>self.media_command(|m|m.next()),Action::Previous=>self.media_command(|m|m.previous()),
             Action::ToggleShuffle=>self.media_command(|m|m.toggle_shuffle()),Action::CycleRepeat=>self.media_command(|m|m.cycle_repeat()),
             Action::Seek(seconds)=>{if self.track.can_seek{self.media_command(|m|m.seek(seconds));}},Action::Lyric(index)=>{if self.track.can_seek{if let Some(line)=self.lyrics.get(index){let at=line.at;self.media_command(|m|m.seek(at));}}},
@@ -2029,6 +2041,14 @@ impl Shell {
             },
             Action::AiSave=>{let key=self.input(43);if !key.is_empty(){match crate::secrets::protect(&key){Ok(secret)=>self.settings.ai_key=secret,Err(e)=>{self.notice(e);return}}}self.settings.ai_endpoint=self.input(41).trim().into();self.settings.ai_model=self.input(42).trim().into();self.clear_input(43);self.notice(crate::i18n::t("notice.ai_saved", &self.settings.language));},Action::AiSend=>self.send_ai(),Action::AiClear=>self.ai_messages.clear(),
             Action::ToggleLyrics=>{
+                if !self.track_is_youtube && self.track.playing {
+                    let was_yt = self.track_is_youtube;
+                    self.track_is_youtube = crate::youtube::session_allows_captions(&self.track.source_app, &self.track.title, &self.track.album);
+                    if !was_yt && self.track_is_youtube {
+                        self.track_is_twitch = crate::youtube::is_twitch_session(&self.track.source_app, &self.track.title, &self.track.album);
+                        self.request_lyrics(false);
+                    }
+                }
                 self.lyric_mode=!self.lyric_mode;
                 self.retarget_morph();
                 self.update_window_region();

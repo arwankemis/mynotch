@@ -1599,6 +1599,14 @@ impl Shell {
         }
         self.hover_stage=stage;
         self.expanded=stage>=2;
+        if stage >= 1 && !self.track_is_youtube && self.track.playing {
+            let was_yt = self.track_is_youtube;
+            self.track_is_youtube = crate::youtube::session_allows_captions(&self.track.source_app, &self.track.title, &self.track.album);
+            if !was_yt && self.track_is_youtube {
+                self.track_is_twitch = crate::youtube::is_twitch_session(&self.track.source_app, &self.track.title, &self.track.album);
+                self.request_lyrics(false);
+            }
+        }
         if stage<2 && self.tab=="Cuaca" && self.settings.enabled("Cuaca") {
             self.weather_stage1_until=Some(Instant::now()+Duration::from_secs(3));
             if self.hover_stage==0 { self.hover_stage=1; }
@@ -1786,6 +1794,8 @@ impl Shell {
     fn refresh_lyrics_consent(&mut self) {
         self.lyrics_consent.set(self.settings.lyrics_online,self.settings.lyrics_youtube_fallback);
         self.cancel_job("Musik");
+        self.track_is_youtube = crate::youtube::session_allows_captions(&self.track.source_app, &self.track.title, &self.track.album);
+        self.track_is_twitch = crate::youtube::is_twitch_session(&self.track.source_app, &self.track.title, &self.track.album);
         self.lyrics.clear();self.plain_lyrics.clear();self.lyrics_data=None;self.lyrics_key.clear();
         self.lyrics_error=None;self.lyrics_retry=Default::default();self.lyrics_from_youtube=false;
         self.last_lyric_line.clear();self.lyric_anim=None;
@@ -2559,6 +2569,15 @@ impl Shell {
         }else if let Some(sensors)=&self.power_sensors{sensors.set_active(false);self.power_snapshot=Default::default();self.power_integrator=Default::default();}
         self.poll_weather();
         if self.lyrics_retry.ready(Instant::now()) && !self.jobs.contains_key("Musik") { self.request_lyrics(true); }
+        if self.hover_stage >= 1 && !self.track_is_youtube && self.track.playing {
+            let was_yt = self.track_is_youtube;
+            self.track_is_youtube = crate::youtube::session_allows_captions(&self.track.source_app, &self.track.title, &self.track.album);
+            if !was_yt && self.track_is_youtube {
+                self.track_is_twitch = crate::youtube::is_twitch_session(&self.track.source_app, &self.track.title, &self.track.album);
+                self.request_lyrics(false);
+                self.invalidate();
+            }
+        }
         self.sync_active_lyric();
         // Community mods run once per entry/click — never per frame. Lua output is cached by
         // mod id, so a periodic refresh only happens when the cache is empty for this mod.

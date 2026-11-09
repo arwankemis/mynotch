@@ -117,9 +117,19 @@ pub fn browser_has_window_keyword(keyword: &str, track_title: &str) -> bool {
 
     let prefix = {
         let trimmed = track_title.trim();
-        if trimmed.len() >= 4 {
-            let end = trimmed.char_indices().nth(12).map(|(i, _)| i).unwrap_or(trimmed.len());
-            Some(trimmed[..end].to_lowercase())
+        let stripped = if trimmed.starts_with('(') || trimmed.starts_with('[') {
+            if let Some(pos) = trimmed.find(|c| c == ')' || c == ']') {
+                trimmed[pos + 1..].trim()
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
+        let normalized = stripped.replace(['\u{2018}', '\u{2019}', '`'], "'");
+        if normalized.len() >= 4 {
+            let end = normalized.char_indices().nth(12).map(|(i, _)| i).unwrap_or(normalized.len());
+            Some(normalized[..end].to_lowercase())
         } else {
             None
         }
@@ -136,7 +146,7 @@ pub fn browser_has_window_keyword(keyword: &str, track_title: &str) -> bool {
             let copied = GetWindowTextW(hwnd, &mut buf);
             if copied > 0 {
                 let text = String::from_utf16_lossy(&buf[..copied as usize]);
-                let text_low = text.to_lowercase();
+                let text_low = text.to_lowercase().replace(['\u{2018}', '\u{2019}', '`'], "'");
                 if text_low.contains(ctx.keyword) {
                     ctx.keyword_matched = true;
                     if let Some(ref pfx) = ctx.title_prefix {
