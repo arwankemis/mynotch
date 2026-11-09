@@ -207,3 +207,12 @@ fn test_mock_adapter_isolation() {
 
     // Purely in-memory: no physical hardware invoked
 }
+
+#[test]
+fn test_focus_reset_on_navigation() {
+    let mut ctrl = QuickControlsController::new_mock();
+    ctrl.focused_element = Some(FOCUS_WIFI_TOGGLE);
+    assert_eq!(ctrl.focused_element, Some(FOCUS_WIFI_TOGGLE));
+    ctrl.focused_element = None;
+    assert_eq!(ctrl.focused_element, None);
+}

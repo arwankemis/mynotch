@@ -1062,6 +1062,7 @@ impl Shell {
                 self.privacy_detail_open = false;
                 self.mod_view = None;
                 self.quick_controls_open = true;
+                self.quick_controls.focused_element = None;
                 self.quick_controls.refresh();
                 self.set_hover_stage(2);
                 self.invalidate();
@@ -1069,6 +1070,7 @@ impl Shell {
             },
             Action::QuickControlsBack => {
                 self.quick_controls_open = false;
+                self.quick_controls.focused_element = None;
                 self.invalidate();
                 return;
             },

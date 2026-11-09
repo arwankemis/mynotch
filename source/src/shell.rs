@@ -2108,7 +2108,7 @@ impl Shell {
                         });
                         SetTimer(Some(self.hwnd), 12, 180, None);
                     } else {
-                        self.tab_drag = None;
+                        self.tab_drag = None; } if hit.action == Action::QuickBrightnessPointer { let layout = crate::quick_controls::calculate_layout(); let ratio = ((x - layout.brightness_slider_hit.left) / (layout.brightness_slider_hit.right - layout.brightness_slider_hit.left)).clamp(0., 1.); let pct = (ratio * 100.0).round() as u32; self.action(Action::QuickControlsSetBrightness(pct, false));
                     }
                     self.invalidate();
                 }
@@ -2126,6 +2126,13 @@ impl Shell {
                 }
                 if self.morph.is_some(){return LRESULT(0)}
                 if let Some(pressed_action)=pressed{
+                    if pressed_action == Action::QuickBrightnessPointer {
+                        let layout = crate::quick_controls::calculate_layout();
+                        let ratio = ((x - layout.brightness_slider_hit.left) / (layout.brightness_slider_hit.right - layout.brightness_slider_hit.left)).clamp(0., 1.);
+                        let pct = (ratio * 100.0).round() as u32;
+                        self.action(Action::QuickControlsSetBrightness(pct, true));
+                        return LRESULT(0);
+                    }
                     if let Some(hit)=self.hits.iter().rev().find(|h|x>=h.rect.left&&x<=h.rect.right&&y>=h.rect.top&&y<=h.rect.bottom).cloned(){
                         if pressed_action==hit.action{
                             match hit.action{
@@ -2343,7 +2350,7 @@ impl Shell {
                 }
                 0x0D|0x20=>{ // VK_RETURN or VK_SPACE
                     if let Some(action)=self.focused.clone(){
-                        if action!=Action::SeekPointer{self.action(action);}
+                        if action!=Action::SeekPointer && action!=Action::QuickBrightnessPointer{self.action(action);}
                         return LRESULT(0);
                     }else if wparam.0 as u16==0x20&&self.expanded&&!self.settings_open&&self.tab=="Musik"{
                         self.action(Action::Play);
@@ -3690,15 +3697,9 @@ impl Shell {
             self.draw_privacy_rail(p, clock_x - rail_w - 8.0, y + 4.0, rail_w, 18.0);
         }
 
-        if self.track.playing&&self.settings.effective_presentation().visualizer{
-            let levels=if self.levels.len()>=4{&self.levels[0..4]}else{&[0.4,0.8,1.0,0.6]};
-            p.bars(levels,self.width-118.,16.,14.,12.,0xffffff);
-        }else if self.settings.effective_presentation().visualizer{
-            p.fill(self.width-118.,21.,14.,2.,1.,0x454e4d);
-        }
 
-        // Window buttons: Pin, Collapse, Settings
-        self.navigation_control(p,"sliders",self.width-120.,y,Action::QuickControlsOpen,self.quick_controls_open);
+        // Window buttons: Quick Controls, Pin, Collapse, Settings
+        self.navigation_control(p,"control_center",self.width-120.,y,Action::QuickControlsOpen,self.quick_controls_open);
         self.navigation_control(p,"pin",self.width-92.,y,Action::TogglePin,self.pinned);
         self.navigation_control(p,"up",self.width-64.,y,Action::ToStage1,false);
         self.navigation_control(p,"settings",self.width-36.,y,Action::Settings,false);

@@ -53,9 +53,9 @@ pub struct TwsInfo {
 
 /// RAII wrapper for one WinRT apartment init. Only an S_OK init is torn down here:
 /// RAII wrapper for WinRT apartment init.
-struct WinRtApartment { initialized: bool }
+pub(crate) struct WinRtApartment { initialized: bool }
 impl WinRtApartment {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         use windows::Win32::System::WinRT::RO_INIT_MULTITHREADED;
         windows::core::link!("api-ms-win-core-winrt-l1-1-0.dll" "system" fn RoInitialize(inittype: windows::Win32::System::WinRT::RO_INIT_TYPE) -> windows::core::HRESULT);
         let hr = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };

@@ -120,6 +120,7 @@ impl QuickControlsController {
 
         match res {
             Ok(new_state) => {
+    
                 self.refresh();
                 Ok(new_state)
             }
@@ -177,8 +178,22 @@ impl QuickControlsController {
             disp.target_percent = Some(raw_percent.min(100));
         } else {
             let id = disp.id.clone();
-            let _ = self.brightness_adapter.set_brightness(&id, raw_percent);
-            self.refresh();
+            match self.brightness_adapter.set_brightness(&id, raw_percent) {
+                Ok(new_val) => {
+                    disp.current_percent = new_val;
+                    disp.target_percent = None;
+                    disp.status_text = format!("Aktual: {new_val}%");
+                }
+                Err(e) => {
+                    disp.target_percent = None;
+                    self.feedback_toast = Some((
+                        format!("{}: {e}", crate::i18n::t("qc.toggle_failed", lang)),
+                        Instant::now(),
+                    ));
+        
+                }
+            }
+
         }
     }
 
