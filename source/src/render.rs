@@ -391,6 +391,27 @@ impl Painter {
             }
         }
     }}
+    pub unsafe fn fill_polygon(&self,points:&[(f32,f32)],rgb:u32){unsafe{
+        if points.len()<3{return}
+        if let Ok(path)=self.d2d.CreatePathGeometry(){
+            let closed=if let Ok(sink)=path.Open(){
+                sink.BeginFigure(pt(points[0].0,points[0].1),D2D1_FIGURE_BEGIN_FILLED);
+                for p in &points[1..]{
+                    sink.AddLine(pt(p.0,p.1));
+                }
+                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                sink.Close().is_ok()
+            }else{false};
+            if closed{
+                self.brush.SetColor(&color(rgb,1.));
+                self.context.FillGeometry(&path,&self.brush,None);
+            }
+        }
+    }}
+    pub unsafe fn icon_power_bolt(&self,bx:f32,by:f32,bw:f32,bh:f32,rgb:u32){unsafe{
+        let pts = crate::ui::power_bolt_polygon(bx, by, bw, bh);
+        self.fill_polygon(&pts, rgb);
+    }}
     pub unsafe fn icon_chevron_up(&self,cx:f32,cy:f32,size:f32,rgb:u32,thickness:f32){unsafe{
         let half_w=size*0.5;
         let half_h=size*0.3;

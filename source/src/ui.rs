@@ -328,6 +328,19 @@ pub const STAGE1_BOLT_W: f32 = 8.;
 pub const STAGE1_BOLT_H: f32 = 12.;
 pub const STAGE1_CHEVRON_HIT_W: f32 = 20.;
 
+/// Vertices of a filled 6-point lightning bolt (zap glyph) within bounding box `(bx, by, bw, bh)`.
+/// Features 180° rotational symmetry and distinct horizontal teeth forming a true lightning step.
+pub fn power_bolt_polygon(bx: f32, by: f32, bw: f32, bh: f32) -> [(f32, f32); 6] {
+    [
+        (bx + bw * 0.62, by),
+        (bx + bw * 0.08, by + bh * 0.54),
+        (bx + bw * 0.50, by + bh * 0.54),
+        (bx + bw * 0.38, by + bh),
+        (bx + bw * 0.92, by + bh * 0.46),
+        (bx + bw * 0.50, by + bh * 0.46),
+    ]
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Stage1Layout {
     pub icon_x: f32,
@@ -1520,6 +1533,28 @@ pub fn plan_hardware_monitor(
         let power_label_end = plan.power_label_rect.unwrap().0 + plan.power_label_rect.unwrap().2;
         assert!(power_label_end > time_end);
         assert!(plan.chevron_hit.0 >= power_label_end);
+    }
+    #[test] fn stage1_power_bolt_polygon_geometry_and_symmetry() {
+        let pts = power_bolt_polygon(10., 20., 8., 12.);
+        assert_eq!(pts.len(), 6);
+        // Top and bottom endpoints
+        assert!((pts[0].1 - 20.).abs() < 1e-4);
+        assert!((pts[3].1 - 32.).abs() < 1e-4);
+        // Horizontal tooth cuts (pts[1] to pts[2] and pts[4] to pts[5])
+        assert!((pts[1].1 - pts[2].1).abs() < 1e-4);
+        assert!((pts[4].1 - pts[5].1).abs() < 1e-4);
+        assert!(pts[2].0 > pts[1].0, "Left tooth must step rightwards");
+        assert!(pts[4].0 > pts[5].0, "Right tooth must step rightwards");
+        // Overlapping waist height (connects without gap)
+        assert!(pts[2].1 > pts[5].1, "Waist must have non-zero vertical overlap");
+        // Rotational symmetry around center (14, 26)
+        let cx = 10. + 4.;
+        let cy = 20. + 6.;
+        for i in 0..3 {
+            let j = i + 3;
+            assert!(((pts[i].0 - cx) + (pts[j].0 - cx)).abs() < 1e-3);
+            assert!(((pts[i].1 - cy) + (pts[j].1 - cy)).abs() < 1e-3);
+        }
     }
     #[test] fn stage1_lyric_stretch_width_clamping(){
         // Short lyric (e.g. 76 DIP) -> clamp to 270 (min)

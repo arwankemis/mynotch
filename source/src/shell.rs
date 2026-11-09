@@ -3228,8 +3228,8 @@ impl Shell {
                 let by = rect.1;
                 let bw = rect.2;
                 let bh = rect.3;
-                p.draw_triangle((bx + bw * 0.85, by), (bx + bw * 0.2, by + bh * 0.58), (bx + bw * 0.55, by + bh * 0.58), 0xf98a47);
-                p.draw_triangle((bx + bw * 0.2, by + bh * 0.58), (bx + bw * 0.55, by + bh * 0.58), (bx + bw * 0.15, by + bh), 0xf98a47);
+                p.icon_power_bolt(bx, by, bw, bh, 0xf98a47);
+
             }
             if let Some(rect) = plan.power_glyph_rect {
                 p.text_centered(plan.power_glyph, rect.0, rect.1, rect.2, rect.3, ui::STAGE1_TEXT_SIZE, 0xececec, 1., false);
