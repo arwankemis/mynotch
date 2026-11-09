@@ -88,7 +88,7 @@ mynotch also has microphone and camera activity indicators. These reflect activi
 
 ## Download and run
 
-1. Download `mynotch-update-public-windows-x64-0.0.2.5.zip` from [Releases](https://github.com/arwankemis/mynotch/releases).
+1. Download `mynotch-v0.0.2.5-windows-x64.zip` from [Releases](https://github.com/arwankemis/mynotch/releases).
 2. Extract it to a folder you can write to. Keep `mynotch.exe` and `libunwind.dll` together.
 3. Run `mynotch.exe`.
 
