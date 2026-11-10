@@ -121,7 +121,7 @@ pub fn available_mods(root: &Path) -> Vec<ModManifest> {
         for entry in entries.flatten() {
             // Staging (.install-<id>) and backup (.backup-<id>) directories from an
             // interrupted install are never mods, even if they contain a mod.json.
-            if entry.file_name().to_string_lossy().starts_with('.') {
+            if entry.file_name() == "daya" || entry.file_name().to_string_lossy().starts_with('.') {
                 continue;
             }
             let path = entry.path();

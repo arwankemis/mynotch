@@ -308,7 +308,7 @@ impl Settings {
     pub fn enabled(&self,m:&str)->bool{
         // Catatan (Simpan) adalah tab permanen bawaan — selalu aktif, bukan mod.
         if m=="Catatan"{return true}
-        let owner=match m{"Cuaca"=>Some("weather"),"Daya"=>Some("daya"),_=>None};
+        let owner=match m{"Cuaca"=>Some("weather"),_=>None};
         self.mod_tab_enabled(m)&&owner.is_none_or(|id|!self.disabled_mods.iter().any(|m|m==id))
     }
     pub fn set_module_enabled(&mut self,module:&str,on:bool)->bool{
@@ -361,8 +361,12 @@ impl Settings {
         for time in &mut self.prayer_times {if chrono::NaiveTime::parse_from_str(time,"%H:%M").is_err(){time.clear();}}
         self.mod_tabs.retain(|t| !t.is_empty() && !MODULES.contains(&t.as_str()) && !BUILTIN_MOD_TABS.contains(&t.as_str()));
         // Migrasi: Catatan bukan mod lagi — entri paket lama dibersihkan, tabnya permanen.
-        self.installed_mods.retain(|m| m != "sticky_notes");
-        self.disabled_mods.retain(|m| m != "sticky_notes");
+        self.installed_mods.retain(|m| m != "sticky_notes" && m != "daya");
+        self.disabled_mods.retain(|m| m != "sticky_notes" && m != "daya");
+        self.mod_tabs.retain(|t| t != "Daya" && t != "Power");
+        self.tab_order.retain(|t| t != "Daya" && t != "Power");
+        self.modules.remove("Daya");
+        self.modules.remove("Power");
         let mut seen_tabs=std::collections::BTreeSet::new();
         self.mod_tabs.retain(|t| seen_tabs.insert(t.clone()));
         let mut seen_network=std::collections::BTreeSet::new();

@@ -2363,6 +2363,7 @@ impl Shell {
     /// Renders a community mod that the user opted into the Stage 2 tab strip.
     fn draw_mod_tab(&mut self, p: &mut Painter) -> bool { unsafe {
         let tab = self.tab.clone();
+        if tab == "Daya" || tab == "Power" { return false; }
         if !self.settings.mod_tabs.iter().any(|t| t == &tab) { return false }
         let Some(manifest) = self.mods().into_iter().find(|m| m.tab_name == tab) else { return false };
         p.outline_icon(&manifest.icon, 24., 38., 20., 0xd8d8de);
@@ -2828,12 +2829,12 @@ fn format_rupiah(amount: u32) -> String {
 }
 
 const CALENDAR_LEAVE_DOT_X:f32=140.;
-fn use_bundled_daya(id:&str,publisher:&str,empty:bool,digest:&str)->bool{id=="daya"&&publisher=="mynotch"&&(empty||matches!(digest,"b684e22620aecd8f4a83d0fc4b6c19385d251e77657b67357e2ab3bb4b29f6e2"|"e3ea02fb30d315af59655a22993563ddf660e21d4ad6447fbbca0f5eaf00851c"|"b7e3c112b5a885d703d8d0829bb7997718906a3d28d770c7004bb0ad6b3b5bd7"|"f747479d62ebb9191f220cee81265fc9026f4414e44adb85087248f4d6afc5d2"|"d078d4fd3cadce06053b8f58ca2e8226ed9a8fe8cbf5f01ddbdd965bce7d9262"))}
+fn use_bundled_daya(_id:&str,_publisher:&str,_empty:bool,_digest:&str)->bool{false}
 const CALENDAR_LEAVE_TEXT_X:f32=148.;
 #[cfg(test)]mod calendar_legend_tests{
 #[test]fn official_legacy_daya_upgrades_but_custom_scripts_stay_intact(){
     let digest="e3ea02fb30d315af59655a22993563ddf660e21d4ad6447fbbca0f5eaf00851c";
-    assert!(super::use_bundled_daya("daya","mynotch",false,digest));
+    assert!(!super::use_bundled_daya("daya","mynotch",false,digest));
     assert!(!super::use_bundled_daya("daya","someone-else",false,digest));
     assert!(!super::use_bundled_daya("daya","mynotch",false,"custom-script-digest"));
 }
