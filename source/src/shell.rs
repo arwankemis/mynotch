@@ -286,6 +286,7 @@ pub(super) struct Shell {
     tws: Option<crate::system::TwsInfo>,
     pub cached_idle_clock_width: f32,
     pub cached_lyric_geometry: (f32, f32, f32),
+    pub cached_now_playing_width: f32,
     pub hardware_sampler: crate::system::HardwareSampler,
     pub hardware_sample: Option<crate::system::HardwareSample>,
     pub last_hardware_tick: Instant,
@@ -449,7 +450,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         render_ready:false,
         cover:None,cover_key:0,preview_silent:args.iter().any(|s|s=="--silent"||s=="--preview-silent"),
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,boot_edge_sweep:None,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,boot_edge_sweep:None,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),cached_now_playing_width:220.,hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
 privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,track_is_twitch:false,cc_menu_open:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
 
     app.tab=app.settings.default_tab.clone();
@@ -1297,6 +1298,28 @@ impl Shell {
         None
     }
 
+    pub fn current_lyric_pair(&self) -> Option<(String, Option<String>)> {
+        if !self.track.playing || self.settings.quiet_mode {
+            return None;
+        }
+        let position = self.media.as_ref().map(|m| m.position_seconds()).unwrap_or(self.track.position_seconds);
+        if let Some(line) = self.lyrics.iter().rev().find(|l| l.at <= position) {
+            if !line.text.trim().is_empty() {
+                return Some((line.text.clone(), line.romanized.clone()));
+            }
+        }
+        if !self.last_lyric_line.trim().is_empty() {
+            return Some((self.last_lyric_line.clone(), None));
+        }
+        if let Some(first) = self.lyrics.first() {
+            return Some((first.text.clone(), first.romanized.clone()));
+        }
+        if !self.plain_lyrics.trim().is_empty() {
+            return Some((self.plain_lyrics.clone(), None));
+        }
+        None
+    }
+
     pub fn is_lyric_active(&self) -> bool {
         self.lyric_mode && self.current_lyric_line().is_some()
     }
@@ -1344,10 +1367,10 @@ impl Shell {
     }
 
     pub fn refresh_lyric_stretch_metrics(&mut self, p: &mut Painter) {
-        if let Some(text) = self.current_lyric_line() {
+        if let Some((text, rom)) = self.current_lyric_pair() {
             let wrap_limit = self.lyric_wrap_limit();
             let wrapped = unsafe {
-                ui::wrap_lyric_lines(&text, wrap_limit, |s| p.measure_text(s, 12.0, true))
+                ui::plan_lyric_lines(&text, rom.as_deref(), wrap_limit, |s| p.measure_text(s, 12.0, true))
             };
             let radius = if wrapped.is_multiline { 16.0 } else { 15.0 };
             self.cached_lyric_geometry = (wrapped.target_width, wrapped.target_height, radius);
@@ -1356,36 +1379,70 @@ impl Shell {
         }
     }
 
+    pub fn refresh_now_playing_metrics(&mut self, p: &mut Painter) {
+        if let Some((title, artist)) = self.stage1_now_playing() {
+            let info = match &artist {
+                Some(a) => format!("{} · {}", title, a),
+                None => title,
+            };
+            let time_str = Local::now().format("%H:%M").to_string();
+            let footer = ui::stage1_footer(
+                &time_str,
+                self.battery.as_ref().filter(|b| b.has_battery).map(|b| (b.percentage as u32, b.is_charging)),
+                self.tws.as_ref().map(|t| t.battery),
+            );
+            let privacy_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
+                crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot) + 8.
+            } else {
+                0.
+            };
+
+            unsafe {
+                let info_w = p.measure_text(&info, 11.5, true);
+                let footer_w = p.measure_text(&footer, 11.5, true);
+                // 34.0 (left margin & brand icon) + info_w + 20.0 (sep "|" + gaps) + footer_w + 28.0 (gap + chevron + right pad) + privacy_w
+                let target_w = (info_w + footer_w + privacy_w + 82.0).ceil().clamp(190.0, 420.0);
+                self.cached_now_playing_width = target_w;
+            }
+        } else {
+            self.cached_now_playing_width = 220.0;
+        }
+    }
+
     /// Single-line Stage 1 status for the now-playing transient: app icon on the
     /// left, "Title · Artist" info, the clock footer, and the dropdown chevron.
     pub fn now_playing_target_geometry(&self) -> (f32, f32, f32) {
-        let (title, artist) = match self.stage1_now_playing() {
-            Some(t) => t,
-            None => return (220., 30., 15.),
-        };
-        let info = match &artist {
-            Some(a) => format!("{} · {}", title, a),
-            None => title,
-        };
-        let info_w = info.chars().count() as f32 * 7.8;
-
-        let time_str = Local::now().format("%H:%M").to_string();
-        let footer = ui::stage1_footer(
-            &time_str,
-            self.battery.as_ref().filter(|b| b.has_battery).map(|b| (b.percentage as u32, b.is_charging)),
-            self.tws.as_ref().map(|t| t.battery),
-        );
-        let footer_w = footer.chars().count() as f32 * 7.5;
-
-        let privacy_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
-            crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot) + 8.
+        if self.cached_now_playing_width > 0. {
+            (self.cached_now_playing_width, 30., 15.)
         } else {
-            0.
-        };
+            let (title, artist) = match self.stage1_now_playing() {
+                Some(t) => t,
+                None => return (220., 30., 15.),
+            };
+            let info = match &artist {
+                Some(a) => format!("{} · {}", title, a),
+                None => title,
+            };
+            let info_w = info.chars().count() as f32 * 5.5;
 
-        let total_w = 36. + info_w + 24. + footer_w + privacy_w + 32.;
-        let width = total_w.clamp(230., 480.);
-        (width, 30., 15.)
+            let time_str = Local::now().format("%H:%M").to_string();
+            let footer = ui::stage1_footer(
+                &time_str,
+                self.battery.as_ref().filter(|b| b.has_battery).map(|b| (b.percentage as u32, b.is_charging)),
+                self.tws.as_ref().map(|t| t.battery),
+            );
+            let footer_w = footer.chars().count() as f32 * 6.0;
+
+            let privacy_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
+                crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot) + 8.
+            } else {
+                0.
+            };
+
+            let total_w = 34. + info_w + 20. + footer_w + privacy_w + 28.;
+            let width = total_w.clamp(190., 420.);
+            (width, 30., 15.)
+        }
     }
 
     fn retarget_morph(&mut self) {
@@ -2967,6 +3024,9 @@ impl Shell {
             if self.is_lyric_active() {
                 self.refresh_lyric_stretch_metrics(painter);
             }
+            if self.stage1_now_playing_visible() {
+                self.refresh_now_playing_metrics(painter);
+            }
         }
         self.painter = p_take;
         // Reconcile every geometry change through the same driver, including settings and
@@ -3389,70 +3449,76 @@ impl Shell {
         unsafe {
             p.clip(0., 0., self.width, self.height);
 
-            let text = self.current_lyric_line().unwrap_or_default();
+            let (text, rom) = self.current_lyric_pair().unwrap_or_default();
             let wrap_limit = self.lyric_wrap_limit();
-            let wrapped = ui::wrap_lyric_lines(&text, wrap_limit, |s| p.measure_text(s, 12.0, true));
+            let wrapped = ui::plan_lyric_lines(&text, rom.as_deref(), wrap_limit, |s| p.measure_text(s, 12.0, true));
             let radius = if wrapped.is_multiline { 16.0 } else { 15.0 };
             self.cached_lyric_geometry = (wrapped.target_width, wrapped.target_height, radius);
 
-            let now = Local::now();
-            let time_str = now.format("%H:%M").to_string();
-            let time_w = p.measure_text(&time_str, ui::STAGE1_TEXT_SIZE, true);
+            // 1. Slot Kiri: Thumbnail cover art lagu (rounded 20x20) atau fallback icon musik
+            let cover_size = 20.0_f32;
+            let cover_x = 10.0_f32;
+            let cover_y = (self.height - cover_size) * 0.5;
+            let mut cover_drawn = false;
+            if let Some(cover) = &self.cover {
+                cover_drawn = p.cover_rounded(Some(cover), self.cover_key, cover_x, cover_y, cover_size, 4.0);
+            }
+            if !cover_drawn {
+                if self.track_is_youtube {
+                    p.icon_cc(cover_x + 10., self.height * 0.5, 15., 0xd8d8de, 1.4, false);
+                } else {
+                    p.outline_icon("music", cover_x + 2., cover_y + 2., cover_size - 4., 0xd8d8de);
+                }
+            }
 
-            let privacy_rail_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
-                crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot)
-            } else {
-                0.
-            };
-            let preset_active = self.settings.quiet_mode || self.settings.power_saver_mode;
+            // 2. Slot Kanan: Mini visualizer bars tebal & berisi (chubby) disamakan dengan screenshot
+            let vis_w = 22.0_f32;
+            let vis_h = 14.0_f32;
+            let vis_x = self.width - 32.0_f32;
+            let vis_y = (self.height - vis_h) * 0.5;
+            let vis_color = self.cover.as_ref().map(|c| c.accent).unwrap_or(0xff9500);
 
-            let plan = ui::plan_lyric_stretch(
-                self.width,
-                self.height,
-                time_w,
-                privacy_rail_w,
-                preset_active,
-                &wrapped,
-            );
-
-            // 1. Slot Kiri: Ikon musik (mint #2fd4a3) atau mini visualizer + pemisah vertikal
-            if self.settings.effective_presentation().visualizer && self.track.playing {
+            if self.track.playing {
                 let levels = if self.levels.len() >= 4 { &self.levels[0..4] } else { &[0.4, 0.8, 1.0, 0.6] };
-                p.bars_mirror(levels, plan.music_icon_rect.0, (self.height - 12.) * 0.5, 14., 12., 0xd8d8de);
-            } else if self.track_is_youtube {
-                p.icon_cc(plan.music_icon_rect.0 + 8., self.height * 0.5, 15., 0xd8d8de, 1.4, false);
+                p.bars_chubby(levels, vis_x, vis_y, vis_w, vis_h, vis_color);
             } else {
-                p.outline_icon("music", plan.music_icon_rect.0, plan.music_icon_rect.1, plan.music_icon_rect.2, 0xd8d8de);
+                p.bars_chubby(&[0.2, 0.2, 0.2, 0.2], vis_x, vis_y, vis_w, vis_h, 0x88888e);
             }
 
-            // Pemisah vertikal tipis
-            p.fill_alpha(plan.separator_rect.0, plan.separator_rect.1, plan.separator_rect.2, plan.separator_rect.3, 0.7, 0x4a4f57, 1.);
-
-            // 2. Slot Kanan: Chevron di width - 24, Jam di rata kanan sebelum chevron
-            self.button_chevron_up(p, plan.chevron_hit.0, plan.chevron_hit.1, plan.chevron_hit.2, plan.chevron_hit.3, Action::ToStage0, 0x88888e);
-
-            p.text_centered(&time_str, plan.time_rect.0, plan.time_rect.1, plan.time_rect.2, plan.time_rect.3, ui::STAGE1_TEXT_SIZE, 0xffffff, 1., true);
-
-            if let Some(rect) = plan.preset_slot {
-                self.preset_indicator(p, rect.0, rect.1);
+            // Slot status opsional (privacy & preset) jika aktif
+            let mut lyric_end_x = vis_x - 10.0;
+            if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
+                let pad = 2.;
+                let priv_w = crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot);
+                let slot_x = lyric_end_x - priv_w - pad * 2.;
+                self.draw_privacy_rail(p, slot_x + pad, (self.height - 18.) * 0.5, priv_w, 18.);
+                lyric_end_x = slot_x - 6.;
+            }
+            if self.settings.quiet_mode || self.settings.power_saver_mode {
+                let slot_x = lyric_end_x - 30.;
+                self.preset_indicator(p, slot_x, (self.height - 24.) * 0.5);
+                lyric_end_x = slot_x - ui::STAGE1_GAP;
             }
 
-            if let Some(rect) = plan.privacy_slot {
-                self.draw_privacy_rail(p, rect.0, rect.1, rect.2, rect.3);
-            }
+            // 3. Slot Tengah: Area teks lirik aktif (Dual-line: Kanji/asli di atas + Romaji di bawah)
+            let lyric_start_x = cover_x + cover_size + 10.0;
+            let lyric_area_w = (lyric_end_x - lyric_start_x).max(10.0);
+            p.clip(lyric_start_x, 0., lyric_area_w, self.height);
 
-            // 3. Slot Tengah: Area teks lirik aktif (Slide-Up vertikal, NO horizontal marquee)
-            p.clip(plan.lyric_area_rect.0, 0., plan.lyric_area_rect.2, self.height);
             let reduced = self.settings.effective_presentation().reduced_motion;
 
             if reduced || self.lyric_anim.is_none() {
-                if plan.is_multiline {
-                    p.text_centered(&plan.line1, plan.lyric_area_rect.0, 8., plan.lyric_area_rect.2, 18., 12.0, 0xffffff, 1., true);
-                    if let Some(l2) = &plan.line2 {
-                        p.text_centered(l2, plan.lyric_area_rect.0, 26., plan.lyric_area_rect.2, 17., 11.5, 0xe2e8f0, 1., true);
+                if wrapped.is_multiline {
+                    if let Some(l2) = &wrapped.line2 {
+                        let y1 = (self.height - 29.0) * 0.5 - 1.0;
+                        let y2 = y1 + 14.0;
+                        p.text_centered(&wrapped.line1, lyric_start_x, y1, lyric_area_w, 13.0, 10.5, 0x9499a4, 1.0, false);
+                        p.text_centered(l2, lyric_start_x, y2, lyric_area_w, 16.0, 12.5, 0xffffff, 1.0, true);
+                    } else {
+                        p.text_centered(&wrapped.line1, lyric_start_x, (self.height - 20.) * 0.5, lyric_area_w, 20.0, 12.0, 0xffffff, 1.0, true);
                     }
                 } else {
-                    p.text_centered(&plan.line1, plan.lyric_area_rect.0, (self.height - 20.) * 0.5, plan.lyric_area_rect.2, 20., 12.0, 0xffffff, 1., true);
+                    p.text_centered(&wrapped.line1, lyric_start_x, (self.height - 20.) * 0.5, lyric_area_w, 20.0, 12.0, 0xffffff, 1.0, true);
                 }
             } else if let Some(anim) = &self.lyric_anim {
                 let elapsed = anim.started.elapsed().as_secs_f32();
@@ -3468,35 +3534,35 @@ impl Shell {
                 if exit_alpha > 0.01 {
                     let prev_wrapped = ui::wrap_lyric_lines(&anim.prev_text, wrap_limit, |s| p.measure_text(s, 12.0, true));
                     p.push_alpha(exit_alpha);
-                    if prev_wrapped.is_multiline {
-                        p.text_centered(&prev_wrapped.line1, plan.lyric_area_rect.0, 8. + exit_offset_y, plan.lyric_area_rect.2, 18., 12.0, 0xffffff, 1., true);
-                        if let Some(l2) = &prev_wrapped.line2 {
-                            p.text_centered(l2, plan.lyric_area_rect.0, 26. + exit_offset_y, plan.lyric_area_rect.2, 17., 11.5, 0xe2e8f0, 1., true);
-                        }
+                    if let Some(prev_l2) = &prev_wrapped.line2 {
+                        let y1 = (self.height - 29.0) * 0.5 - 1.0 + exit_offset_y;
+                        let y2 = y1 + 14.0;
+                        p.text_centered(&prev_wrapped.line1, lyric_start_x, y1, lyric_area_w, 13.0, 10.5, 0x9499a4, 1.0, false);
+                        p.text_centered(prev_l2, lyric_start_x, y2, lyric_area_w, 16.0, 12.5, 0xffffff, 1.0, true);
                     } else {
-                        p.text_centered(&prev_wrapped.line1, plan.lyric_area_rect.0, (self.height - 20.) * 0.5 + exit_offset_y, plan.lyric_area_rect.2, 20., 12.0, 0xffffff, 1., true);
+                        p.text_centered(&prev_wrapped.line1, lyric_start_x, (self.height - 20.) * 0.5 + exit_offset_y, lyric_area_w, 20.0, 12.0, 0xffffff, 1.0, true);
                     }
                     p.pop_alpha();
                 }
 
                 // Baris baru meluncur masuk dari bawah ke atas dan menguat
                 p.push_alpha(enter_alpha);
-                if plan.is_multiline {
-                    p.text_centered(&plan.line1, plan.lyric_area_rect.0, 8. + enter_offset_y, plan.lyric_area_rect.2, 18., 12.0, 0xffffff, 1., true);
-                    if let Some(l2) = &plan.line2 {
-                        p.text_centered(l2, plan.lyric_area_rect.0, 26. + enter_offset_y, plan.lyric_area_rect.2, 17., 11.5, 0xe2e8f0, 1., true);
-                    }
+                if let Some(l2) = &wrapped.line2 {
+                    let y1 = (self.height - 29.0) * 0.5 - 1.0 + enter_offset_y;
+                    let y2 = y1 + 14.0;
+                    p.text_centered(&wrapped.line1, lyric_start_x, y1, lyric_area_w, 13.0, 10.5, 0x9499a4, 1.0, false);
+                    p.text_centered(l2, lyric_start_x, y2, lyric_area_w, 16.0, 12.5, 0xffffff, 1.0, true);
                 } else {
-                    p.text_centered(&plan.line1, plan.lyric_area_rect.0, (self.height - 20.) * 0.5 + enter_offset_y, plan.lyric_area_rect.2, 20., 12.0, 0xffffff, 1., true);
+                    p.text_centered(&wrapped.line1, lyric_start_x, (self.height - 20.) * 0.5 + enter_offset_y, lyric_area_w, 20.0, 12.0, 0xffffff, 1.0, true);
                 }
                 p.pop_alpha();
             }
             p.unclip();
 
-            // 4. Whole lyric pill opens the Music tab in Stage 2 (chevron excluded so it can still collapse).
+            // 4. Whole lyric notch opens the Music tab in Stage 2.
             if self.hit_enabled {
                 self.hits.push(Hit {
-                    rect: render::rect(plan.music_icon_rect.0, 0., (plan.chevron_hit.0 - plan.music_icon_rect.0).max(10.), self.height),
+                    rect: render::rect(0., 0., self.width, self.height),
                     action: Action::ExpandMusic,
                 });
             }
@@ -3516,11 +3582,63 @@ impl Shell {
         };
         let time_str = Local::now().format("%H:%M").to_string();
         let btn_up_x = self.width - 24.0;
-        unsafe { p.clip(0., 0., self.width, self.height); }
-        let info_x = self.draw_stage1_status(p, &info, &time_str, btn_up_x);
         unsafe {
-            let brand = self.resolved_media_brand(); p.icon_media_source((info_x - 12.).max(10.), self.height * 0.5, 20., brand, self.track.playing);
+            p.clip(0., 0., self.width, self.height);
+
+            // 1. Brand icon anchored at left
+            let brand = self.resolved_media_brand();
+            p.icon_media_source(20.0, self.height * 0.5, 20., brand, self.track.playing);
+
+            // 2. Chevron at right
             self.button_chevron_up(p, btn_up_x, (self.height - 20.) * 0.5, 20., 20., Action::ToStage0, 0x88888e);
+
+            // 3. Status text or volume HUD
+            if let Some((vol, muted, _at)) = self.volume_hud {
+                let left_x = 36.0;
+                let right_x = btn_up_x - 4.0;
+                let available_w = (right_x - left_x).max(10.0);
+                let vol_icon = if muted || vol == 0.0 { "\u{1F507}" } else if vol < 0.33 { "\u{1F508}" } else if vol < 0.66 { "\u{1F509}" } else { "\u{1F50A}" };
+                let percent = format!("{}%", (vol * 100.0).round() as u32);
+                let bar_w = 54.0;
+                let bar_h = 4.0;
+                let bar_y = (self.height - bar_h) * 0.5;
+
+                let icon_w = 18.0;
+                let pct_w = 30.0;
+                let total_w = icon_w + 4.0 + pct_w + 6.0 + bar_w;
+                let start_x = left_x + (available_w - total_w).max(0.0) * 0.5;
+
+                p.text_centered(vol_icon, start_x, 0., icon_w, self.height, 11.5, 0xffffff, 1.0, true);
+                p.text_centered(&percent, start_x + icon_w + 4.0, 0., pct_w, self.height, 11.0, 0xd8d8de, 1.0, true);
+                let bar_x = start_x + icon_w + 4.0 + pct_w + 6.0;
+                p.fill_alpha(bar_x, bar_y, bar_w, bar_h, 2.0, 0xffffff, 0.20);
+                p.fill_alpha(bar_x, bar_y, (bar_w * vol).clamp(0.0, bar_w), bar_h, 2.0, 0xd8d8de, 0.95);
+            } else {
+                let footer = ui::stage1_footer(&time_str, self.battery.as_ref().filter(|b| b.has_battery).map(|b| (b.percentage as u32, b.is_charging)), self.tws.as_ref().map(|t| t.battery));
+                let footer_w = p.measure_text(&footer, 11.5, true);
+                let info_w = p.measure_text(&info, 11.5, true);
+
+                let left_x = 34.0;
+                let right_x = btn_up_x - 4.0;
+                let available_w = (right_x - left_x).max(10.0);
+
+                let group_overhead = 20.0;
+                let max_info_w = (available_w - footer_w - group_overhead).max(10.0);
+                let actual_info_w = info_w.min(max_info_w);
+
+                let total_content_w = actual_info_w + group_overhead + footer_w;
+                let extra_w = (available_w - total_content_w).max(0.0);
+                let info_x = left_x + extra_w * 0.5;
+
+                let sep_x = info_x + actual_info_w + 8.0;
+                let footer_x = sep_x + 10.0;
+
+                p.text_ellipsis_vcenter(&info, info_x, 0., actual_info_w, self.height, 11.5, self.palette.text_primary, true);
+                p.text_centered("|", sep_x, 0., 4., self.height, 11., self.palette.text_muted, 0.85, false);
+                p.text_centered(&footer, footer_x, 0., footer_w, self.height, 11.5, self.palette.text_primary, 1., true);
+            }
+
+            p.unclip();
         }
         if self.hit_enabled {
             self.hits.push(Hit {
@@ -3528,7 +3646,6 @@ impl Shell {
                 action: Action::ExpandMusic,
             });
         }
-        unsafe { p.unclip(); }
     }
 
     fn draw_collapsed(&mut self, p: &mut Painter, alpha: f32) {
@@ -4490,7 +4607,7 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
         assert_eq!(response.0,MA_NOACTIVATE as isize);
     }
     #[test]fn notice_classification_prioritizes_focus_completion_over_stretch(){let msg="🎯 Sesi fokus selesai! Waktunya istirahat & peregangan.";let kind=classify_notice_kind(msg);assert_eq!(kind,ToastKind::Focus);}
-    #[test]fn lyric_display_index_respects_manual_scroll_offset(){let lines=vec![crate::lyrics::LyricLine{at:1.0,text:"A".into()},crate::lyrics::LyricLine{at:5.0,text:"B".into()},crate::lyrics::LyricLine{at:10.0,text:"C".into()}];assert_eq!(lyric_display_index(&lines,6.0,0),1);assert_eq!(lyric_display_index(&lines,6.0,3),2);}
+    #[test]fn lyric_display_index_respects_manual_scroll_offset(){let lines=vec![crate::lyrics::LyricLine::new(1.0,"A"),crate::lyrics::LyricLine::new(5.0,"B"),crate::lyrics::LyricLine::new(10.0,"C")];assert_eq!(lyric_display_index(&lines,6.0,0),1);assert_eq!(lyric_display_index(&lines,6.0,3),2);}
     #[test]
     fn lyric_request_identity_changes_when_the_source_session_changes() {
         let mut track=MediaSnapshot {title:"Song".into(),artist:"Artist".into(),source_app:"spotify.exe".into(),duration_seconds:200.,..Default::default()};

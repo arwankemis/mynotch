@@ -1431,6 +1431,26 @@ pub fn pointer_in_spotlight_range(px: f32, py: f32, x: f32, y: f32, w: f32, h: f
         if levels.is_empty(){return}let step=width/levels.len()as f32;let cy=y+height*0.5;
         for (i,&value)in levels.iter().enumerate(){let h=(value.clamp(0.,1.)*height).max(2.);self.fill(x+i as f32*step,cy-h*0.5,(step-2.).max(1.),h,1.3,rgb);}
     }}
+    /// Waveform bar chubby / rounded pill tebal (seperti Dynamic Island / visualizer Stage 1 berisi).
+    /// Bar bulat utuh dengan radius r = bar_w * 0.5, tumbuh simetris dari sumbu tengah (cy).
+    pub unsafe fn bars_chubby(&self, levels: &[f32], x: f32, y: f32, width: f32, height: f32, rgb: u32) { unsafe {
+        if levels.is_empty() { return; }
+        let count = levels.len().min(4);
+        let levels = &levels[..count];
+        let bar_w = 3.5_f32;
+        let gap = 2.5_f32;
+        let total_w = count as f32 * bar_w + (count.saturating_sub(1)) as f32 * gap;
+        let start_x = x + ((width - total_w) * 0.5).max(0.);
+        let cy = y + height * 0.5;
+        let r = bar_w * 0.5;
+        for (i, &value) in levels.iter().enumerate() {
+            let norm = value.clamp(0.0, 1.0);
+            let h = (norm * height).max(bar_w);
+            let bx = start_x + i as f32 * (bar_w + gap);
+            let by = cy - h * 0.5;
+            self.fill(bx, by, bar_w, h, r, rgb);
+        }
+    }}
     /// Fades a whole scene without touching every draw call inside it.
     /// A layer that cannot be created degrades to fully opaque drawing, never to a crash.
     /// Scales everything drawn afterwards around a logical-space point. Used so the panel

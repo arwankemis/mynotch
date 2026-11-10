@@ -790,6 +790,29 @@ pub struct LyricWrappedLines {
     pub target_height: f32,
 }
 
+pub fn plan_lyric_lines<F>(text: &str, romanized: Option<&str>, max_single_w: f32, mut measure_fn: F) -> LyricWrappedLines
+where
+    F: FnMut(&str) -> f32,
+{
+    if let Some(rom) = romanized.filter(|r| !r.trim().is_empty()) {
+        let text_trimmed = text.trim();
+        let rom_trimmed = rom.trim();
+        let w1 = measure_fn(text_trimmed);
+        let w2 = measure_fn(rom_trimmed);
+        let max_w = w1.max(w2);
+        let target_w = calculate_lyric_stretch_width(max_w);
+        LyricWrappedLines {
+            line1: text_trimmed.to_string(),
+            line2: Some(rom_trimmed.to_string()),
+            is_multiline: true,
+            target_width: target_w,
+            target_height: 42.0,
+        }
+    } else {
+        wrap_lyric_lines(text, max_single_w, measure_fn)
+    }
+}
+
 pub fn wrap_lyric_lines<F>(text: &str, max_single_w: f32, mut measure_fn: F) -> LyricWrappedLines
 where
     F: FnMut(&str) -> f32,

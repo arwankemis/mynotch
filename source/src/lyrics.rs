@@ -105,6 +105,19 @@ pub fn has_japanese_kana(s: &str) -> bool {
 const JP_PAIRS: &[(&str, &str)] = &[
     ("世界が終わるまでは", " sekai ga owaru made wa "),
     ("君の名は", " kimi no na wa "),
+    ("汗だくに", " asedaku ni "),
+    ("汗だく", " asedaku "),
+    ("付加価値を", " fuka kachi wo "),
+    ("付加価値", " fuka kachi "),
+    ("僕らでもう一度", " bokura de mouichido "),
+    ("僕らで", " bokura de "),
+    ("僕等", " bokura "),
+    ("僕ら", " bokura "),
+    ("君ら", " kimira "),
+    ("彼ら", " karera "),
+    ("彼女ら", " kanojyora "),
+    ("もう一度", " mouichido "),
+    ("一度", " ichido "),
     ("愛してる", " aishiteru "),
     ("大好き", " daisuki "),
     ("好きだよ", " suki da yo "),
@@ -334,7 +347,10 @@ pub fn romanize_lines(lines: &mut [LyricLine]) {
     let is_jp = lines.iter().any(|l| has_japanese_kana(&l.text));
     for line in lines.iter_mut() {
         if contains_cjk(&line.text) {
-            line.text = romanize_line_hint(&line.text, is_jp);
+            let rom = romanize_line_hint(&line.text, is_jp);
+            if !rom.trim().is_empty() && rom != line.text {
+                line.romanized = Some(rom);
+            }
         }
     }
 }
@@ -343,6 +359,26 @@ pub fn romanize_lines(lines: &mut [LyricLine]) {
 pub struct LyricLine {
     pub at: f64,
     pub text: String,
+    #[serde(default)]
+    pub romanized: Option<String>,
+}
+
+impl LyricLine {
+    pub fn new(at: f64, text: impl Into<String>) -> Self {
+        Self {
+            at,
+            text: text.into(),
+            romanized: None,
+        }
+    }
+
+    pub fn with_romaji(at: f64, text: impl Into<String>, romanized: impl Into<String>) -> Self {
+        Self {
+            at,
+            text: text.into(),
+            romanized: Some(romanized.into()),
+        }
+    }
 }
 
 /// LRC timestamps in seconds. The optional offset tag adds milliseconds to every timestamp.
@@ -378,7 +414,7 @@ pub fn parse_lrc_checked_with_options(content: &str, romanize: bool) -> Result<V
             remaining = &rest[end + 1..];
             if stamps.len() > 100 { return Err("Terlalu banyak timestamp per baris lirik.".into()); }
         }
-        for at in stamps { output.push(LyricLine { at, text: remaining.to_owned() }); }
+        for at in stamps { output.push(LyricLine::new(at, remaining.to_owned())); }
         if output.len() > 20000 { return Err("Terlalu banyak baris lirik.".into()); }
     }
     // Stable sort preserves the file's order when several lines share a timestamp.
@@ -438,7 +474,7 @@ mod tests {
     fn multiple_timestamps_offset_and_stable_order() {
         let lines = parse_lrc("[ar:Test]\n[offset:-500]\n[00:02.00][00:04.00]Halo\n[00:02.00]Dunia");
         assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], LyricLine { at: 1.5, text: "Halo".into() });
+        assert_eq!(lines[0], LyricLine::new(1.5, "Halo"));
         assert_eq!(lines[1].text, "Dunia");
         assert_eq!(lines[2].at, 3.5);
         assert_eq!(active_line(&lines, 1.4), None);
@@ -459,27 +495,37 @@ mod tests {
         // Non-CJK text remains unaffected
         assert_eq!(romanize_line("Hello world 123!"), "Hello world 123!");
 
-        // Context-aware: pure kanji in Japanese song uses Japanese readings
+        // Context-aware: pure kanji in Japanese song uses Japanese readings and keeps source text
         let mut lines = vec![
-            LyricLine { at: 1.0, text: "君の声を聴かせて".into() },
-            LyricLine { at: 2.0, text: "永遠".into() },
+            LyricLine::new(1.0, "君の声を聴かせて"),
+            LyricLine::new(2.0, "永遠"),
         ];
         romanize_lines(&mut lines);
-        assert_eq!(lines[1].text, "eien");
+        assert_eq!(lines[1].text, "永遠");
+        assert_eq!(lines[1].romanized.as_deref(), Some("eien"));
     }
     #[test]
     fn japanese_compounds_and_optional_romanization() {
         assert_eq!(romanize_line_hint("人生と時計と今年", true), "jinsei to tokei to kotoshi");
+        assert_eq!(
+            romanize_line_hint("汗だくに付加価値を 僕らでもう一度", true),
+            "asedaku ni fuka kachi wo bokura de mouichido"
+        );
         let raw = parse_lrc_with_options("[00:01.00]君の名は", false);
         assert_eq!(raw[0].text, "君の名は");
+        assert_eq!(raw[0].romanized, None);
+
+        let with_rom = parse_lrc_with_options("[00:01.00]汗だくに付加価値を 僕らでもう一度", true);
+        assert_eq!(with_rom[0].text, "汗だくに付加価値を 僕らでもう一度");
+        assert_eq!(with_rom[0].romanized.as_deref(), Some("asedaku ni fuka kachi wo bokura de mouichido"));
     }
     #[test]
     fn long_lines_preserve_source_text_and_timing() {
         let text = "Ini adalah kalimat yang sangat panjang sekali melebihi empat puluh karakter dan tidak boleh membuat timestamp baru";
         let lines = parse_lrc_with_options(&format!("[00:10.00]{text}\n[00:10.40]Baris pendek\n[00:20.00]{text}"), false);
         assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], LyricLine { at: 10.0, text: text.into() });
-        assert_eq!(lines[2], LyricLine { at: 20.0, text: text.into() });
+        assert_eq!(lines[0], LyricLine::new(10.0, text));
+        assert_eq!(lines[2], LyricLine::new(20.0, text));
         assert_eq!(active_line(&lines, 10.39), Some(0));
         assert_eq!(active_line(&lines, 10.4), Some(1));
     }
