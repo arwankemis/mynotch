@@ -15,13 +15,6 @@ impl Shell {
             PageRoute::Clipboard=>self.clipboard_page(p),
             PageRoute::Notes=>self.simpan_page(p),
             PageRoute::Weather=>self.weather_page(p),
-            PageRoute::Power => {
-
-                if !self.draw_mod_tab(p) {
-                    let msg = if self.settings.language == "en" { "Install or enable the Power mod from Settings → Mods & Extensions." } else { "Pasang atau aktifkan Mod Daya dari Pengaturan → Mod & Ekstensi." };
-                    p.text(msg, 24., 76., self.width - 48., 66., 13., render::TEXT, false);
-                }
-            }
             PageRoute::Other=>{
                 if !self.draw_mod_tab(p) {
                     let msg = crate::i18n::t("shell.select_module", &self.settings.language);
@@ -1191,14 +1184,7 @@ impl Shell {
                 self.open_activity_target(crate::activity::ActivityTarget::Music);
             },
             Action::ExpandHardware=>{
-                // Clicking the Stage 1 hardware monitor opens Stage 2 on the Daya/Power
-                // page when available, otherwise just expands the current tab.
-                let order=self.settings.active_tab_order();
-                if order.iter().any(|t|t=="Daya"){self.tab="Daya".into();self.lyric_mode=false;}
-                else if order.iter().any(|t|t=="Power"){self.tab="Power".into();self.lyric_mode=false;}
-                self.set_expanded(true);
-                self.activate_on_explicit_open();
-                self.invalidate();
+                // Passive indicator: clicking Stage 1 hardware monitor does nothing.
             },
             Action::ExpandWeather=>{
                 self.tab="Cuaca".into();
@@ -2922,10 +2908,10 @@ fn media_source_choice_available(sessions:&MediaSessions,id:&Option<String>)->bo
 
 /// The dispatch used by draw_page. Quiet routes never accept content payloads.
 #[derive(Debug,PartialEq,Eq)]
-enum PageRoute{QuietMusic,QuietCalendar,Hidden,Music,Calendar,Reminder,Clipboard,Notes,Weather,Power,Other}
+enum PageRoute{QuietMusic,QuietCalendar,Hidden,Music,Calendar,Reminder,Clipboard,Notes,Weather,Other}
 fn page_route(tab:&str,quiet:bool,notes_enabled:bool)->PageRoute{
     if quiet{return match tab{"Musik"=>PageRoute::QuietMusic,"Kalender"=>PageRoute::QuietCalendar,_=>PageRoute::Hidden};}
-    match tab{"Musik"=>PageRoute::Music,"Kalender"=>PageRoute::Calendar,"Reminder"=>PageRoute::Reminder,"Clipboard"=>PageRoute::Clipboard,"Catatan" if notes_enabled=>PageRoute::Notes,"Catatan"=>PageRoute::Other,"Cuaca"=>PageRoute::Weather,"Daya"=>PageRoute::Power,_=>PageRoute::Other}
+    match tab{"Musik"=>PageRoute::Music,"Kalender"=>PageRoute::Calendar,"Reminder"=>PageRoute::Reminder,"Clipboard"=>PageRoute::Clipboard,"Catatan" if notes_enabled=>PageRoute::Notes,"Catatan"=>PageRoute::Other,"Cuaca"=>PageRoute::Weather,_=>PageRoute::Other}
 }
 #[cfg(test)]mod presenter_router_r1_tests{
  use super::*;

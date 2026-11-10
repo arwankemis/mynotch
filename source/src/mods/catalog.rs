@@ -51,42 +51,7 @@ pub fn get_catalog(root: &Path, settings: &Settings) -> Catalog {
     let pm = PackageManager::new(root);
     let mut entries = Vec::new();
 
-    // 1. Official Daya Mod package (available locally or installable)
-    let daya_installed = pm.is_installed(settings, "daya");
-    let daya_manifest = ModManifest {
-        schema: 2,
-        id: "daya".into(),
-        publisher: "mynotch".into(),
-        name: "Daya".into(),
-        package_kind: PackageKind::Mod,
-        mod_type: super::ModType::Lua,
-        entry: Some("main.lua".into()),
-        version: "0.3.0".into(),
-        min_host_api: 2,
-        profiles: vec!["public".into(), "personal".into()],
-        permissions: vec!["power.read".into(), "storage.self".into()],
-        optional_dependencies: vec!["power-meter-provider".into()],
-        tab_name: "Daya".into(),
-        default_tab_enabled: true,
-        description: "Sensor CPU/GPU bawaan dan energi komponen teramati. Sensor CPU tertentu memerlukan izin admin; listrik seluruh PC membutuhkan meter.".into(),
-        author: "mynotch".into(),
-        icon: "zap".into(),
-        endpoint: None,
-        cards: vec![],
-        buttons: vec![],
-    };
-    entries.push(CatalogEntry {
-        manifest: daya_manifest,
-        available: true,
-        is_installed: daya_installed,
-        is_active: pm.is_active(settings, "daya"),
-        is_tab_enabled: pm.is_tab_enabled(settings, "Daya"),
-    });
-
     for m in super::available_mods(root) {
-        if m.id == "daya" {
-            continue;
-        }
         let is_inst = pm.is_installed(settings, &m.id);
         let is_act = pm.is_active(settings, &m.id);
         let is_tab = pm.is_tab_enabled(settings, &m.tab_name);

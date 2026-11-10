@@ -1632,15 +1632,7 @@ impl Shell {
                 self.draw_privacy_rail(p, rect.0, rect.1, rect.2, rect.3);
             }
 
-            // Whole pill opens Stage 2 (hardware monitor → Daya page when available).
-            if self.hit_enabled {
-                let hit_w = (plan.chevron_hit.0 - 8.0).max(10.0);
-                self.hits.push(Hit {
-                    rect: render::rect(8.0, 0.0, hit_w, self.height),
-                    action: Action::ExpandHardware,
-                });
-            }
-
+            // Passive indicator: whole pill no longer opens Stage 2.
             p.unclip();
         }
     }
@@ -4723,9 +4715,9 @@ fn duplicate_toast(active:Option<&ToastNotification>,queue:&std::collections::Ve
 use super::*;
 #[test]fn runtime_activation_matches_filesystem_package_and_persisted_disabled_state(){
  let root=std::env::temp_dir().join(format!("mynotch-runtime-package-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
- std::fs::create_dir_all(root.join("mods/daya")).unwrap();let manifest=crate::mods::catalog::get_catalog(&root,&Settings::default()).entries.into_iter().find(|e|e.manifest.id=="daya").unwrap().manifest;std::fs::write(root.join("mods/daya/mod.json"),serde_json::to_vec(&manifest).unwrap()).unwrap();
- let mut settings=Settings::default();assert!(active_package(&root,&settings,"daya"));
- settings.disabled_mods.push("daya".into());settings.normalize();let settings:Settings=serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();assert!(!active_package(&root,&settings,"daya"));std::fs::remove_dir_all(root).unwrap();
+ std::fs::create_dir_all(root.join("mods/weather")).unwrap();let manifest=crate::mods::catalog::get_catalog(&root,&Settings::default()).entries.into_iter().find(|e|e.manifest.id=="weather").unwrap().manifest;std::fs::write(root.join("mods/weather/mod.json"),serde_json::to_vec(&manifest).unwrap()).unwrap();
+ let mut settings=Settings::default();assert!(active_package(&root,&settings,"weather"));
+ settings.disabled_mods.push("weather".into());settings.normalize();let settings:Settings=serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();assert!(!active_package(&root,&settings,"weather"));std::fs::remove_dir_all(root).unwrap();
 }
 #[test]fn repeated_mod_notice_does_not_build_a_minutes_long_queue(){
  let now=Instant::now();let toast=ToastNotification{kind:ToastKind::Generic,message:"Mod uninstalled".into(),expires_at:now+Duration::from_secs(8),confirmed:false,confirmed_at:None};

@@ -8,7 +8,7 @@ fn legacy_daya_marker_is_not_a_runnable_installed_package(){
     std::fs::create_dir_all(root.join("mods")).unwrap();std::fs::write(root.join("mods/daya.mod.json"),b"{}").unwrap();
     let mut s=Settings::default();s.installed_mods.push("daya".into());
     assert!(!PackageManager::new(&root).is_installed(&s,"daya"));
-    let c=get_catalog(&root,&s);assert!(!c.entries.iter().find(|e|e.manifest.id=="daya").unwrap().is_active);
+    let c=get_catalog(&root,&s);assert!(c.entries.iter().find(|e|e.manifest.id=="daya").is_none());
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -186,7 +186,7 @@ fn test_catalog_separates_mods_and_extensions_and_marks_planned() {
 
     assert!(mods.iter().any(|p| p.manifest.id == "weather"));
     assert!(!mods.iter().any(|p| p.manifest.id == "sticky_notes"));
-    assert!(mods.iter().any(|p| p.manifest.id == "daya"));
+    assert!(!mods.iter().any(|p| p.manifest.id == "daya"));
 
     // Extensions that have no real implementation must display as Planned (not available for install)
     assert!(extensions.iter().any(|p| p.manifest.id == "meter" && !p.available));

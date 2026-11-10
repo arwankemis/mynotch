@@ -15,8 +15,8 @@ impl PowerSensors{
         let shared=state.clone();let(stop,rx)=mpsc::channel();let(stopped_tx,stopped)=mpsc::channel();
         let _=thread::Builder::new().name("notch-power-sensors".into()).spawn(move||unsafe{
             struct Finished(mpsc::Sender<()>);impl Drop for Finished{fn drop(&mut self){let _=self.0.send(());}}let _finished=Finished(stopped_tx);
-            let helper_path=std::env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("power-provider/mynotch-power.exe")));
-            let setup_path=std::env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("power-provider/driver/PawnIO_setup.exe")));
+            let helper_path: Option<std::path::PathBuf> = None;
+            let setup_path: Option<std::path::PathBuf> = None;
             let has_helper=helper_path.as_ref().is_some_and(|p|p.is_file());
             let com_ready=!has_helper&&CoInitializeEx(None,COINIT_MULTITHREADED).is_ok();
             struct Apartment(bool);impl Drop for Apartment{fn drop(&mut self){if self.0{unsafe{CoUninitialize()}}}}let _apartment=Apartment(com_ready);
