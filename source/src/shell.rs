@@ -1962,7 +1962,7 @@ impl Shell {
         for(_,hwnd)in std::mem::take(&mut self.inputs){let _=DestroyWindow(hwnd);}if !self.expanded{self.rebuild_input_region();self.sync_input_host();return}
         if self.settings.quiet_mode{self.input_page.clear();self.rebuild_input_region();self.sync_input_host();return;}
         self.input_page=if self.settings_open{"Pengaturan".into()}else{self.tab.clone()};
-        if self.settings_open{
+        if self.settings_open || self.quick_controls_open || self.privacy_detail_open || self.mod_view.is_some() {
             self.rebuild_input_region();self.sync_input_host();return
         }
         match self.tab.as_str(){

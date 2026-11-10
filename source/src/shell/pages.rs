@@ -1054,12 +1054,14 @@ impl Shell {
                 self.quick_controls.focused_element = None;
                 self.quick_controls.refresh();
                 self.set_hover_stage(2);
+                self.make_inputs();
                 self.invalidate();
                 return;
             },
             Action::QuickControlsBack => {
                 self.quick_controls_open = false;
                 self.quick_controls.focused_element = None;
+                self.make_inputs();
                 self.invalidate();
                 return;
             },
@@ -1568,6 +1570,7 @@ impl Shell {
                 self.retarget_morph();
                 self.update_window_region();
                 self.start_morph_timer();
+                self.make_inputs();
                 self.invalidate();
             },
             Action::PrivacyClose => {
@@ -1575,6 +1578,7 @@ impl Shell {
                 self.retarget_morph();
                 self.update_window_region();
                 self.start_morph_timer();
+                self.make_inputs();
                 self.invalidate();
             },
             Action::OpenWindowsMicSettings => {
