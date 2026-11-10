@@ -57,8 +57,12 @@ pub struct Painter {
     layer_pool:Vec<Option<ID2D1Layer>>,
     pub is_warp:bool,
     path_cache:std::cell::RefCell<Option<([f32;5],ID2D1PathGeometry)>>,
+    rim_path_cache:std::cell::RefCell<Option<([f32;5],ID2D1PathGeometry)>>,
     sheen:Option<ID2D1LinearGradientBrush>,
     hover_sheen:Option<ID2D1RadialGradientBrush>,
+    spotlight_inner:Option<ID2D1RadialGradientBrush>,
+    spotlight_border:Option<(u32,ID2D1RadialGradientBrush)>,
+    sweep_brush:Option<(u32,ID2D1LinearGradientBrush)>,
 }
 /// Light (Terang) palette switch. Every generic draw call goes through `color`, which applies the shared
 /// token map, so text, icons, buttons, sliders, cards, tabs, tooltips and toasts follow one palette.
@@ -123,7 +127,7 @@ impl Painter {
         let brush=context.CreateSolidColorBrush(&color(TEXT,1.),None)?;
         let factory:IDWriteFactory=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let is_warp=preferred==D3D_DRIVER_TYPE_WARP||first.is_err();
-        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_legacy_composition:legacy,host,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),sheen:None,hover_sheen:None})
+        Ok(Self{d2d,_device:device,_immediate:immediate,swap_chain,_legacy_composition:legacy,host,context,artwork:None,artwork_key:0,factory,brush,formats:BTreeMap::new(),weather_gradient:None,weather_icons:[None,None],layers:0,layer_pool:vec![None;8],is_warp,path_cache:std::cell::RefCell::new(None),rim_path_cache:std::cell::RefCell::new(None),sheen:None,hover_sheen:None,spotlight_inner:None,spotlight_border:None,sweep_brush:None})
     }}
     /// Binds the current back buffer as the draw target. The bitmap is rebuilt every frame on
     /// purpose: a cached D2D bitmap wrapping a swap chain buffer goes stale once that buffer
@@ -220,6 +224,39 @@ impl Painter {
         sink.Close()?;
         let path:ID2D1PathGeometry=path.into();
         *self.path_cache.borrow_mut()=Some((key,path.clone()));
+        Ok(path)
+    }}
+    /// Open path geometry following only the physical bottom notch rim:
+    /// left ear -> left wall -> bottom-left curve -> bottom horizontal edge -> bottom-right curve -> right wall -> right ear.
+    /// Excludes the top closing line so laser edge sweep illuminates only the bottom notch edge.
+    pub unsafe fn rim_path(&self, width: f32, height: f32, ear: f32, radius: f32, round_top: bool) -> Result<ID2D1PathGeometry> { unsafe {
+        let key = [width, height, ear, radius, if round_top { 1. } else { 0. }];
+        if let Some((k, g)) = self.rim_path_cache.borrow().as_ref() {
+            if *k == key { return Ok(g.clone()); }
+        }
+        let contour = crate::glass::notch_contour(width, height, ear, radius, round_top);
+        let path = self.d2d.CreatePathGeometry()?;
+        let sink = path.Open()?;
+        sink.BeginFigure(pt(contour.start.0, contour.start.1), D2D1_FIGURE_BEGIN_HOLLOW);
+        let seg_count = if !round_top && contour.segs.len() > 1 {
+            contour.segs.len() - 1
+        } else {
+            contour.segs.len()
+        };
+        for seg in &contour.segs[..seg_count] {
+            match *seg {
+                crate::glass::Seg::Line(p) => sink.AddLine(pt(p.0, p.1)),
+                crate::glass::Seg::Bezier(a, b, c) => sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                    point1: pt(a.0, a.1),
+                    point2: pt(b.0, b.1),
+                    point3: pt(c.0, c.1),
+                }),
+            }
+        }
+        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+        sink.Close()?;
+        let path: ID2D1PathGeometry = path.into();
+        *self.rim_path_cache.borrow_mut() = Some((key, path.clone()));
         Ok(path)
     }}
     pub unsafe fn notch_path(&self,width:f32,height:f32,ear:f32,radius:f32)->Result<ID2D1PathGeometry>{unsafe{self.contour_path(width,height,ear,radius,false)}}
@@ -871,6 +908,261 @@ impl Painter {
         self.brush.SetColor(&color(rgb,1.));
         self.context.DrawRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x,y,width,height),radiusX:radius,radiusY:radius},&self.brush,thickness,None);
     }}
+#[inline]
+pub fn pointer_in_spotlight_range(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, max_dist: f32) -> bool {
+    let near_x = px.clamp(x, x + w);
+    let near_y = py.clamp(y, y + h);
+    let dx = px - near_x;
+    let dy = py - near_y;
+    (dx * dx + dy * dy) <= (max_dist * max_dist)
+}
+
+    /// Spotlight hover card rendering (Motion #154):
+    /// 1. Fills base rounded card with g_rgb.
+    /// 2. If pointer is within 140 DIP and !reduced_motion, casts a white radial inner spotlight
+    ///    (radius 115 px, opacity 0.28 -> 0) strictly bounded to the card.
+    /// 3. Strokes faint base border line with ase_border_rgb and ase_border_alpha.
+    /// 4. If pointer is within 140 DIP, strokes dynamic border glow (radius 120 px) with ccent_rgb.
+    pub unsafe fn draw_spotlight_card(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        bg_rgb: u32,
+        base_border_rgb: u32,
+        base_border_alpha: f32,
+        accent_rgb: u32,
+        pointer: Option<(f32, f32)>,
+        reduced_motion: bool,
+    ) { unsafe {
+        let card_rect = D2D1_ROUNDED_RECT {
+            rect: rect(x, y, w, h),
+            radiusX: radius,
+            radiusY: radius,
+        };
+
+        // 1. Base card background
+        self.brush.SetColor(&color(bg_rgb, 1.0));
+        self.context.FillRoundedRectangle(&card_rect, &self.brush);
+
+        let in_spotlight = !reduced_motion && pointer.is_some_and(|(px, py)| {
+            Self::pointer_in_spotlight_range(px, py, x, y, w, h, 140.0)
+        });
+
+        // 2. Inner card spotlight (white radial light of radius 115 px, opacity 0.28 -> 0)
+        if in_spotlight {
+            let (px, py) = pointer.unwrap();
+            if self.spotlight_inner.is_none() {
+                let stops = [
+                    D2D1_GRADIENT_STOP { position: 0.0, color: raw_color(0xffffff, 0.28) },
+                    D2D1_GRADIENT_STOP { position: 1.0, color: raw_color(0xffffff, 0.0) },
+                ];
+                if let Ok(rt) = self.context.cast::<ID2D1RenderTarget>() {
+                    if let Ok(stops) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) {
+                        self.spotlight_inner = rt.CreateRadialGradientBrush(
+                            &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                                center: pt(0., 0.),
+                                gradientOriginOffset: pt(0., 0.),
+                                radiusX: 115.0,
+                                radiusY: 115.0,
+                            },
+                            None,
+                            &stops,
+                        ).ok();
+                    }
+                }
+            }
+            if let Some(brush) = &self.spotlight_inner {
+                brush.SetCenter(pt(px, py));
+                brush.SetRadiusX(115.0);
+                brush.SetRadiusY(115.0);
+                self.context.FillRoundedRectangle(&card_rect, brush);
+            }
+        }
+
+        // 3. Base border stroke
+        self.brush.SetColor(&color(base_border_rgb, base_border_alpha));
+        self.context.DrawRoundedRectangle(&card_rect, &self.brush, 1.0, None);
+
+        // 4. Dynamic border glow stroke (accent radial light of radius 120 px)
+        if in_spotlight {
+            let (px, py) = pointer.unwrap();
+            let need_rebuild = match &self.spotlight_border {
+                Some((col, _)) => *col != accent_rgb,
+                None => true,
+            };
+            if need_rebuild {
+                let stops = [
+                    D2D1_GRADIENT_STOP { position: 0.0, color: color(accent_rgb, 0.90) },
+                    D2D1_GRADIENT_STOP { position: 0.40, color: color(accent_rgb, 0.45) },
+                    D2D1_GRADIENT_STOP { position: 1.0, color: color(accent_rgb, 0.0) },
+                ];
+                if let Ok(rt) = self.context.cast::<ID2D1RenderTarget>() {
+                    if let Ok(stops) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) {
+                        let brush = rt.CreateRadialGradientBrush(
+                            &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                                center: pt(0., 0.),
+                                gradientOriginOffset: pt(0., 0.),
+                                radiusX: 120.0,
+                                radiusY: 120.0,
+                            },
+                            None,
+                            &stops,
+                        ).ok();
+                        if let Some(b) = brush {
+                            self.spotlight_border = Some((accent_rgb, b));
+                        }
+                    }
+                }
+            }
+            if let Some((_, brush)) = &self.spotlight_border {
+                brush.SetCenter(pt(px, py));
+                brush.SetRadiusX(120.0);
+                brush.SetRadiusY(120.0);
+                self.context.DrawRoundedRectangle(&card_rect, brush, 1.5, None);
+            }
+        }
+    }}
+    /// Motion #154 Spotlight Hover on the entire Notch contour (ears included, seamless):
+    /// 1. Radial white inner spotlight centered at cursor (radius 140 DIP, opacity 0.22 -> 0)
+    ///    filled strictly inside the notch contour path geometry.
+    /// 2. Radial accent border glow (radius 140 DIP, opacity 0.85 -> 0) stroked along the contour.
+    pub unsafe fn draw_notch_spotlight(
+        &mut self,
+        width: f32,
+        height: f32,
+        ear: f32,
+        radius: f32,
+        round_top: bool,
+        accent_rgb: u32,
+        pointer: (f32, f32),
+    ) { unsafe {
+        let (px, py) = pointer;
+        let Ok(contour_path) = self.contour_path(width, height, ear, radius, round_top) else { return };
+        let Ok(rim_path) = self.rim_path(width, height, ear, radius, round_top) else { return };
+
+        // 1. Inner white spotlight strictly bounded by the notch geometry (ears included)
+        if self.spotlight_inner.is_none() {
+            let stops = [
+                D2D1_GRADIENT_STOP { position: 0.0, color: raw_color(0xffffff, 0.22) },
+                D2D1_GRADIENT_STOP { position: 0.45, color: raw_color(0xffffff, 0.08) },
+                D2D1_GRADIENT_STOP { position: 1.0, color: raw_color(0xffffff, 0.0) },
+            ];
+            if let Ok(rt) = self.context.cast::<ID2D1RenderTarget>() {
+                if let Ok(stops) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) {
+                    self.spotlight_inner = rt.CreateRadialGradientBrush(
+                        &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                            center: pt(0., 0.),
+                            gradientOriginOffset: pt(0., 0.),
+                            radiusX: 140.0,
+                            radiusY: 140.0,
+                        },
+                        None,
+                        &stops,
+                    ).ok();
+                }
+            }
+        }
+        if let Some(brush) = &self.spotlight_inner {
+            brush.SetCenter(pt(px, py));
+            brush.SetRadiusX(140.0);
+            brush.SetRadiusY(140.0);
+            self.context.FillGeometry(&contour_path, brush, None);
+        }
+
+        // 2. Dynamic border glow stroke along notch contour (ears and bottom curves)
+        let need_rebuild = match &self.spotlight_border {
+            Some((col, _)) => *col != accent_rgb,
+            None => true,
+        };
+        if need_rebuild {
+            let stops = [
+                D2D1_GRADIENT_STOP { position: 0.0, color: color(accent_rgb, 0.85) },
+                D2D1_GRADIENT_STOP { position: 0.40, color: color(accent_rgb, 0.35) },
+                D2D1_GRADIENT_STOP { position: 1.0, color: color(accent_rgb, 0.0) },
+            ];
+            if let Ok(rt) = self.context.cast::<ID2D1RenderTarget>() {
+                if let Ok(stops) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) {
+                    let brush = rt.CreateRadialGradientBrush(
+                        &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                            center: pt(0., 0.),
+                            gradientOriginOffset: pt(0., 0.),
+                            radiusX: 140.0,
+                            radiusY: 140.0,
+                        },
+                        None,
+                        &stops,
+                    ).ok();
+                    if let Some(b) = brush {
+                        self.spotlight_border = Some((accent_rgb, b));
+                    }
+                }
+            }
+        }
+        if let Some((_, brush)) = &self.spotlight_border {
+            brush.SetCenter(pt(px, py));
+            brush.SetRadiusX(140.0);
+            brush.SetRadiusY(140.0);
+            self.context.DrawGeometry(&rim_path, brush, 1.8, None);
+        }
+    }}
+    /// Startup laser edge sweep along the Notch contour (left ear -> bottom curve -> right ear):
+    pub unsafe fn draw_notch_edge_sweep(
+        &mut self,
+        width: f32,
+        height: f32,
+        ear: f32,
+        radius: f32,
+        round_top: bool,
+        accent_rgb: u32,
+        progress: f32,
+    ) { unsafe {
+        let Ok(path) = self.rim_path(width, height, ear, radius, round_top) else { return };
+        let t = crate::ui::ease_accent_sweep(progress.clamp(0.0, 1.0));
+
+        let beam_width = 80.0;
+        let start_pos = -ear - beam_width;
+        let end_pos = width + ear + beam_width;
+        let head_x = start_pos + (end_pos - start_pos) * t;
+        let tail_x = head_x - beam_width;
+
+        let need_rebuild = match &self.sweep_brush {
+            Some((col, _)) => *col != accent_rgb,
+            None => true,
+        };
+        if need_rebuild {
+            let stops = [
+                D2D1_GRADIENT_STOP { position: 0.0, color: raw_color(accent_rgb, 0.0) },
+                D2D1_GRADIENT_STOP { position: 0.35, color: color(accent_rgb, 0.55) },
+                D2D1_GRADIENT_STOP { position: 0.70, color: color(accent_rgb, 0.95) },
+                D2D1_GRADIENT_STOP { position: 0.88, color: raw_color(0xffffff, 1.0) },
+                D2D1_GRADIENT_STOP { position: 1.0, color: raw_color(0xffffff, 0.0) },
+            ];
+            if let Ok(rt) = self.context.cast::<ID2D1RenderTarget>() {
+                if let Ok(stops) = rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) {
+                    let brush = rt.CreateLinearGradientBrush(
+                        &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                            startPoint: pt(0., 0.),
+                            endPoint: pt(beam_width, 0.),
+                        },
+                        None,
+                        &stops,
+                    ).ok();
+                    if let Some(b) = brush {
+                        self.sweep_brush = Some((accent_rgb, b));
+                    }
+                }
+            }
+        }
+
+        if let Some((_, brush)) = &self.sweep_brush {
+            brush.SetStartPoint(pt(tail_x, 0.));
+            brush.SetEndPoint(pt(head_x, 0.));
+            self.context.DrawGeometry(&path, brush, 2.0, None);
+        }
+    }}
     /// A bounded, device-owned atlas per style, decoded only on its first visible use.
     pub unsafe fn weather_icon(&mut self,code:u32,is_day:bool,compact:bool,x:f32,y:f32,size:f32){unsafe{
         use crate::weather_icons::{Icon,Style};
@@ -1278,7 +1570,7 @@ impl Painter {
             "terminal"=>{line(&[(3.,5.),(21.,5.),(21.,19.),(3.,19.),(3.,5.)]);line(&[(7.,10.),(10.,13.),(7.,16.)]);line(&[(13.,16.),(17.,16.)]);},
             "grid"=>{for (a,b) in [(4.,4.),(14.,4.),(4.,14.),(14.,14.)]{line(&[(a,b),(a+6.,b),(a+6.,b+6.),(a,b+6.),(a,b)]);}},
             "star"=>line(&[(12.,2.),(15.,9.),(22.,9.),(16.,14.),(18.,21.),(12.,17.),(6.,21.),(8.,14.),(2.,9.),(9.,9.),(12.,2.)]),
-            "mic"=>{line(&[(12.,3.),(12.,11.)]);circle(12.,7.,3.);line(&[(8.,9.),(8.,11.),(16.,11.),(16.,9.)]);line(&[(12.,14.),(12.,19.)]);line(&[(9.,19.),(15.,19.)]);},
+            "mic"=>self.icon_mic(x+size*0.5,y+size*0.5,size,rgb,if size<10.{1.0}else{(1.6*k).max(1.2)},false),
             "camera"=>{line(&[(4.,8.),(8.,8.),(9.,6.),(15.,6.),(16.,8.),(20.,8.),(20.,18.),(4.,18.),(4.,8.)]);circle(12.,13.,3.);},
             "screen_share"|"share"=>{line(&[(3.,4.),(21.,4.),(21.,16.),(3.,16.),(3.,4.)]);line(&[(12.,16.),(12.,20.)]);line(&[(8.,20.),(16.,20.)]);circle(12.,10.,2.);},
             "record"=>{circle(12.,12.,6.);},
@@ -1379,6 +1671,52 @@ mod tests {
     fn test_system_fallbacks_safe_detection() {
         let _ = is_high_contrast();
         let _ = is_reduced_transparency();
+    }
+
+    #[test]
+    fn test_boot_edge_sweep_progress_bounds() {
+        let beam_width = 80.0f32;
+        let ear = 12.0f32;
+        let width = 300.0f32;
+        let start_pos = -ear - beam_width;
+        let end_pos = width + ear + beam_width;
+
+        let head_at_0 = start_pos + (end_pos - start_pos) * crate::ui::ease_accent_sweep(0.0);
+        let tail_at_0 = head_at_0 - beam_width;
+        assert!(tail_at_0 < -ear);
+        assert!(head_at_0 <= -ear);
+
+        let head_at_1 = start_pos + (end_pos - start_pos) * crate::ui::ease_accent_sweep(1.0);
+        let tail_at_1 = head_at_1 - beam_width;
+        assert!(head_at_1 >= width + ear);
+        assert!(tail_at_1 >= width + ear);
+    }
+
+    #[test]
+    fn test_rim_path_segment_count() {
+        let contour = crate::glass::notch_contour(300.0, 30.0, 12.0, 15.0, false);
+        assert_eq!(contour.segs.len(), 8);
+        let rim_segs = &contour.segs[..contour.segs.len() - 1];
+        assert_eq!(rim_segs.len(), 7);
+        match rim_segs.last().unwrap() {
+            crate::glass::Seg::Bezier(_, _, end) => {
+                assert_eq!(end.0, 300.0 + 12.0);
+                assert_eq!(end.1, 0.0);
+            }
+            _ => panic!("Expected right ear Bezier at the end of rim segments"),
+        }
+    }
+
+    #[test]
+    fn test_pointer_in_spotlight_range() {
+        // Center of card (100, 100, 100, 100) -> inside
+        assert!(Painter::pointer_in_spotlight_range(150.0, 150.0, 100.0, 100.0, 100.0, 100.0, 140.0));
+        // Exactly on edge
+        assert!(Painter::pointer_in_spotlight_range(100.0, 150.0, 100.0, 100.0, 100.0, 100.0, 140.0));
+        // Outside within 140 DIP (100 - 80 = 20 distance from left)
+        assert!(Painter::pointer_in_spotlight_range(80.0, 150.0, 100.0, 100.0, 100.0, 100.0, 140.0));
+        // Outside beyond 140 DIP (350 - 200 = 150 distance from right edge)
+        assert!(!Painter::pointer_in_spotlight_range(350.0, 150.0, 100.0, 100.0, 100.0, 100.0, 140.0));
     }
 
         #[test]

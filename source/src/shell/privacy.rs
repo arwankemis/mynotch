@@ -268,8 +268,10 @@ impl Shell {
                 let is_active = state.is_active();
                 let is_unknown = state.is_unknown();
 
-                p.fill(24.0, y, 512.0, card_h, 8.0, card_bg);
-                p.stroke(24.0, y, 512.0, card_h, 8.0, if is_active { *color } else { card_border }, 1.0);
+                let reduced = self.settings.effective_presentation().reduced_motion;
+                let card_accent = if is_active { *color } else { self.palette.accent };
+                let border_base = if is_active { *color } else { card_border };
+                p.draw_spotlight_card(24.0, y, 512.0, card_h, 8.0, card_bg, border_base, 1.0, card_accent, self.pointer, reduced);
 
                 // Icon pill
                 let icon_bg = if is_active { *color } else { 0x22222a };

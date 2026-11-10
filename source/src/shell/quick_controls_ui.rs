@@ -30,11 +30,12 @@ impl Shell {
         self.navigation_control(p, "up", layout.chevron_btn.left, y_hdr, Action::ToStage1, false);
         self.navigation_control(p, "settings", layout.settings_btn.left, y_hdr, Action::Settings, false);
 
+        let reduced = self.settings.effective_presentation().reduced_motion;
+        let accent = self.palette.accent;
         // Card 1: Wi-Fi
         let card1_w = layout.card_wifi.right - layout.card_wifi.left;
         let card1_h = layout.card_wifi.bottom - layout.card_wifi.top;
-        p.fill(layout.card_wifi.left, layout.card_wifi.top, card1_w, card1_h, 10., 0x12141a);
-        p.stroke(layout.card_wifi.left, layout.card_wifi.top, card1_w, card1_h, 10., 0x222229, 1.0);
+        p.draw_spotlight_card(layout.card_wifi.left, layout.card_wifi.top, card1_w, card1_h, 10., 0x12141a, 0x222229, 1.0, accent, self.pointer, reduced);
 
         let (wifi_on, wifi_avail, wifi_name, wifi_status, wifi_sub) = if let Some(r) = self.quick_controls.selected_radio(crate::quick_controls::RadioKind::WiFi) {
             (r.state == crate::quick_controls::RadioState::On, r.availability.clone(), r.name.clone(), r.status_text.clone(), r.sub_status_text.clone())
@@ -81,8 +82,7 @@ impl Shell {
         // Card 2: Bluetooth
         let card2_w = layout.card_bt.right - layout.card_bt.left;
         let card2_h = layout.card_bt.bottom - layout.card_bt.top;
-        p.fill(layout.card_bt.left, layout.card_bt.top, card2_w, card2_h, 10., 0x12141a);
-        p.stroke(layout.card_bt.left, layout.card_bt.top, card2_w, card2_h, 10., 0x222229, 1.0);
+        p.draw_spotlight_card(layout.card_bt.left, layout.card_bt.top, card2_w, card2_h, 10., 0x12141a, 0x222229, 1.0, accent, self.pointer, reduced);
 
         let (bt_on, bt_avail, bt_name, bt_status, bt_sub) = if let Some(r) = self.quick_controls.selected_radio(crate::quick_controls::RadioKind::Bluetooth) {
             (r.state == crate::quick_controls::RadioState::On, r.availability.clone(), r.name.clone(), r.status_text.clone(), r.sub_status_text.clone())
@@ -125,8 +125,7 @@ impl Shell {
         // Card 3: Brightness
         let card3_w = layout.card_display.right - layout.card_display.left;
         let card3_h = layout.card_display.bottom - layout.card_display.top;
-        p.fill(layout.card_display.left, layout.card_display.top, card3_w, card3_h, 10., 0x12141a);
-        p.stroke(layout.card_display.left, layout.card_display.top, card3_w, card3_h, 10., 0x222229, 1.0);
+        p.draw_spotlight_card(layout.card_display.left, layout.card_display.top, card3_w, card3_h, 10., 0x12141a, 0x222229, 1.0, accent, self.pointer, reduced);
 
         let (disp_name, disp_percent, disp_target, disp_status, disp_sub, disp_unsupported) = if let Some(d) = self.quick_controls.selected_display() {
             (d.name.clone(), d.current_percent, d.target_percent, d.status_text.clone(), d.sub_status_text.clone(), d.kind == crate::quick_controls::DisplayKind::Unsupported)

@@ -269,6 +269,7 @@ pub(super) struct Shell {
     /// morph ke Stage 1 idle. Some(t) = animasi turun 600 ms masih berjalan sejak t.
     /// None saat preview, reduced-motion, atau setelah animasi selesai.
     boot_drop:Option<Instant>,
+    boot_edge_sweep:Option<Instant>,
     /// F2 sweep aksen Nyala: anchor siklus 3 dtk + aksen yang sedang berjalan.
     /// Diset draw_activity saat menggambar aksen, di-wrap morph_step tiap periode,
     /// dan dikosongkan paint() bila frame terakhir tidak menampilkan pill aksen.
@@ -448,7 +449,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         render_ready:false,
         cover:None,cover_key:0,preview_silent:args.iter().any(|s|s=="--silent"||s=="--preview-silent"),
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,boot_edge_sweep:None,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
 privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,track_is_twitch:false,cc_menu_open:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
 
     app.tab=app.settings.default_tab.clone();
@@ -1315,14 +1316,38 @@ impl Shell {
         Some((self.track.title.clone(), if artist.is_empty() { None } else { Some(self.track.artist.clone()) }))
     }
 
+    pub fn lyric_wrap_limit(&self) -> f32 {
+        let mut max_w = 346.0;
+        if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
+            let priv_w = crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot);
+            max_w -= priv_w + 14.;
+        }
+        if self.settings.quiet_mode || self.settings.power_saver_mode {
+            max_w -= 30. + ui::STAGE1_GAP;
+        }
+        max_w.max(160.0)
+    }
+
     pub fn lyric_stretch_target_geometry(&self) -> (f32, f32, f32) {
-        self.cached_lyric_geometry
+        let (cached_w, h, r) = self.cached_lyric_geometry;
+        let privacy_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
+            crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot) + 14.
+        } else {
+            0.
+        };
+        let preset_w = if self.settings.quiet_mode || self.settings.power_saver_mode {
+            30. + ui::STAGE1_GAP
+        } else {
+            0.
+        };
+        ((cached_w + privacy_w + preset_w).clamp(ui::LYRIC_MIN_WIDTH, ui::LYRIC_MAX_WIDTH), h, r)
     }
 
     pub fn refresh_lyric_stretch_metrics(&mut self, p: &mut Painter) {
         if let Some(text) = self.current_lyric_line() {
+            let wrap_limit = self.lyric_wrap_limit();
             let wrapped = unsafe {
-                ui::wrap_lyric_lines(&text, 346.0, |s| p.measure_text(s, 12.0, true))
+                ui::wrap_lyric_lines(&text, wrap_limit, |s| p.measure_text(s, 12.0, true))
             };
             let radius = if wrapped.is_multiline { 16.0 } else { 15.0 };
             self.cached_lyric_geometry = (wrapped.target_width, wrapped.target_height, radius);
@@ -1334,11 +1359,32 @@ impl Shell {
     /// Single-line Stage 1 status for the now-playing transient: app icon on the
     /// left, "Title · Artist" info, the clock footer, and the dropdown chevron.
     pub fn now_playing_target_geometry(&self) -> (f32, f32, f32) {
-        let len = match self.stage1_now_playing() {
-            Some((title, artist)) => title.chars().count() + artist.as_ref().map(|a| a.chars().count() + 3).unwrap_or(0),
-            None => 0,
+        let (title, artist) = match self.stage1_now_playing() {
+            Some(t) => t,
+            None => return (220., 30., 15.),
         };
-        let width = (len as f32 * 7.2 + 110.).clamp(190., 360.);
+        let info = match &artist {
+            Some(a) => format!("{} · {}", title, a),
+            None => title,
+        };
+        let info_w = info.chars().count() as f32 * 7.8;
+
+        let time_str = Local::now().format("%H:%M").to_string();
+        let footer = ui::stage1_footer(
+            &time_str,
+            self.battery.as_ref().filter(|b| b.has_battery).map(|b| (b.percentage as u32, b.is_charging)),
+            self.tws.as_ref().map(|t| t.battery),
+        );
+        let footer_w = footer.chars().count() as f32 * 7.5;
+
+        let privacy_w = if self.settings.privacy_enabled && self.privacy_snapshot.any_active() {
+            crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot) + 8.
+        } else {
+            0.
+        };
+
+        let total_w = 36. + info_w + 24. + footer_w + privacy_w + 32.;
+        let width = total_w.clamp(230., 480.);
         (width, 30., 15.)
     }
 
@@ -2303,10 +2349,21 @@ impl Shell {
                 8=>{let _=KillTimer(Some(self.hwnd),8);self.power_state(false);},
                 10=>{if self.tab_fade.as_ref().is_some_and(|(_,t,_)|t.elapsed()>=ui::TAB_FADE_DURATION){self.tab_fade=None;let _=KillTimer(Some(self.hwnd),10);}self.invalidate();},
                 11=>{self.startup_alpha=(self.startup_alpha+0.05).min(1.);
-                    // F1: timer 11 juga menggerakkan animasi turun boot (600 ms) —
-                    // jangan dimatikan sebelum keduanya selesai.
                     let drop_done=self.boot_drop.as_ref().is_none_or(|t|t.elapsed()>=BOOT_DROP_DURATION);
-                    if self.startup_alpha>=1.&&drop_done{self.boot_drop=None;let _=KillTimer(Some(self.hwnd),11);crate::system::trim_working_set();}
+                    if drop_done && self.boot_drop.is_some() {
+                        self.boot_drop = None;
+                        if !self.preview && !self.settings.effective_presentation().reduced_motion {
+                            self.boot_edge_sweep = Some(Instant::now());
+                        }
+                    }
+                    let sweep_done = self.boot_edge_sweep.as_ref().is_none_or(|t| t.elapsed() >= Duration::from_millis(1000));
+                    if sweep_done && self.boot_edge_sweep.is_some() {
+                        self.boot_edge_sweep = None;
+                    }
+                    if self.startup_alpha>=1.&&drop_done&&sweep_done{
+                        let _=KillTimer(Some(self.hwnd),11);
+                        crate::system::trim_working_set();
+                    }
                     self.invalidate();},
                 13=>{let _=KillTimer(Some(self.hwnd),13);
                     // F1: selesai menunggu — morph ke Stage 1 idle kecuali pengguna
@@ -2383,7 +2440,7 @@ impl Shell {
                         let (cc_x, cc_y, cc_w, cc_h) = if self.lyric_mode {
                             (24.0, 138.0, 30.0, 30.0)
                         } else {
-                            (24.0, 132.0, 34.0, 34.0)
+                            (24.0, 124.0, 34.0, 34.0)
                         };
                         if x >= cc_x - 4.0 && x <= cc_x + cc_w + 4.0 && y >= cc_y - 4.0 && y <= cc_y + cc_h + 4.0 {
                             self.cc_menu_open = !self.cc_menu_open;
@@ -3002,12 +3059,46 @@ impl Shell {
                         p.fill(0.,0.,width,height,radius,body_bg);
                         if !self.settings_open&&(!self.settings.quiet_mode&&self.settings.effective_presentation().glow)&&self.expanded&&self.tab=="Musik"{let accent=self.cover.as_ref().filter(|_|!self.settings.quiet_mode).map(|c|c.accent).unwrap_or(0x1a2e3b);p.fill_alpha(0.,0.,width,height,radius,accent,0.12);}
                     }
+                    if self.hover_stage >= 1 && !self.settings.effective_presentation().reduced_motion {
+                        if let Some(ptr) = self.pointer {
+                            let ear = if is_attached_top {
+                                match &self.morph {
+                                    Some(m) => m.ear(),
+                                    None => self.target_ear(),
+                                }
+                            } else {
+                                0.
+                            };
+                            let spotlight_accent = if let Some(acc) = self.activities.runtime.snapshot.as_ref().and_then(|s| crate::shell::activity_host::reminder_accent_rgb(s)) {
+                                acc
+                            } else if (self.tab == "Musik" || self.hover_stage == 1) && self.track.playing {
+                                self.cover.as_ref().filter(|_| !self.settings.quiet_mode).map(|c| c.accent).unwrap_or(self.palette.accent)
+                            } else {
+                                self.palette.accent
+                            };
+                            p.draw_notch_spotlight(width, height, ear, radius, !is_attached_top, spotlight_accent, ptr);
+                        }
+                    }
                     // F2 sweep: tandai ulang tiap frame — bila draw() tidak menampilkan
                     // pill aksen (live tetap false), anchor dikosongkan sehingga timer
                     // morph mati pada tick berikutnya.
                     self.activity_sweep_live=false;
                     self.draw(&mut p);
                     if !self.activity_sweep_live{self.activity_sweep=None;}
+                    if let Some(sweep_start) = self.boot_edge_sweep {
+                        if !self.settings.effective_presentation().reduced_motion {
+                            let ear = if is_attached_top {
+                                match &self.morph {
+                                    Some(m) => m.ear(),
+                                    None => self.target_ear(),
+                                }
+                            } else {
+                                0.
+                            };
+                            let progress = (sweep_start.elapsed().as_secs_f32() / 1.0).clamp(0.0, 1.0);
+                            p.draw_notch_edge_sweep(width, height, ear, radius, !is_attached_top, self.palette.accent, progress);
+                        }
+                    }
                     p.reset_transform();
                     p.pop_alpha();
                     ok=p.end().is_ok();
@@ -3299,7 +3390,8 @@ impl Shell {
             p.clip(0., 0., self.width, self.height);
 
             let text = self.current_lyric_line().unwrap_or_default();
-            let wrapped = ui::wrap_lyric_lines(&text, 346.0, |s| p.measure_text(s, 12.0, true));
+            let wrap_limit = self.lyric_wrap_limit();
+            let wrapped = ui::wrap_lyric_lines(&text, wrap_limit, |s| p.measure_text(s, 12.0, true));
             let radius = if wrapped.is_multiline { 16.0 } else { 15.0 };
             self.cached_lyric_geometry = (wrapped.target_width, wrapped.target_height, radius);
 
@@ -3374,7 +3466,7 @@ impl Shell {
 
                 // Baris lama meluncur ke atas dan memudar
                 if exit_alpha > 0.01 {
-                    let prev_wrapped = ui::wrap_lyric_lines(&anim.prev_text, 346.0, |s| p.measure_text(s, 12.0, true));
+                    let prev_wrapped = ui::wrap_lyric_lines(&anim.prev_text, wrap_limit, |s| p.measure_text(s, 12.0, true));
                     p.push_alpha(exit_alpha);
                     if prev_wrapped.is_multiline {
                         p.text_centered(&prev_wrapped.line1, plan.lyric_area_rect.0, 8. + exit_offset_y, plan.lyric_area_rect.2, 18., 12.0, 0xffffff, 1., true);
@@ -3584,6 +3676,39 @@ impl Shell {
         p.text_ellipsis_vcenter(info,info_x,0.,(sep_x-8.-info_x).max(0.),self.height,11.5,self.palette.text_primary,true);
         info_x
     }}
+    fn draw_footer_tab_indicator(&mut self, p: &mut Painter) { unsafe {
+        let tabs = self.settings.active_tab_order();
+        if tabs.len() <= 1 { return; }
+
+        let active_w = 20.0f32;
+        let dot_w = 7.0f32;
+        let dot_h = 3.5f32;
+        let gap = 5.0f32;
+        let total_w = tabs.iter().map(|t| if t == &self.tab { active_w } else { dot_w }).sum::<f32>() + (tabs.len() - 1) as f32 * gap;
+        let mut cur_x = (self.width - total_w) * 0.5;
+        let dot_y = self.height - 7.5;
+
+        for t in &tabs {
+            let is_active = t == &self.tab;
+            let w = if is_active { active_w } else { dot_w };
+            let hit_rect = render::rect(cur_x - 3.0, dot_y - 4.0, w + 6.0, dot_h + 8.0);
+            let hovered = self.pointer.is_some_and(|(px, py)| px >= hit_rect.left && px <= hit_rect.right && py >= hit_rect.top && py <= hit_rect.bottom);
+
+            if is_active {
+                p.fill(cur_x, dot_y, w, dot_h, 1.75, 0xf4f4f6);
+            } else {
+                p.fill_alpha(cur_x, dot_y, w, dot_h, 1.75, 0xffffff, if hovered { 0.55 } else { 0.25 });
+            }
+
+            if self.hit_enabled {
+                self.hits.push(Hit {
+                    rect: hit_rect,
+                    action: Action::Tab(t.clone()),
+                });
+            }
+            cur_x += w + gap;
+        }
+    }}
     fn draw_top_tabs(&mut self,p:&mut Painter){unsafe{
         let is_rearranging = self.tab_drag.as_ref().map(|d| d.is_dragging).unwrap_or(false);
         let tabs = self.settings.active_tab_order();
@@ -3742,6 +3867,7 @@ impl Shell {
                 self.draw_page(p);
             }
             self.draw_top_tabs(p);
+            self.draw_footer_tab_indicator(p);
         }
         if self.has_activity_bar(){self.draw_activity(p,self.height-30.,true);}
         if let Some(toast)=self.toast.clone().filter(|_|!self.settings.quiet_mode){

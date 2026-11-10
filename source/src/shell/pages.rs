@@ -43,18 +43,18 @@ impl Shell {
         // Mockup stage2-musik: layout player identik di ketiga material
         // (Solid/Glass Lite/Glass Adaptive) — tanpa jalur glass terpisah.
         let lang = self.settings.language.clone();
-        // 1. Track Content (Artwork 60x60 from y=44 to y=104)
-        let art_x=24.;let art_y=44.;let art_size=60.;
+        // 1. Track Content (Artwork 58x58 from y=40 to y=98)
+        let art_x=24.;let art_y=40.;let art_size=58.;
         let key=if self.cover.is_some(){self.cover_key}else{0};
         if !p.cover(self.cover.as_ref(),key,art_x,art_y,art_size,false){
             p.fill(art_x,art_y,art_size,art_size,8.,0x16222b);
-            p.text("♫",art_x+19.,art_y+13.,24.,30.,22.,0x8dc4dd,false);
+            p.text("♫",art_x+18.,art_y+13.,24.,30.,22.,0x8dc4dd,false);
         }
 
         // Title (bold 14px white)
         let default_title = crate::i18n::t("music.no_music", &lang);
         let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
-        p.text_ellipsis(title,94.,44.,self.width-156.,18.,14.,self.palette.text_primary,true);
+        p.text_ellipsis(title,94.,40.,self.width-156.,18.,14.,self.palette.text_primary,true);
 
         // Media source app icon (Spotify, etc) placed at far right of title row
         self.draw_media_source(p);
@@ -64,42 +64,42 @@ impl Shell {
         // Artist (12px #9ea3a8)
         let default_artist = crate::i18n::t("music.no_artist", &lang);
         let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
-        p.text_ellipsis(&artist,94.,65.,metadata_width,16.,12.,self.palette.text_muted,false);
+        p.text_ellipsis(&artist,94.,60.,metadata_width,16.,12.,self.palette.text_muted,false);
 
         // Album (11px #6e7681)
         let default_album = crate::i18n::t("music.no_album", &lang);
         let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
-        p.text_ellipsis(&album,94.,85.,metadata_width,16.,11.,self.palette.text_muted,false);
+        p.text_ellipsis(&album,94.,78.,metadata_width,16.,11.,self.palette.text_muted,false);
 
-        // 2. Scrubber (At y=114, below the artwork)
+        // 2. Scrubber (At y=104, below the artwork)
         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
         let duration=self.track.duration_seconds;
         let ratio=if duration>0.{(position/duration).clamp(0.,1.)}else{0.};
 
-        let scrub_y=114.;
+        let scrub_y=104.;
         p.text(&time_label(position),24.,scrub_y,34.,16.,11.,0xffffff,false);
         let track_x=62.;let track_w=self.width-124.;
-        let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+18.);
-        p.fill(track_x,scrub_y+6.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
+        let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+16.);
+        p.fill(track_x,scrub_y+5.,track_w,4.,2.,if scrub_hov{0x52605e}else{0x3e4948});
         if ratio>0.{
-            p.fill(track_x,scrub_y+6.,track_w*ratio as f32,4.,2.,self.palette.accent);
+            p.fill(track_x,scrub_y+5.,track_w*ratio as f32,4.,2.,self.palette.accent);
         }
         if scrub_hov{
             let thumb_x=(track_x+track_w*ratio as f32-5.).clamp(track_x-2.,track_x+track_w-8.);
-            p.fill(thumb_x,scrub_y+3.,10.,10.,5.,self.palette.accent);
+            p.fill(thumb_x,scrub_y+2.,10.,10.,5.,self.palette.accent);
         }
         if self.focused.as_ref()==Some(&Action::SeekPointer){
-            p.stroke(track_x-2.,scrub_y+2.,track_w+4.,12.,4.,0xd5d5dc,1.);
+            p.stroke(track_x-2.,scrub_y+1.,track_w+4.,12.,4.,0xd5d5dc,1.);
         }
         if self.track.can_seek&&self.hit_enabled{
-            self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,18.),action:Action::SeekPointer});
+            self.hits.push(Hit{rect:render::rect(track_x,scrub_y,track_w,16.),action:Action::SeekPointer});
         }
         let remaining=(duration-position).max(0.);
         p.text(&format!("-{}",time_label(remaining)),self.width-58.,scrub_y,40.,16.,11.,0xffffff,false);
 
         // 3. Transport Controls ala Spotify (mockup stage2-musik: [mic kiri] … acak · prev ·
         //    putar · next · ulangi; hover tanpa latar, aktif = titik 4 px di bawah ikon)
-        let trans_y=132.;
+        let trans_y=124.;
         let mic_label = if self.track_is_youtube && self.track.playing { "CC" } else { "MIC" };
         self.transport_btn(p,mic_label,24.,trans_y,34.,34.,Action::ToggleLyrics,self.lyric_mode,true);
         let (slots,total)=Self::spotify_transport_slots(false);
@@ -559,8 +559,8 @@ impl Shell {
                 let card_y=202.;
                 let jump_act=Action::JumpToDate(nh.date.year(),nh.date.month(),nh.date.day());
                 let card_hov=self.pointer.is_some_and(|(px,py)|px>=324.&&px<=512.&&py>=card_y&&py<=card_y+42.);
-                p.fill(324.,card_y,188.,42.,8.,if card_hov{0x221c1f}else{0x181517});
-                p.stroke(324.,card_y,188.,42.,8.,if card_hov{0x3d2e31}else{0x292022},1.0);
+                let reduced=self.settings.effective_presentation().reduced_motion;
+                p.draw_spotlight_card(324.,card_y,188.,42.,8.,if card_hov{0x221c1f}else{0x181517},0x292022,1.0,0xff9a9a,self.pointer,reduced);
 
                 // Date badge
                 p.fill(328.,card_y+3.,34.,36.,6.,0x2f171a);
@@ -965,10 +965,11 @@ impl Shell {
         let cpu_name = self.power_snapshot.cpu_name.as_deref().unwrap_or("CPU");
         let gpu_name = self.power_snapshot.gpu_name.as_deref().unwrap_or("GPU");
 
+        let reduced = self.settings.effective_presentation().reduced_motion;
+        let accent = self.palette.accent;
         // CPU Card
         let cpu_x = 24.;
-        p.fill(cpu_x, card_y, card_w, card_h, 8., 0x141416);
-        p.stroke(cpu_x, card_y, card_w, card_h, 8., 0x222226, 1.0);
+        p.draw_spotlight_card(cpu_x, card_y, card_w, card_h, 8., 0x141416, 0x222226, 1.0, accent, self.pointer, reduced);
         p.text("CPU", cpu_x + 10., card_y + 6., 32., 14., 10., 0x909098, true);
         p.text_ellipsis(cpu_name, cpu_x + 42., card_y + 6., card_w - 50., 14., 9., 0x6a6a72, false);
         p.text(&if self.power_snapshot.cpu_watts.is_some() { format!("{:.0} W", cpu_watts) } else { "—".to_string() }, cpu_x + 10., card_y + 20., 80., 20., 16., 0xffa46b, true);
@@ -980,8 +981,7 @@ impl Shell {
 
         // GPU Card
         let gpu_x = cpu_x + card_w + gap;
-        p.fill(gpu_x, card_y, card_w, card_h, 8., 0x141416);
-        p.stroke(gpu_x, card_y, card_w, card_h, 8., 0x222226, 1.0);
+        p.draw_spotlight_card(gpu_x, card_y, card_w, card_h, 8., 0x141416, 0x222226, 1.0, accent, self.pointer, reduced);
         p.text("GPU", gpu_x + 10., card_y + 6., 32., 14., 10., 0x909098, true);
         p.text_ellipsis(gpu_name, gpu_x + 42., card_y + 6., card_w - 50., 14., 9., 0x6a6a72, false);
         p.text(&if self.power_snapshot.gpu_watts.is_some() { format!("{:.0} W", gpu_watts) } else { "—".to_string() }, gpu_x + 10., card_y + 20., 80., 20., 16., 0x5edbf6, true);
@@ -993,8 +993,7 @@ impl Shell {
 
         // Periferal Card
         let rest_x = gpu_x + card_w + gap;
-        p.fill(rest_x, card_y, card_w, card_h, 8., 0x141416);
-        p.stroke(rest_x, card_y, card_w, card_h, 8., 0x222226, 1.0);
+        p.draw_spotlight_card(rest_x, card_y, card_w, card_h, 8., 0x141416, 0x222226, 1.0, accent, self.pointer, reduced);
         p.text(crate::i18n::t("power.peripheral", &lang), rest_x + 10., card_y + 6., 54., 14., 10., 0x909098, true);
         p.text_ellipsis("Board, RAM, Fan", rest_x + 64., card_y + 6., card_w - 72., 14., 9., 0x6a6a72, false);
         p.text(&if self.power_snapshot.rest_watts.is_some() { format!("{:.0} W", rest_watts) } else { "—".to_string() }, rest_x + 10., card_y + 20., 80., 20., 16., 0xd0d0d6, true);
@@ -1027,22 +1026,19 @@ impl Shell {
         let projected_cost = (daily_avg_cost * 30.0).round() as u32;
 
         // Card 1: Bulan Ini (Highlighted)
-        p.fill(cpu_x, row_y, card_w, sum_h, 8., 0x152b33);
-        p.stroke(cpu_x, row_y, card_w, sum_h, 8., 0x2e6e80, 1.2);
+        p.draw_spotlight_card(cpu_x, row_y, card_w, sum_h, 8., 0x152b33, 0x2e6e80, 1.2, 0x5edbf6, self.pointer, reduced);
         p.text(crate::i18n::t("power.this_month", &lang), cpu_x + 10., row_y + 5., card_w - 20., 13., 9.5, 0x5edbf6, true);
         p.text(&format!("Rp {}", format_rupiah(monthly_cost)), cpu_x + 10., row_y + 19., card_w - 20., 18., 13.5, 0xffffff, true);
         p.text(&format!("{:.2} kWh · {} {}", monthly_kwh, active_days, crate::i18n::t("power.active_days", &lang)), cpu_x + 10., row_y + 37., card_w - 20., 13., 8.5, 0x8fd8e8, false);
 
         // Card 2: Sesi Saat Ini
-        p.fill(gpu_x, row_y, card_w, sum_h, 8., 0x141416);
-        p.stroke(gpu_x, row_y, card_w, sum_h, 8., 0x222226, 1.0);
+        p.draw_spotlight_card(gpu_x, row_y, card_w, sum_h, 8., 0x141416, 0x222226, 1.0, 0x40c977, self.pointer, reduced);
         p.text(crate::i18n::t("power.current_session", &lang), gpu_x + 10., row_y + 5., card_w - 20., 13., 9.5, 0x909098, true);
         p.text(&format!("Rp {}", format_rupiah(session_cost)), gpu_x + 10., row_y + 19., card_w - 20., 18., 13.5, 0x40c977, true);
         p.text(&format!("{:.3} kWh", session_kwh), gpu_x + 10., row_y + 37., card_w - 20., 13., 8.5, 0x6a6a72, false);
 
         // Card 3: Proyeksi 30 Hari
-        p.fill(rest_x, row_y, card_w, sum_h, 8., 0x141416);
-        p.stroke(rest_x, row_y, card_w, sum_h, 8., 0x222226, 1.0);
+        p.draw_spotlight_card(rest_x, row_y, card_w, sum_h, 8., 0x141416, 0x222226, 1.0, 0xffa46b, self.pointer, reduced);
         p.text(crate::i18n::t("power.monthly_projection", &lang), rest_x + 10., row_y + 5., card_w - 20., 13., 9.5, 0x909098, true);
         p.text(&format!("Rp {}", format_rupiah(projected_cost)), rest_x + 10., row_y + 19., card_w - 20., 18., 13.5, 0xffa46b, true);
         p.text_ellipsis(crate::i18n::t("power.tariff_info", &lang), rest_x + 10., row_y + 37., card_w - 20., 13., 8.0, 0x6a6a72, false);
@@ -2429,8 +2425,8 @@ impl Shell {
                 for (i, card) in manifest.cards.iter().enumerate() {
                     let x = margin + (i % 2) as f32 * (card_w + 12.);
                     let y = start_y + (i / 2) as f32 * (card_h + 10.);
-                    p.fill(x, y, card_w, card_h, 8., self.palette.card_bg);
-                    p.stroke(x, y, card_w, card_h, 8., self.palette.border, 1.);
+                    let reduced = self.settings.effective_presentation().reduced_motion;
+                    p.draw_spotlight_card(x, y, card_w, card_h, 8., self.palette.card_bg, self.palette.border, 1.0, self.palette.accent, self.pointer, reduced);
                     p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., self.palette.text_muted, false);
                     p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., self.palette.text_primary, false);
                     if !card.subtext.is_empty() {
@@ -2483,8 +2479,8 @@ impl Shell {
                         for (i, card) in output.cards.iter().enumerate() {
                             let x = margin + (i % 2) as f32 * (card_w + 12.);
                             let y = body_y + (i / 2) as f32 * (card_h + 10.);
-                            p.fill(x, y, card_w, card_h, 8., self.palette.card_bg);
-                            p.stroke(x, y, card_w, card_h, 8., self.palette.border, 1.);
+                    let reduced = self.settings.effective_presentation().reduced_motion;
+                    p.draw_spotlight_card(x, y, card_w, card_h, 8., self.palette.card_bg, self.palette.border, 1.0, self.palette.accent, self.pointer, reduced);
                             p.text(&card.title, x + 12., y + 8., card_w - 24., 16., 10., self.palette.text_muted, false);
                             p.text(&card.value, x + 12., y + 24., card_w - 24., 24., 14., self.palette.text_primary, false);
                             if let Some(sub) = &card.subtext {

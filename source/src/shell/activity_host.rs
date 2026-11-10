@@ -58,7 +58,6 @@ impl Shell {
         let mut status=0.;
         if self.settings.quiet_mode||self.settings.power_saver_mode{status+=32.;}
         if self.settings.privacy_enabled&&self.privacy_snapshot.any_active(){status+=crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot)+8.;}
-        if self.battery.as_ref().is_some_and(|b|b.has_battery){status+=38.;}
         if self.tws.is_some(){status+=46.;}
         let chip=self.activity_accent_chip(s);
         activity_pill_width(estimate_activity_text_w(&text),actions,s.other_count>0,status,chip)
@@ -187,7 +186,6 @@ impl Shell {
         if self.settings.privacy_enabled&&self.privacy_snapshot.any_active(){
             let rail=crate::shell::privacy::compute_privacy_rail_width(&self.privacy_snapshot);right-=rail;self.draw_privacy_rail(p,right,y,rail,30.);right-=8.;
         }
-        if let Some(b)=&self.battery{if b.has_battery{right-=38.;p.text_centered(&format!("{}%",b.percentage),right,y,36.,30.,9.,0xaaaaaa,1.,false);}}
         if let Some(t)=&self.tws{right-=46.;p.outline_icon("headphones",right,y+8.,14.,0xaaaaaa);p.text_centered(&t.battery.map(|b|format!("{b}%")).unwrap_or_else(||"--".into()),right+16.,y,30.,30.,9.,0xaaaaaa,1.,false);}
 
         // Vertical separator between status indicators and content/actions
@@ -326,7 +324,7 @@ pub(super) enum AccentMode{Netral,Halus,Nyala}
 /// Warna aksen per jenis reminder (mockup: Air #38bdf8, Sholat #a78bfa,
 /// Gerak/Peregangan #34d399, Fokus #f98a47, sesi selesai #34d399).
 /// None = bukan reminder (Media/HUD/Jam/dll) sehingga tampil netral.
-fn reminder_accent_rgb(s:&ActivitySnapshot)->Option<u32>{match &s.primary.id{
+pub(super) fn reminder_accent_rgb(s:&ActivitySnapshot)->Option<u32>{match &s.primary.id{
     ActivityId::Water(_)=>Some(0x38bdf8),
     ActivityId::Prayer{..}=>Some(0xa78bfa),
     ActivityId::Move(_)|ActivityId::Eye(_)|ActivityId::Stretch(_)=>Some(0x34d399),

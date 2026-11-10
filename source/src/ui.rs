@@ -50,7 +50,7 @@ pub const TINY_HEIGHT: f32 = 10.;
 /// Fixed canvas dimensions. The composition surface and Direct3D swap chain buffers are
 /// allocated once at this static size, eliminating all ResizeBuffers and SetWindowPos
 /// stutter during fluid morph animations.
-pub const CANVAS_WIDTH: f32 = 620.;
+pub const CANVAS_WIDTH: f32 = 660.;
 pub const CANVAS_HEIGHT: f32 = 420.;
 
 /// Corner radius of the panel. The pill uses half its height, which makes it a true capsule.
@@ -583,7 +583,7 @@ pub fn plan_idle_clock(
         let pad = 2.;
         let slot_w = privacy_rail_w + pad * 2.;
         let slot_x = cursor_right - slot_w;
-        let _ = cursor_right;
+        cursor_right = slot_x - 10.;
         Some((slot_x + pad, (height - 18.) * 0.5, privacy_rail_w, 18.))
     } else {
         None
@@ -934,7 +934,7 @@ pub fn plan_lyric_stretch(
         let pad = 2.;
         let slot_w = privacy_rail_w + pad * 2.;
         let slot_x = cursor_right - slot_w;
-        let _ = cursor_right;
+        cursor_right = slot_x - 10.;
         Some((slot_x + pad, (height - 18.) * 0.5, privacy_rail_w, 18.))
     } else {
         None
@@ -1605,6 +1605,13 @@ pub fn plan_hardware_monitor(
         // Slot Tengah: lyric area spans between separator and time
         assert!(plan.lyric_area_rect.0 > plan.separator_rect.0);
         assert!(plan.lyric_area_rect.0 + plan.lyric_area_rect.2 <= plan.time_rect.0);
+    }
+    #[test] fn stage1_lyric_stretch_plan_layout_privacy_clearance(){
+        let wrapped = wrap_lyric_lines("Can you tell me is it hard for you", 346.0, |s| s.len() as f32 * 7.5);
+        let plan = plan_lyric_stretch(380.0, 50.0, 36.0, 20.0, false, &wrapped);
+        let priv_slot = plan.privacy_slot.expect("privacy slot should be present");
+        assert!(plan.lyric_area_rect.0 + plan.lyric_area_rect.2 <= priv_slot.0 - 8.0, 
+            "Lyric area must maintain clearance from privacy badge");
     }
     fn date_w(v:f32)->f32{v}
     fn time_w(v:f32)->f32{v}

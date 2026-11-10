@@ -60,7 +60,7 @@ impl Shell {
             let updated=format!("{} {time}",t(if self.weather_refresh.failed{"weather.stale"}else{"weather.updated"}));
             p.text_ellipsis(&updated,18.,212.,(refresh_x-26.).max(20.),20.,10.,0xb9cbd9,false);
             let x=266.;let w=(self.width-x-16.).max(100.);
-            weather_card(p,x,54.,w,112.);
+            let reduced=self.settings.effective_presentation().reduced_motion;let accent=self.palette.accent;p.draw_spotlight_card(x,54.,w,112.,11.,0x142636,0x516a7e,0.6,accent,self.pointer,reduced);
             p.text_ellipsis(&weather::summary(report,now,&lang),x+11.,64.,w-22.,18.,11.,0xe4eef7,false);
             let slot_w=(w-22.)/5.;
             draw_hour(p,x+11.,slot_w,t("weather.now"),report.weather_code,report.is_day,report.temperature);
@@ -77,7 +77,7 @@ impl Shell {
                 ("wind",t("weather.wind"),format!("{:.0} {}",report.wind_kph,t("weather.wind_unit"))),
                 ("cloud",t("weather.rain_short"),weather::today(report,now).and_then(|day|day.rain_chance).map(|chance|format!("{chance}%")).unwrap_or_else(||"—".into())),
             ].into_iter().enumerate(){
-                let mx=x+index as f32*(metric_w+8.);weather_card(p,mx,176.,metric_w,50.);
+                let mx=x+index as f32*(metric_w+8.);p.draw_spotlight_card(mx,176.,metric_w,50.,11.,0x142636,0x516a7e,0.6,accent,self.pointer,reduced);
                 p.outline_icon(icon,mx+9.,184.,10.,0xc7d9e7);
                 p.text_ellipsis(label,mx+23.,181.,metric_w-29.,16.,10.,0xc7d9e7,false);
                 p.text(&value,mx+9.,199.,metric_w-18.,21.,13.,0xffffff,false);
