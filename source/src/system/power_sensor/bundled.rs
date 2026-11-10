@@ -11,10 +11,20 @@ pub struct Frame{
 }
 impl Frame{
  pub fn decode(bytes:&[u8])->Option<Self>{
-  if bytes.len()>32768{return None}let f:Self=serde_json::from_slice(bytes).ok()?;
+  if bytes.len()>32768{return None}let mut f:Self=serde_json::from_slice(bytes).ok()?;
   if f.schema!=1||f.backend!="librehardwaremonitor-0.9.6"{return None}
   if [&f.cpu_name,&f.gpu_name].into_iter().flatten().any(|s|s.len()>512)||f.status.len()>80{return None}
-  if [f.cpu_watts,f.gpu_watts].into_iter().flatten().any(|w|!w.is_finite()||w<=0.||w>3000.){return None}Some(f)
+  if [f.cpu_watts,f.gpu_watts].into_iter().flatten().any(|w|!w.is_finite()||w<=0.||w>3000.){return None}
+  let is_laptop_gpu = f.gpu_name.as_deref().map(|n| {
+      let l = n.to_ascii_lowercase();
+      l.contains("laptop") || l.contains("mobile") || l.contains("max-q")
+  }).unwrap_or(false);
+  if let Some(gw) = f.gpu_watts {
+      if (is_laptop_gpu && gw > 175.0) || gw > 550.0 {
+          f.gpu_watts = None;
+      }
+  }
+  Some(f)
  }
  pub fn apply(&self,s:&mut PowerSnapshot){
   if self.cpu_name.is_some(){s.cpu_name=self.cpu_name.clone();}if self.gpu_name.is_some(){s.gpu_name=self.gpu_name.clone();}

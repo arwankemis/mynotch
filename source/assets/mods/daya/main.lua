@@ -31,8 +31,12 @@ local function storage_gb(used, total)
   return fixed(used, 0) .. " GB"
 end
 
+local raw_gpu_w = snap and snap.gpu_watts
+if raw_gpu_w and raw_gpu_w > 175.0 then
+  raw_gpu_w = nil
+end
 local cpu_val = watts(snap and snap.cpu_watts)
-local gpu_val = watts(snap and snap.gpu_watts)
+local gpu_val = watts(raw_gpu_w)
 local ram_val = gigabytes(snap and snap.ram_used_gb, snap and snap.ram_total_gb)
 local storage_val = storage_gb(snap and snap.storage_used_gb, snap and snap.storage_total_gb)
 

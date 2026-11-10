@@ -16,6 +16,7 @@ impl PowerSensors{
         let _=thread::Builder::new().name("notch-power-sensors".into()).spawn(move||unsafe{
             struct Finished(mpsc::Sender<()>);impl Drop for Finished{fn drop(&mut self){let _=self.0.send(());}}let _finished=Finished(stopped_tx);
             let helper_path=std::env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("power-provider/mynotch-power.exe")));
+            let setup_path=std::env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join("power-provider/driver/PawnIO_setup.exe")));
             let has_helper=helper_path.as_ref().is_some_and(|p|p.is_file());
             let com_ready=!has_helper&&CoInitializeEx(None,COINIT_MULTITHREADED).is_ok();
             struct Apartment(bool);impl Drop for Apartment{fn drop(&mut self){if self.0{unsafe{CoUninitialize()}}}}let _apartment=Apartment(com_ready);
@@ -47,7 +48,7 @@ impl PowerSensors{
                     }else{snapshot.provider_note=Some("Provider sensor tidak merespons; tidak ada pengukuran daya baru.".into());provider=None;}
                 }
                 if let Ok(mut state)=shared.lock(){*state=(snapshot,acquired);}
-                match rx.recv_timeout(Duration::from_secs(2)){Ok(Control::Active(v))=>active=v,Ok(Control::Setup)=>{if let Some(session)=helper.as_mut(){session.request_admin();}},Ok(Control::Stop)|Err(mpsc::RecvTimeoutError::Disconnected)=>break,Err(mpsc::RecvTimeoutError::Timeout)=>{}}
+                match rx.recv_timeout(Duration::from_secs(2)){Ok(Control::Active(v))=>active=v,Ok(Control::Setup)=>{if let Some(ref setup)=setup_path{install_pawnio_silent(setup);}if let Some(session)=helper.as_mut(){session.request_admin();}},Ok(Control::Stop)|Err(mpsc::RecvTimeoutError::Disconnected)=>break,Err(mpsc::RecvTimeoutError::Timeout)=>{}}
             }
         });
         Self{state,stop,stopped,active:std::sync::atomic::AtomicBool::new(true)}
@@ -144,4 +145,46 @@ pub fn localize_provider_note(raw: &str, lang: &str) -> String {
         assert_eq!(s.active_power_w,Some(185.));assert_eq!(s.total_ac_watts,None);assert_eq!(s.current_a,None);assert_eq!(s.voltage_v,None);
     }
     #[test]fn absent_or_invalid_sensors_remain_unavailable(){let mut s=PowerSnapshot::default();apply_readings(&mut s,&[],"test");assert_eq!(s.active_power_w,None);assert!(s.provider_note.unwrap().contains("tidak tersedia"));}
+}
+
+fn is_pawnio_installed() -> bool {
+    unsafe {
+        let mut key = windows::Win32::System::Registry::HKEY::default();
+        let subkey: Vec<u16> = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        if windows::Win32::System::Registry::RegOpenKeyExW(
+            windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+            windows::core::PCWSTR(subkey.as_ptr()),
+            Some(0),
+            windows::Win32::System::Registry::KEY_READ,
+            &mut key,
+        ).is_ok() {
+            let _ = windows::Win32::System::Registry::RegCloseKey(key);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn install_pawnio_silent(setup_path: &std::path::Path) {
+    use std::os::windows::ffi::OsStrExt;
+    if !setup_path.is_file() || is_pawnio_installed() {
+        return;
+    }
+    unsafe {
+        let op: Vec<u16> = "runas\0".encode_utf16().collect();
+        let file: Vec<u16> = setup_path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let args: Vec<u16> = "-install -silent\0".encode_utf16().collect();
+        let _ = windows::Win32::UI::Shell::ShellExecuteW(
+            None,
+            windows::core::PCWSTR(op.as_ptr()),
+            windows::core::PCWSTR(file.as_ptr()),
+            windows::core::PCWSTR(args.as_ptr()),
+            None,
+            windows::Win32::UI::WindowsAndMessaging::SW_HIDE,
+        );
+    }
 }

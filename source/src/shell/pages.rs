@@ -44,7 +44,7 @@ impl Shell {
         // (Solid/Glass Lite/Glass Adaptive) — tanpa jalur glass terpisah.
         let lang = self.settings.language.clone();
         // 1. Track Content (Artwork 58x58 from y=40 to y=98)
-        let art_x=24.;let art_y=40.;let art_size=58.;
+        let art_x=24.;let art_y=48.;let art_size=58.;
         let key=if self.cover.is_some(){self.cover_key}else{0};
         if !p.cover(self.cover.as_ref(),key,art_x,art_y,art_size,false){
             p.fill(art_x,art_y,art_size,art_size,8.,0x16222b);
@@ -54,7 +54,7 @@ impl Shell {
         // Title (bold 14px white)
         let default_title = crate::i18n::t("music.no_music", &lang);
         let title=if self.track.title.is_empty(){default_title}else{&self.track.title};
-        p.text_ellipsis(title,94.,40.,self.width-156.,18.,14.,self.palette.text_primary,true);
+        p.text_ellipsis(title,94.,48.,self.width-156.,18.,14.,self.palette.text_primary,true);
 
         // Media source app icon (Spotify, etc) placed at far right of title row
         self.draw_media_source(p);
@@ -64,19 +64,19 @@ impl Shell {
         // Artist (12px #9ea3a8)
         let default_artist = crate::i18n::t("music.no_artist", &lang);
         let artist=if self.track.artist.is_empty(){default_artist.to_string()}else{self.track.artist.clone()};
-        p.text_ellipsis(&artist,94.,60.,metadata_width,16.,12.,self.palette.text_muted,false);
+        p.text_ellipsis(&artist,94.,69.,metadata_width,16.,12.,self.palette.text_muted,false);
 
         // Album (11px #6e7681)
         let default_album = crate::i18n::t("music.no_album", &lang);
         let album=if self.track.album.is_empty(){default_album.to_string()}else{self.track.album.clone()};
-        p.text_ellipsis(&album,94.,78.,metadata_width,16.,11.,self.palette.text_muted,false);
+        p.text_ellipsis(&album,94.,87.,metadata_width,16.,11.,self.palette.text_muted,false);
 
         // 2. Scrubber (At y=104, below the artwork)
         let position=self.media.as_ref().map(|m|m.position_seconds()).unwrap_or(self.track.position_seconds);
         let duration=self.track.duration_seconds;
         let ratio=if duration>0.{(position/duration).clamp(0.,1.)}else{0.};
 
-        let scrub_y=104.;
+        let scrub_y=114.;
         p.text(&time_label(position),24.,scrub_y,34.,16.,11.,0xffffff,false);
         let track_x=62.;let track_w=self.width-124.;
         let scrub_hov=self.track.can_seek&&self.pointer.is_some_and(|(px,py)|px>=track_x&&px<=track_x+track_w&&py>=scrub_y&&py<=scrub_y+16.);
@@ -99,7 +99,7 @@ impl Shell {
 
         // 3. Transport Controls ala Spotify (mockup stage2-musik: [mic kiri] … acak · prev ·
         //    putar · next · ulangi; hover tanpa latar, aktif = titik 4 px di bawah ikon)
-        let trans_y=124.;
+        let trans_y=135.;
         let mic_label = if self.track_is_youtube && self.track.playing { "CC" } else { "MIC" };
         self.transport_btn(p,mic_label,24.,trans_y,34.,34.,Action::ToggleLyrics,self.lyric_mode,true);
         let (slots,total)=Self::spotify_transport_slots(false);
@@ -116,15 +116,15 @@ impl Shell {
 
     pub(super) fn draw_media_source(&mut self,p:&mut Painter){unsafe{
         let x=self.width-48.;let action=Action::MediaSourceMenu;
-        p.fill(x,40.,28.,28.,7.,0x121217);
+        p.fill(x,48.,28.,28.,7.,0x121217);
         let focused=self.focused.as_ref()==Some(&action);
-        p.stroke(x,40.,28.,28.,7.,if focused{self.palette.accent}else{0x2b2b36},1.);
-        let brand = self.resolved_media_brand(); p.icon_media_source(x+14.,54.,24.,brand,self.track.playing);
+        p.stroke(x,48.,28.,28.,7.,if focused{self.palette.accent}else{0x2b2b36},1.);
+        let brand = self.resolved_media_brand(); p.icon_media_source(x+14.,62.,24.,brand,self.track.playing);
         if self.media_sessions.manual.is_none(){
-            p.fill(x+18.,57.,12.,12.,6.,0x121217);
-            p.text_centered("A",x+18.,57.,12.,12.,8.,self.palette.accent,1.,true);
+            p.fill(x+18.,65.,12.,12.,6.,0x121217);
+            p.text_centered("A",x+18.,65.,12.,12.,8.,self.palette.accent,1.,true);
         }
-        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x,40.,28.,28.),action});}
+        if self.hit_enabled{self.hits.push(Hit{rect:render::rect(x,48.,28.,28.),action});}
         if !self.media_source_open{return}
         let sessions:Vec<_>=self.media_sessions.sessions.iter().filter(|s|s.playing).collect();
         let visible=sessions.len().min(2);

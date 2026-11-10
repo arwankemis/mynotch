@@ -1174,7 +1174,7 @@ impl Shell {
                 }else{
                     // Mockup stage2-musik: layout player identik di ketiga material
                     // (Solid/Glass Lite/Glass Adaptive) — panel 460x180 untuk semua.
-                    (460.,180.,28.)
+                    (460.,192.,28.)
                 }
             }else if self.tab=="Kalender"{
                 (540.,300.,24.)
