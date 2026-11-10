@@ -4,8 +4,6 @@ use crate::shell::{Action, Hit, Shell};
 impl Shell {
     pub(super) unsafe fn draw_quick_controls(&mut self, p: &mut Painter) { unsafe {
         let layout = crate::quick_controls::calculate_layout();
-        let bg_col = 0x000000;
-        p.fill(0., 0., self.width, self.height, 18., bg_col);
 
         // Header: Back button [← Kembali]
         let back_hover = self.pressed == Some(Action::QuickControlsBack);

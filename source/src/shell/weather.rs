@@ -30,9 +30,6 @@ impl Shell {
     pub(super) fn weather_page(&mut self,p:&mut Painter){unsafe{
         if !self.settings.enabled("Cuaca"){return}
         let lang=self.settings.language.clone();let t=|key|i18n::t(key,&lang);
-        let (mid,bottom)=self.weather.as_ref().map(|w|weather::sky(w.weather_code,w.is_day)).unwrap_or(weather::Sky::Cloud).colors();
-        // Glass already owns the single material/contour; never cover it with a second skin.
-        if self.glass_config(self.height).is_none(){p.weather_background(self.width,self.height,mid,bottom);}
         if self.weather_custom_open {self.draw_weather_custom_modal(p);return}
         let city=if self.settings.weather_city.is_empty(){"Jakarta"}else{&self.settings.weather_city};
         p.outline_icon("navigation",18.,57.,10.,0xe8f0f7);
@@ -111,9 +108,6 @@ impl Shell {
     }}
     pub(super) fn draw_weather_stage1(&mut self,p:&mut Painter,_right:f32){unsafe{
         let(code,is_day,temp)=self.weather.as_ref().map(|w|(w.weather_code,w.is_day,format!("{:.0}°",w.temperature))).unwrap_or((3,true,"—°".into()));
-        // Sky-matched gradient so the Stage 1 pill reads like the Weather page background.
-        let (mid,bottom)=self.weather.as_ref().map(|w|weather::sky(w.weather_code,w.is_day)).unwrap_or(weather::Sky::Cloud).colors();
-        p.weather_background(self.width,self.height,mid,bottom);
         let city=if self.settings.weather_city.is_empty(){"Jakarta"}else{&self.settings.weather_city};
         let info=format!("{temp} {city}");
         let time=Local::now().format("%H:%M").to_string();

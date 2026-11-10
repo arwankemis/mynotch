@@ -184,12 +184,11 @@ impl Painter {
         self.brush.SetColor(&color(rgb,alpha));
         self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(x,y,width,height),radiusX:radius,radiusY:radius},&self.brush);
     }}
-    /// One device-owned brush, rebuilt only when weather/daylight changes. No bitmap or blur.
-    pub unsafe fn weather_background(&mut self,width:f32,height:f32,mid:u32,bottom:u32){unsafe{
+    /// One device-owned brush, rebuilt only when weather/daylight changes. Fills unified notch contour.
+    pub unsafe fn weather_background_notch(&mut self,width:f32,height:f32,ear:f32,radius:f32,round_top:bool,mid:u32,bottom:u32){unsafe{
         // Short Stage 1 pill: gradient runs top->bottom; tall page keeps the 44 DIP offset.
         let top = if height <= 60. { 0.0 } else { 44.0 };
         let end = height.max(top + 1.0);
-        let radius = if height <= 40. { height * 0.5 } else { 24.0 };
         if self.weather_gradient.as_ref().is_none_or(|(m,b,_)|*m!=mid||*b!=bottom){
             let stops=[D2D1_GRADIENT_STOP{position:0.,color:color(BG,1.)},D2D1_GRADIENT_STOP{position:0.28,color:color(mid,1.)},D2D1_GRADIENT_STOP{position:1.,color:color(bottom,1.)}];
             let rt:Result<ID2D1RenderTarget>=self.context.cast();
@@ -197,8 +196,16 @@ impl Painter {
         }
         if let Some((_,_,brush))=&self.weather_gradient{
             brush.SetStartPoint(pt(0.,top));brush.SetEndPoint(pt(0.,end));
-            self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(0.,0.,width,height),radiusX:radius,radiusY:radius},brush);
+            if let Ok(path)=self.contour_path(width,height,ear,radius,round_top){
+                self.context.FillGeometry(&path,brush,None);
+            }else if round_top{
+                self.context.FillRoundedRectangle(&D2D1_ROUNDED_RECT{rect:rect(0.,0.,width,height),radiusX:radius,radiusY:radius},brush);
+            }
         }
+    }}
+    #[allow(dead_code)]
+    pub unsafe fn weather_background(&mut self,width:f32,height:f32,mid:u32,bottom:u32){unsafe{
+        self.weather_background_notch(width,height,0.,24.,true,mid,bottom);
     }}
     pub unsafe fn text_light(&mut self,text:&str,x:f32,y:f32,width:f32,height:f32,size:f32,rgb:u32){unsafe{
         // Reserve the high bit for the light weight; ordinary text keys remain unchanged.

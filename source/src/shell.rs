@@ -3104,12 +3104,22 @@ impl Shell {
                             }else{
                                 p.fill_notch(width,height,ear,radius,body_bg);
                             }
+                        }else if !self.settings_open && !self.quick_controls_open && !self.privacy_detail_open && self.mod_view.is_none() && ((self.hover_stage >= 2 && self.tab == "Cuaca") || self.should_show_weather_stage1()){
+                            let (mid, bottom) = self.weather.as_ref().map(|w| crate::weather::sky(w.weather_code, w.is_day)).unwrap_or(crate::weather::Sky::Cloud).colors();
+                            p.fill_notch(width, height, ear, radius, body_bg);
+                            p.weather_background_notch(width, height, ear, radius, false, mid, bottom);
                         }else{
                             p.fill_notch(width,height,ear,radius,body_bg);
                         }
                     }else{
                         p.fill(0.,0.,width,height,radius,body_bg);
-                        if !self.settings_open&&(!self.settings.quiet_mode&&self.settings.effective_presentation().glow)&&self.expanded&&self.tab=="Musik"{let accent=self.cover.as_ref().filter(|_|!self.settings.quiet_mode).map(|c|c.accent).unwrap_or(0x1a2e3b);p.fill_alpha(0.,0.,width,height,radius,accent,0.12);}
+                        if !self.settings_open&&(!self.settings.quiet_mode&&self.settings.effective_presentation().glow)&&self.expanded&&self.tab=="Musik"{
+                            let accent=self.cover.as_ref().filter(|_|!self.settings.quiet_mode).map(|c|c.accent).unwrap_or(0x1a2e3b);
+                            p.fill_alpha(0.,0.,width,height,radius,accent,0.12);
+                        }else if !self.settings_open && !self.quick_controls_open && !self.privacy_detail_open && self.mod_view.is_none() && ((self.hover_stage >= 2 && self.tab == "Cuaca") || self.should_show_weather_stage1()){
+                            let (mid, bottom) = self.weather.as_ref().map(|w| crate::weather::sky(w.weather_code, w.is_day)).unwrap_or(crate::weather::Sky::Cloud).colors();
+                            p.weather_background_notch(width, height, 0., radius, true, mid, bottom);
+                        }
                     }
                     if self.hover_stage >= 1 && !self.settings.effective_presentation().reduced_motion {
                         if let Some(ptr) = self.pointer {
