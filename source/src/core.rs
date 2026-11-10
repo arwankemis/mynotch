@@ -478,7 +478,9 @@ impl Store {
     pub fn load<T:serde::de::DeserializeOwned+Default>(&mut self,name:&str)->T {
         let path=self.root.join(name);
         if !path.exists(){return T::default()}
-        match std::fs::read(&path).ok().and_then(|b|serde_json::from_slice(&b).ok()) {Some(v)=>v,None=>{
+        let bytes=match std::fs::read(&path){Ok(b)=>b,Err(_)=>return T::default()};
+        let slice=bytes.strip_prefix(&[0xEF, 0xBB, 0xBF][..]).unwrap_or(&bytes);
+        match serde_json::from_slice(slice).ok() {Some(v)=>v,None=>{
             self.last_error=Some(format!("{name} gagal dibaca; data asli dipertahankan sebagai recovery dan penyimpanan file ini ditahan sampai dipulihkan"));
             self.held.insert(name.to_string());
             let backup=self.root.join(format!("{name}.recovery-{}",Local::now().timestamp_millis()));
@@ -564,6 +566,21 @@ pub struct WorkPolicy {pub enabled:bool,pub visible:bool,pub fullscreen:bool,pub
 impl WorkPolicy {pub fn visualize(&self)->bool{self.enabled&&self.visible&&!self.fullscreen&&self.playing}}
 
 #[cfg(test)] mod tests {
+
+    #[test]
+    fn test_store_load_handles_utf8_bom() {
+        let temp_dir = std::env::temp_dir().join(format!("mynotch_test_bom_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let mut store = Store::new(temp_dir.clone()).unwrap();
+        let mut content = vec![0xEF, 0xBB, 0xBF];
+        content.extend_from_slice(br#"{"minimal":true}"#);
+        std::fs::write(temp_dir.join("settings.json"), content).unwrap();
+        let loaded: Settings = store.load("settings.json");
+        assert!(loaded.minimal);
+        assert!(store.held_files().is_empty());
+        assert!(store.last_error.is_none());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     #[test]
     fn test_hw_metrics_serialization_and_defaults() {
