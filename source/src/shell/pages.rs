@@ -478,8 +478,9 @@ impl Shell {
         p.text(crate::i18n::t("calendar.collective_leave", &lang),CALENDAR_LEAVE_TEXT_X,232.,142.,16.,11.,0xc5cedd,false);
 
         // Footer at y = 254
-        let footer_text = if self.year==2026 {
-            crate::i18n::t("calendar.footer_2026", &lang)
+        let has_holidays = matches!(self.year, 2026 | 2027);
+        let footer_text = if has_holidays {
+            crate::i18n::t("calendar.footer_supported", &lang)
         } else {
             crate::i18n::t("calendar.footer_other", &lang)
         };
@@ -509,7 +510,7 @@ impl Shell {
             p.text(&format!("{} {}",month_name_str,self.year),324.,104.,160.,16.,11.,0x9b9ba0,false);
 
             let holiday=self.holidays.iter().find(|h|h.date==date);
-            let status_text=if self.year!=2026{
+            let status_text=if !has_holidays{
                 crate::i18n::t("calendar.no_holiday_data", &lang).to_string()
             }else if let Some(h)=holiday{
                 let prefix = if h.collective_leave {

@@ -1,0 +1,33 @@
+{
+  "year": 2027,
+  "officialSourceUrl": "https://kalenderku.id/2027",
+  "verifiedAt": "2026-11-13",
+  "holidays": [
+    {"date":"2027-01-01","name":"Tahun Baru"},
+    {"date":"2027-01-05","name":"Isra Mikraj"},
+    {"date":"2027-02-06","name":"Imlek"},
+    {"date":"2027-03-08","name":"Nyepi"},
+    {"date":"2027-03-10","name":"Idulfitri"},
+    {"date":"2027-03-11","name":"Idulfitri"},
+    {"date":"2027-03-26","name":"Wafat Yesus Kristus"},
+    {"date":"2027-03-28","name":"Paskah"},
+    {"date":"2027-05-01","name":"Hari Buruh"},
+    {"date":"2027-05-06","name":"Kenaikan Yesus Kristus"},
+    {"date":"2027-05-17","name":"Iduladha"},
+    {"date":"2027-05-20","name":"Waisak"},
+    {"date":"2027-06-01","name":"Hari Lahir Pancasila"},
+    {"date":"2027-06-06","name":"Tahun Baru Islam"},
+    {"date":"2027-08-15","name":"Maulid Nabi Muhammad"},
+    {"date":"2027-08-17","name":"Kemerdekaan Indonesia"},
+    {"date":"2027-12-25","name":"Natal"},
+    {"date":"2027-12-26","name":"Isra Mikraj"},
+    {"date":"2027-02-05","name":"Cuti bersama Imlek","collective_leave":true},
+    {"date":"2027-03-09","name":"Cuti bersama Idulfitri","collective_leave":true},
+    {"date":"2027-03-12","name":"Cuti bersama Idulfitri","collective_leave":true},
+    {"date":"2027-03-15","name":"Cuti bersama Idulfitri","collective_leave":true},
+    {"date":"2027-03-25","name":"Cuti bersama Wafat Yesus Kristus","collective_leave":true},
+    {"date":"2027-05-18","name":"Cuti bersama Iduladha","collective_leave":true},
+    {"date":"2027-05-19","name":"Cuti bersama Waisak","collective_leave":true},
+    {"date":"2027-12-24","name":"Cuti bersama Natal","collective_leave":true}
+  ]
+}

@@ -2058,7 +2058,7 @@ impl Shell {
     }}
     fn input(&self,id:u16)->String{unsafe{if let Some(&hwnd)=self.inputs.get(&id){let mut text=vec![0u16;(GetWindowTextLengthW(hwnd)as usize).min(65535)+1];let count=GetWindowTextW(hwnd,&mut text);String::from_utf16_lossy(&text[..count.max(0)as usize])}else{String::new()}}}
     fn clear_input(&self,id:u16){unsafe{if let Some(&hwnd)=self.inputs.get(&id){let _=SetWindowTextW(hwnd,w!(""));}}}
-    fn load_holidays(&mut self){self.holidays=if self.year==2026{serde_json::from_str::<HolidayFile>(include_str!("../data/holidays-2026.json")).map(|f|f.holidays).unwrap_or_default()}else{vec![]};}
+    fn load_holidays(&mut self){self.holidays=match self.year{2026=>serde_json::from_str::<HolidayFile>(include_str!("../data/holidays-2026.json")).map(|f|f.holidays).unwrap_or_default(),2027=>serde_json::from_str::<HolidayFile>(include_str!("../data/holidays-2027.json")).map(|f|f.holidays).unwrap_or_default(),_=>vec![]};}
     fn handle(&mut self,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{unsafe{
         match msg{
             sticky_window::NOTE_SAVED=>{if self.flush_editors_barrier(){self.make_inputs();self.invalidate();}return LRESULT(0);},

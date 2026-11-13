@@ -395,7 +395,7 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         // Calendar
         "calendar.national_holiday" => if en { "National holiday" } else { "Libur nasional" },
         "calendar.collective_leave" => if en { "Collective leave" } else { "Cuti bersama" },
-        "calendar.footer_2026" => if en { "Indonesia · 2026 holiday data" } else { "Indonesia · data libur 2026" },
+        "calendar.footer_supported" => if en { "Indonesia · 2026–2027 holiday data" } else { "Indonesia · data libur 2026–2027" },
         "calendar.footer_other" => if en { "Holiday data for this year is unavailable" } else { "Data libur tahun ini belum tersedia" },
         "calendar.leave_toggle_on" => if en { "☑ Collective leave" } else { "☑ Cuti bersama" },
         "calendar.leave_toggle_off" => if en { "☐ Collective leave" } else { "☐ Cuti bersama" },
