@@ -102,6 +102,15 @@ pub struct Settings {
     /// Intensitas aksen pill Stage 1: "netral" (tampilan lama), "halus", atau "nyala".
     #[serde(default = "default_reminder_accent")]
     pub reminder_accent: String,
+    #[serde(default)]
+    pub widget_clock_enabled: bool,
+    #[serde(default = "default_widget_pos")]
+    pub widget_clock_x: i32,
+    #[serde(default = "default_widget_pos")]
+    pub widget_clock_y: i32,
+}
+fn default_widget_pos() -> i32 {
+    i32::MIN
 }
 fn default_true() -> bool {
     true
@@ -146,6 +155,9 @@ impl Default for Settings {
         hw_threshold_high: 80,
         hw_threshold_critical: 90,
         reminder_accent: "nyala".into(),
+        widget_clock_enabled: false,
+        widget_clock_x: i32::MIN,
+        widget_clock_y: i32::MIN,
         focus_minutes:25,break_minutes:5,focus_enabled:true,stretch_after_focus:true,prayer_city:"Jakarta".into(),prayer_sound:false,auto_break:false,stretch_seconds:60,prayer_enabled:false,prayer_lead:5,prayer_times:vec![String::new();5],prayer_date:String::new(),water_target:2000,water_serving:250,water_interval:45,move_interval:45,eye_interval:25,
         water_reminder:true,move_reminder:true,eye_reminder:false,
         latitude:-6.2088,longitude:106.8456,weather_city:"Jakarta".into(),weather_configured:false,

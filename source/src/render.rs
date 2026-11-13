@@ -1631,6 +1631,194 @@ impl Painter {
             _=>{line(&[(12.,2.),(21.,7.),(21.,17.),(12.,22.),(3.,17.),(3.,7.),(12.,2.)]);line(&[(12.,12.),(21.,7.)]);line(&[(12.,12.),(3.,7.)]);line(&[(12.,12.),(12.,22.)]);},
         }
     }}
+
+    pub unsafe fn set_translation(&self, dx: f32, dy: f32) {
+        unsafe {
+            self.context
+                .SetTransform(&windows_numerics::Matrix3x2::translation(dx, dy));
+        }
+    }
+
+    pub unsafe fn draw_widget_shadow(&self, x: f32, y: f32, width: f32, height: f32, radius: f32) {
+        unsafe {
+            for (spread, alpha) in [(6.0, 0.06), (3.5, 0.10), (1.5, 0.14)] {
+                self.brush.SetColor(&raw_color(0x000000, alpha));
+                self.context.FillRoundedRectangle(
+                    &D2D1_ROUNDED_RECT {
+                        rect: rect(
+                            x - spread,
+                            y - spread + 1.5,
+                            width + spread * 2.0,
+                            height + spread * 2.0,
+                        ),
+                        radiusX: radius + spread * 0.5,
+                        radiusY: radius + spread * 0.5,
+                    },
+                    &self.brush,
+                );
+            }
+        }
+    }
+
+    /// Draws a macOS-style analog clock face (`1..12` numerals, 60 ticks, two-part hands,
+    /// and `#FF9F0A` second hand). Uses `raw_color` directly so `LIGHT_UI` never remaps it:
+    /// `is_light == true` is the white-dial Frosted+Angka look; `false` is its dark invert.
+    pub unsafe fn draw_analog_clock_face(
+        &self,
+        cx: f32,
+        cy: f32,
+        dial_r: f32,
+        is_light: bool,
+        hour: f32,
+        minute: f32,
+        second: f32,
+    ) {
+        unsafe {
+            let dial_bg = if is_light { 0xffffff } else { 0x141418 };
+            let fg_major = if is_light { 0x1c1c1e } else { 0xf2f2f7 };
+            let fg_minor = if is_light { 0xc7c7cc } else { 0x48484a };
+
+            self.brush.SetColor(&raw_color(dial_bg, 1.0));
+            self.context.FillEllipse(
+                &D2D1_ELLIPSE {
+                    point: pt(cx, cy),
+                    radiusX: dial_r,
+                    radiusY: dial_r,
+                },
+                &self.brush,
+            );
+
+            let stroke_props = D2D1_STROKE_STYLE_PROPERTIES1 {
+                startCap: D2D1_CAP_STYLE_ROUND,
+                endCap: D2D1_CAP_STYLE_ROUND,
+                dashCap: D2D1_CAP_STYLE_ROUND,
+                lineJoin: D2D1_LINE_JOIN_ROUND,
+                miterLimit: 10.0,
+                dashStyle: D2D1_DASH_STYLE_SOLID,
+                dashOffset: 0.0,
+                transformType: D2D1_STROKE_TRANSFORM_TYPE_NORMAL,
+            };
+            let round_stroke: Option<ID2D1StrokeStyle> = self
+                .d2d
+                .CreateStrokeStyle(&stroke_props, None)
+                .ok()
+                .map(Into::into);
+            let stroke_ref = round_stroke.as_ref();
+
+            for i in 0..60 {
+                let angle = (i as f32 * 6.0) * std::f32::consts::PI / 180.0;
+                let is_hour = i % 5 == 0;
+                let r_outer = dial_r * 0.935;
+                let r_inner = dial_r * if is_hour { 0.855 } else { 0.885 };
+                self.brush
+                    .SetColor(&raw_color(if is_hour { fg_major } else { fg_minor }, 1.0));
+                self.context.DrawLine(
+                    pt(cx + r_inner * angle.sin(), cy - r_inner * angle.cos()),
+                    pt(cx + r_outer * angle.sin(), cy - r_outer * angle.cos()),
+                    &self.brush,
+                    if is_hour { 2.2 } else { 1.4 },
+                    stroke_ref,
+                );
+            }
+
+            if let Ok(fmt) = self.factory.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                dial_r * 0.195,
+                w!("en-US"),
+            ) {
+                let _ = fmt.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                let _ = fmt.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                self.brush.SetColor(&raw_color(fg_major, 1.0));
+                for h in 1..=12 {
+                    let angle = (h as f32 * 30.0) * std::f32::consts::PI / 180.0;
+                    let r = dial_r * 0.715;
+                    let nx = cx + r * angle.sin();
+                    let ny = cy - r * angle.cos();
+                    let label: Vec<u16> = h.to_string().encode_utf16().collect();
+                    let layout_rc = rect(nx - 16.0, ny - 13.0, 32.0, 26.0);
+                    self.context.DrawText(
+                        &label,
+                        &fmt,
+                        &layout_rc,
+                        &self.brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        DWRITE_MEASURING_MODE_NATURAL,
+                    );
+                }
+            }
+
+            // Hour & Minute hands (macOS two-part style: thin neck + thick rounded blade).
+            self.brush.SetColor(&raw_color(fg_major, 1.0));
+            let hr_ang = (hour * 30.0) * std::f32::consts::PI / 180.0;
+            let neck_r = dial_r * 0.165;
+            let hr_tip_r = dial_r * 0.525;
+            self.context.DrawLine(
+                pt(cx, cy),
+                pt(cx + neck_r * hr_ang.sin(), cy - neck_r * hr_ang.cos()),
+                &self.brush,
+                2.8,
+                stroke_ref,
+            );
+            self.context.DrawLine(
+                pt(cx + neck_r * hr_ang.sin(), cy - neck_r * hr_ang.cos()),
+                pt(cx + hr_tip_r * hr_ang.sin(), cy - hr_tip_r * hr_ang.cos()),
+                &self.brush,
+                7.2,
+                stroke_ref,
+            );
+
+            let min_ang = (minute * 6.0) * std::f32::consts::PI / 180.0;
+            let min_tip_r = dial_r * 0.81;
+            self.context.DrawLine(
+                pt(cx, cy),
+                pt(cx + neck_r * min_ang.sin(), cy - neck_r * min_ang.cos()),
+                &self.brush,
+                2.8,
+                stroke_ref,
+            );
+            self.context.DrawLine(
+                pt(cx + neck_r * min_ang.sin(), cy - neck_r * min_ang.cos()),
+                pt(cx + min_tip_r * min_ang.sin(), cy - min_tip_r * min_ang.cos()),
+                &self.brush,
+                5.8,
+                stroke_ref,
+            );
+
+            // Second hand (#FF9F0A).
+            let sec_ang = (second * 6.0) * std::f32::consts::PI / 180.0;
+            let sec_tail_r = dial_r * 0.18;
+            let sec_tip_r = dial_r * 0.90;
+            self.brush.SetColor(&raw_color(0xff9f0a, 1.0));
+            self.context.DrawLine(
+                pt(cx - sec_tail_r * sec_ang.sin(), cy + sec_tail_r * sec_ang.cos()),
+                pt(cx + sec_tip_r * sec_ang.sin(), cy - sec_tip_r * sec_ang.cos()),
+                &self.brush,
+                1.9,
+                stroke_ref,
+            );
+
+            // Center cap.
+            self.brush.SetColor(&raw_color(fg_major, 1.0));
+            self.context.FillEllipse(
+                &D2D1_ELLIPSE { point: pt(cx, cy), radiusX: 5.4, radiusY: 5.4 },
+                &self.brush,
+            );
+            self.brush.SetColor(&raw_color(0xff9f0a, 1.0));
+            self.context.FillEllipse(
+                &D2D1_ELLIPSE { point: pt(cx, cy), radiusX: 3.5, radiusY: 3.5 },
+                &self.brush,
+            );
+            self.brush.SetColor(&raw_color(dial_bg, 1.0));
+            self.context.FillEllipse(
+                &D2D1_ELLIPSE { point: pt(cx, cy), radiusX: 1.5, radiusY: 1.5 },
+                &self.brush,
+            );
+        }
+    }
 }
 
 pub fn is_high_contrast() -> bool {

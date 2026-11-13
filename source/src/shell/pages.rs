@@ -1269,7 +1269,7 @@ impl Shell {
                 self.save();
                 self.invalidate();
             },
-            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(6);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));if self.settings_cat==5{self.invalidate_mods();}},
+            Action::SettingsCategory(cat)=>{self.settings_cat=cat.min(7);self.settings_popup=None;self.focused=Some(Action::SettingsCategory(self.settings_cat));if self.settings_cat==5{self.invalidate_mods();}},
             Action::PowerSensorSetup=>{
                 if self.is_mod_active("daya"){if let Some(sensors)=&self.power_sensors{sensors.request_admin();}}
             },
@@ -1602,6 +1602,21 @@ impl Shell {
             Action::Gap(delta)=>{self.settings.edge_gap=(self.settings.edge_gap+delta).clamp(0,160);self.layout();self.save();},Action::Scale(delta)=>{self.settings.scale=(self.settings.scale+delta).clamp(0.8,1.35);self.layout();self.make_inputs();self.save();},Action::Opacity(delta)=>{self.settings.opacity=(self.settings.opacity as i32+delta).clamp(MIN_OPACITY as i32,255)as u8;self.save();self.invalidate();},
             Action::ToggleModule(module)=>{let enabled=!self.settings.enabled(&module);if !self.settings.set_module_enabled(&module,enabled){self.notice(crate::i18n::t("notice.at_least_one_tab", &self.settings.language));return}if module=="Musik"{if enabled{self.start_media();}else{if let Some(mut m)=self.media.take(){m.stop();}self.cancel_job("Musik");self.lyrics_retry=Default::default();self.track=MediaSnapshot::default();self.media_sessions=MediaSessions::default();self.media_source_open=false;self.lyrics.clear();self.sync_visualizer();}}if module=="Reminder"&&!enabled{self.focus.reset();self.stretch_deadline=None;}if module=="Sehat"&&!enabled{self.breathing=None;}if !self.settings.enabled(&self.tab){self.tab=self.settings.active_tab_order().first().cloned().unwrap_or_default();self.make_inputs();}self.save();self.invalidate();},
             Action::Toggle(key)=>match key{
+                "widget_clock"=>{
+                    self.settings.widget_clock_enabled=!self.settings.widget_clock_enabled;
+                    self.save();
+                    self.sync_widget_clock();
+                    self.invalidate();
+                },
+                "widget_clock_reset"=>{
+                    self.settings.widget_clock_x=i32::MIN;
+                    self.settings.widget_clock_y=i32::MIN;
+                    self.save();
+                    if !self.preview {
+                        super::widget_clock::reset_widget_clock_pos();
+                    }
+                    self.invalidate();
+                },
                 "hw_monitor"=>{
                     self.settings.hw_monitor_enabled=!self.settings.hw_monitor_enabled;
                     if self.settings.hw_monitor_enabled{

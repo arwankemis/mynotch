@@ -15,6 +15,7 @@ mod settings;
 mod catalog_ui;
 mod settings_layout;
 mod sticky_window;
+mod widget_clock;
 mod weather;
 mod material;
 pub mod privacy;
@@ -241,7 +242,7 @@ pub(super) struct Shell {
     drafts:BTreeMap<(String,u16),String>,input_page:String,
     jobs:BTreeMap<&'static str,(u64,crate::net::Cancellation)>,next_job:u64,
     hwnd:HWND,inputs_hwnd:HWND,input_x:i32,input_y:i32,canvas_w:i32,canvas_h:i32,win_x:i32,win_y:i32,painter:Option<Painter>,frame_contour:Option<glass::FrameContour>,presented_contour:Option<glass::FrameContour>,store:Store,settings:Settings,state:State,
-    expanded:bool,settings_open:bool,settings_cat:usize,settings_scroll:[f32;7],settings_popup:Option<settings::SettingsPopup>,tab:String,scale:f32,width:f32,height:f32,hits:Vec<Hit>,inputs:BTreeMap<u16,HWND>,
+    expanded:bool,settings_open:bool,settings_cat:usize,settings_scroll:[f32;8],settings_popup:Option<settings::SettingsPopup>,tab:String,scale:f32,width:f32,height:f32,hits:Vec<Hit>,inputs:BTreeMap<u16,HWND>,
     morph:Option<ui::Morph>,pointer:Option<(f32,f32)>,hit_enabled:bool,pressed:Option<Action>,focused:Option<Action>,tab_fade:Option<(String,Instant,i8)>,painting:bool,morph_timer:u32,
     media:Option<MediaService>,track:MediaSnapshot,media_sessions:MediaSessions,media_selection_revision:u64,media_source_open:bool,media_source_cursor:usize,visualizer:Option<Visualizer>,levels:Vec<f32>,
     lyrics_consent:crate::lyrics_gate::LyricsConsent,lyrics_data:Option<LyricsResult>,
@@ -450,7 +451,7 @@ pub fn run(args:&[String])->Result<(),String>{unsafe{
         render_ready:false,
         cover:None,cover_key:0,preview_silent:args.iter().any(|s|s=="--silent"||s=="--preview-silent"),
         online,drafts:BTreeMap::new(),input_page:String::new(),jobs:BTreeMap::new(),next_job:0,
-        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;7],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,boot_edge_sweep:None,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),cached_now_playing_width:220.,hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
+        hwnd,inputs_hwnd,input_x:0,input_y:0,canvas_w:0,canvas_h:0,win_x:0,win_y:0,painter:None,frame_contour:None,presented_contour:None,store,settings,state,expanded:preview,settings_open:false,settings_cat:0,settings_scroll:[0.;8],settings_popup:None,tab:"Musik".into(),scale:1.,width:if preview{ui::PLAYER_WIDTH}else{220.},height:if preview{ui::PLAYER_HEIGHT}else{30.},hits:vec![],inputs:BTreeMap::new(),morph:None,pointer:None,hit_enabled:true,pressed:None,focused:None,tab_fade:None,painting:false,morph_timer:0,media:None,track:MediaSnapshot::default(),media_sessions:MediaSessions::default(),media_selection_revision:0,media_source_open:false,media_source_cursor:0,visualizer:None,levels:vec![0.;24],lyrics:vec![],plain_lyrics:String::new(),lyrics_key:String::new(),lyric_offset:0,lyrics_error:None,lyrics_retry:Default::default(),lyrics_from_youtube:false,focus:FocusClock::default(),breathing:None,last_water:Instant::now(),last_move:Instant::now(),last_eye:Instant::now(),toast:None,toast_from_stage0:false,last_clipboard_seq:0,selected_clip:0,clip_offset:0,queue,fullscreen:false,fullscreen_hwnd:None,year:now.year(),month:now.month(),day:now.day(),system_date:now.date_naive(),holidays:vec![],agenda:vec![],weather:None,ai_messages:vec![],busy:false,todo_offset:0,prayer_schedule:None,prayer_attempt:None,prayer_error:None,reminder_menu:None,reminder_menu_cursor:0,reminder_menu_scroll:0,reminder_index:1,reminder_anim:None,stretch_deadline:None,toast_queue:Default::default(),last_schedule:String::new(),weather_updated:None,weather_fetched_time:None,agenda_updated:None,preview,lyric_mode:false,hover_stage:boot_start_stage(preview),pinned:false,screenshot_stage2_freeze:None,screenshot_hide_until:None,hover_blocked_until:Instant::now(),startup_alpha:if preview{1.}else{0.},boot_drop,boot_edge_sweep:None,activity_sweep:None,activity_sweep_live:false,activity_sweep_paint:Instant::now(),last_lyric_line:String::new(),lyric_anim:None,sheet_index:0,sheet_slide:None,tab_drag:None,stage1_temporary_until:None,stage1_media_until:None,volume_hud:None,battery:crate::system::get_battery_status(),last_battery_check:Instant::now(),tws:None,cached_idle_clock_width:150.,cached_lyric_geometry:(270.,30.,15.),cached_now_playing_width:220.,hardware_sampler:crate::system::HardwareSampler::new(),hardware_sample:None,last_hardware_tick:Instant::now(),cached_hardware_width:330.,last_tws_check:Instant::now(),tws_pending:false,tws_ready:false,last_ac_status:crate::system::get_battery_status().map(|b|b.is_charging),clip_filter:String::new(),clip_search_open:false,update_status:UpdateStatus::Idle,weather_custom_open:false,weather_menu_open:false,weather_refresh:crate::weather::RefreshState::default(),last_known_volume:crate::system::get_master_volume(),last_mod_button_clicked:None,mod_output:None,mod_view:None,mods_catalog_cache:None,mods_selected:None,mods_detail_open:false,mods_detail_scroll:0.,mods_scroll:0,mods_kind:crate::mods::package::PackageKind::Mod,mods_filter:crate::mods::catalog::CatalogFilter::All,mods_cache:Some(available_mods),mod_http_cache:BTreeMap::new(),mod_http_ttl:Duration::from_secs(60),
 privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_controls:crate::quick_controls::QuickControlsController::new_windows(),quick_controls_open:false,privacy_detail_open:false,settings_subpage_privacy:false,storage_dropdown_open:false,note_export_open:None,storage_dropdown_page:0,track_is_youtube:false,track_is_twitch:false,cc_menu_open:false,pending_ack_tx:None,pending_ack_ready_at:None,provider_downloading:false,provider_download_progress:0,confirm_provider_download:false,palette,glass:material::GlassRt::new(args),};
 
     app.tab=app.settings.default_tab.clone();
@@ -496,6 +497,9 @@ privacy_mailbox_tx,privacy_mailbox_rx,privacy_snapshot,privacy_monitor,quick_con
     app.sync_clipboard();
     app.register_hotkey();
     app.start_media();
+    if !app.preview && app.settings.widget_clock_enabled {
+        app.sync_widget_clock();
+    }
 
     if let Some(error) = clipboard_migration { app.notice(error); }
     app.clock_timer();
@@ -559,7 +563,7 @@ fn is_edit_control(hwnd: HWND) -> bool {
 unsafe extern "system" fn wndproc(hwnd:HWND,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{
     // DestroyWindow dispatches WM_DESTROY reentrantly while the command handler
     // already borrows APP. Quit must not depend on obtaining that borrow again.
-    if msg==WM_DESTROY{crate::system::set_volume_osd_hidden(false);unsafe{PostQuitMessage(0);}return LRESULT(0)}
+    if msg==WM_DESTROY{widget_clock::destroy_widget_clock();crate::system::set_volume_osd_hidden(false);unsafe{PostQuitMessage(0);}return LRESULT(0)}
     APP.with(|cell|{if let Ok(mut app)=cell.try_borrow_mut(){if let Some(app)=app.as_mut(){return app.handle(msg,wparam,lparam);}}unsafe{DefWindowProcW(hwnd,msg,wparam,lparam)}})
 }
 /// The input host only exists to carry the EDIT controls. It has no behaviour of its own:
@@ -1126,8 +1130,12 @@ impl Shell {
                 }
             }
             if changed {
-                if let Some(fg) = self.fullscreen_hwnd {
-                    let _ = SetWindowPos(fg, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                if let Some(fs_hwnd) = self.fullscreen_hwnd {
+                    // Never lift or activate an underlying window above a foreground popup/dialog
+                    // (e.g. Chrome's Save As dialog); only re-assert z-order when it owns focus.
+                    if GetForegroundWindow() == fs_hwnd {
+                        let _ = SetWindowPos(fs_hwnd, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    }
                 }
             }
         } else if changed && !self.fullscreen {
@@ -2062,6 +2070,7 @@ impl Shell {
     fn handle(&mut self,msg:u32,wparam:WPARAM,lparam:LPARAM)->LRESULT{unsafe{
         match msg{
             sticky_window::NOTE_SAVED=>{if self.flush_editors_barrier(){self.make_inputs();self.invalidate();}return LRESULT(0);},
+            widget_clock::WIDGET_CLOCK_MOVED=>{if let Some((wx,wy))=widget_clock::take_last_moved_pos(){self.settings.widget_clock_x=wx;self.settings.widget_clock_y=wy;self.save();}return LRESULT(0);},
             WM_APP_VOLUME_CHANGED=>{
                 let updated=match volume_key(wparam.0 as u16){
                     Some(VolumeKey::Up)=>crate::system::adjust_master_volume(0.02),
@@ -4200,8 +4209,38 @@ fn client_screen_rect(hwnd:HWND)->Option<RECT>{
     }
 }
 
+fn is_foreground_in_move_or_size()->bool{
+    unsafe{
+        let mut gti=GUITHREADINFO{cbSize:std::mem::size_of::<GUITHREADINFO>()as u32,..Default::default()};
+        GetGUIThreadInfo(0,&mut gti).is_ok()&&(gti.flags.0&GUI_INMOVESIZE.0)!=0
+    }
+}
+
+fn covers_fullscreen_fallback_bounds(
+    window:RECT,
+    client:Option<RECT>,
+    monitor:RECT,
+    work:RECT,
+    style:u32,
+)->bool{
+    if covers_rect_tolerance(window,monitor,16){
+        return true;
+    }
+    let has_caption=(style&WS_CAPTION.0)==WS_CAPTION.0;
+    if has_caption{
+        return false;
+    }
+    covers_rect_tolerance(window,work,16)
+        ||client.is_some_and(|c|covers_rect_tolerance(c,work,16))
+}
+
 fn is_cursor_clipped_to_window(window:RECT,monitor:RECT)->bool{
     unsafe{
+        // During SC_MOVE / SC_SIZE (e.g. dragging a popup/dialog), Win32 itself calls
+        // ClipCursor to confine the pointer to the monitor/work area. That is not a game lock.
+        if is_foreground_in_move_or_size(){
+            return false;
+        }
         let mut clip=RECT::default();
         if GetClipCursor(&mut clip).is_err(){
             return false;
@@ -4273,9 +4312,13 @@ fn check_hwnd_fullscreen(hwnd:HWND,my_monitor:HMONITOR,info:&MONITORINFO)->bool{
         ){
             return true;
         }
-        let covers_mon = covers_rect_tolerance(window,info.rcMonitor,16)
-            || covers_rect_tolerance(window,info.rcWork,16)
-            || client.is_some_and(|c|covers_rect_tolerance(c,info.rcWork,16));
+        let covers_mon=covers_fullscreen_fallback_bounds(
+            window,
+            client,
+            info.rcMonitor,
+            info.rcWork,
+            style,
+        );
         if is_cursor_clipped_to_window(window,info.rcMonitor)&&covers_mon{
             return true;
         }
@@ -4709,6 +4752,14 @@ unsafe fn fullscreen_fixture()->Result<(),String>{unsafe{
 
         // 9. Toolwindow covering work area must NOT be treated as fullscreen
         assert!(!is_borderless_fullscreen_rect(work, Some(work), monitor, work, popup_style, WS_EX_TOOLWINDOW.0, false));
+
+        // 10. Normal maximized / overlapped captioned windows covering only the work area
+        // (e.g. maximized Chrome behind a dragged Save As dialog) must NOT trigger fullscreen
+        // fallback via ClipCursor/D3D checks.
+        assert!(!covers_fullscreen_fallback_bounds(max_win, Some(work), monitor, work, overlapped_style));
+        assert!(!covers_fullscreen_fallback_bounds(work, Some(work), monitor, work, overlapped_style));
+        assert!(covers_fullscreen_fallback_bounds(monitor, Some(monitor), monitor, work, overlapped_style));
+        assert!(covers_fullscreen_fallback_bounds(work, Some(work), monitor, work, popup_style));
     }
 
 }

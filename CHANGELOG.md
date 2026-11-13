@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.0.2.7] - 2026-11-13
+
+This release introduces the draggable desktop analog clock widget with live theme synchronization, adds 2027 Indonesian national holiday and collective leave data to the calendar, unblocks Explorer Save As and application popup dragging across the desktop, and prevents the notch and Windows taskbar from disappearing while dragging popups over maximized windows.
+
+### Added
+- **Desktop analog clock widget (`Settings > Widget`):** Added a macOS-style analog clock widget (`188x188` DIP frame with `1..12` numerals, 60 tick marks, two-part hands, and `#FF9F0A` second hand) pinned at the bottom of the Z-order (`HWND_BOTTOM`) with `WS_EX_NOACTIVATE`.
+  - Automatically synchronizes with the active material (`Solid`, `Lite`, `Adaptive`) and light/dark appearance.
+  - Supports dragging anywhere within the monitor work area, persists the widget coordinates (`widget_clock_x`, `widget_clock_y`), and provides a **Reset position** button in **Settings > Widget**.
+- **2027 Indonesian holidays & collective leave:** Added `source/data/holidays-2027.json` covering 2027 Indonesian national holidays and *cuti bersama* dates, and updated calendar year lookup and footer support (`2026–2027`).
+
+### Fixed
+- **Popup & Save As dialog dragging blocked (`system.rs`):** Fixed a critical bug where Explorer Save As (`#32770`) dialogs and application popups could not be dragged while `mynotch` was running.
+  - Tightened `find_volume_osd()` (`is_osd_candidate_window` + `osd_candidate_area`) to ignore `WS_CHILD`, `WS_THICKFRAME`, and `WS_CAPTION` windows, require `WS_EX_TOPMOST | WS_EX_TOOLWINDOW`, and re-validate cached `OSD_HWND` bounds and styles before use.
+  - Replaced unconditional 150 ms `ShowWindow(..., SW_MINIMIZE)` calls with `SW_SHOWMINNOACTIVE` guarded by `IsWindowVisible && !IsIconic` (`osd_needs_minimize`), preventing repeated Z-order activation and modal drag cancellation.
+- **Notch & taskbar hiding during popup drag (`shell.rs`):** Fixed a bug where dragging a popup (`SC_MOVE`) over a maximized captioned window (such as Chrome behind a Save As dialog) caused Win32 cursor clipping to falsely trigger fullscreen mode, hiding `mynotch` and the Windows taskbar (`Shell_TrayWnd` / `Shell_SecondaryTrayWnd`).
+  - Added `is_foreground_in_move_or_size()` (`GetGUIThreadInfo` `GUI_INMOVESIZE`) so active window move/size drags never count as game cursor confinement in `is_cursor_clipped_to_window()`.
+  - Added `covers_fullscreen_fallback_bounds()` so captioned desktop windows covering only `rcWork` (not `rcMonitor`) do not trigger cursor-clip or D3D fullscreen fallback.
+  - Guarded fullscreen `SetWindowPos(..., HWND_TOP)` in `sync_foreground()` with `GetForegroundWindow() == fs_hwnd` and `SWP_NOACTIVATE` so an underlying window is never raised above an active modal dialog or popup.
+
+---
+
 ## [0.0.2.6] - 2026-11-10
 
 This release introduces the startup laser edge sweep, interactive Stage 2 card spotlights, footer tab pagination indicators, fixes Stage 1 lyric collision against privacy badges, restores full ears rendering on Stage 2 lyric mode, optimizes player layout spacing, removes the heavy Power companion background daemon from the public edition for minimal memory usage, fixes settings BOM save locks, resolves sticky note inputs floating over overlays, and unifies notch ear contour rendering in Weather and Quick Controls.

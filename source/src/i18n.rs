@@ -232,6 +232,8 @@ pub fn t<'a>(key: &'a str, lang: &str) -> &'a str {
         "cat.reminders.desc" => if en { "Daily reminder and health settings." } else { "Buka pengaturan pengingat harian." },
         "cat.mods" => if en { "Mods & Extensions" } else { "Mod & Ekstensi" },
         "cat.mods.desc" => if en { "Install, open, or remove community mods." } else { "Pasang, buka, atau kelola mod komunitas." },
+        "cat.widget" => "Widget",
+        "cat.widget.desc" => if en { "Desktop widgets pinned to your wallpaper." } else { "Widget desktop yang menempel di layar." },
         "cat.update" => if en { "Updates" } else { "Pembaruan" },
         "cat.update.desc" => if en { "Check and download the latest mynotch releases." } else { "Periksa dan unduh rilis terbaru mynotch." },
 
@@ -724,7 +726,7 @@ mod tests {
     fn test_i18n_translations_exist_for_both_languages() {
         let keys = [
             "settings.title", "settings.auto_saved", "settings.back",
-            "cat.general", "cat.appearance", "cat.tabs", "cat.audio", "cat.reminders", "cat.mods",
+            "cat.general", "cat.appearance", "cat.tabs", "cat.audio", "cat.reminders", "cat.mods", "cat.widget",
             "general.language", "general.fullscreen", "general.screenshot", "general.minimal", "general.default_tab", "general.startup",
             "appearance.position", "appearance.top", "appearance.bottom", "appearance.scale",
             "appearance.gap", "appearance.opacity", "appearance.material", "appearance.material.desc", "color.dark", "color.light", "material.solid", "material.lite", "material.adaptive", "material.fallback.reduced", "material.fallback.contrast", "material.fallback.software", "material.fallback.unavailable",

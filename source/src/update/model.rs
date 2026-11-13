@@ -199,9 +199,9 @@ mod tests {
     fn test_current_build_identity_from_manifest() {
         let identity = BuildIdentity::current();
         assert_eq!(identity.product, "mynotch");
-        assert_eq!(identity.version, "0.0.2.6");
-        assert_eq!(identity.version_components, vec![0, 0, 2, 6]);
-        assert_eq!(identity.release_sequence, 20006);
+        assert_eq!(identity.version, "0.0.2.7");
+        assert_eq!(identity.version_components, vec![0, 0, 2, 7]);
+        assert_eq!(identity.release_sequence, 20007);
         assert_eq!(identity.channel, "preview");
         assert_eq!(identity.arch, "x86_64");
         assert_eq!(identity.os, "windows");

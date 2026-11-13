@@ -17,16 +17,16 @@ impl Shell{
     fn settings_content_bottom(&self)->f32{match self.settings_cat{
         0=>if self.settings_subpage_privacy{280.}else{568.},
         1=>if self.settings.hw_monitor_enabled{610.}else{466.},2=>116.+self.settings.settings_tab_order().len()as f32*36.,
-        3=>570.,4=>399.,5=>420.,_=>self.height-20.
+        3=>570.,4=>399.,5=>420.,6=>260.,_=>self.height-20.
     }}
     pub(super) fn scroll_settings(&mut self,delta:f32){
         if self.settings_cat==5{self.scroll_catalog(delta.signum()as i32);return}
-        let cat=self.settings_cat.min(6);
+        let cat=self.settings_cat.min(7);
         let l=super::settings_layout::SettingsLayout::compute(self.width,self.height.min(360.),self.settings_content_bottom(),self.settings_scroll[cat]+delta);
         self.settings_scroll[cat]=l.scroll_y;self.settings_popup=None;self.focused=None;self.invalidate();
     }
 
-    fn categories(&self) -> [(&'static str, &'static str, &'static str); 7] {
+    fn categories(&self) -> [(&'static str, &'static str, &'static str); 8] {
         let lang = self.settings.language.clone();
         [
             (t("cat.general", &lang), "settings", t("cat.general.desc", &lang)),
@@ -35,6 +35,7 @@ impl Shell{
             (t("cat.audio", &lang), "music", t("cat.audio.desc", &lang)),
             (t("cat.reminders", &lang), "bell", t("cat.reminders.desc", &lang)),
             (t("cat.mods", &lang), "package", t("cat.mods.desc", &lang)),
+            (t("cat.widget", &lang), "grid", t("cat.widget.desc", &lang)),
             (t("cat.update", &lang), "download", t("cat.update.desc", &lang)),
         ]
     }
@@ -73,20 +74,20 @@ impl Shell{
         p.fill(176.,65.,1.,279.,0.,0x26262c);
         let cats = self.categories();
         for (i,(label,icon,_)) in cats.iter().enumerate(){
-            let y = 64. + i as f32 * 39.;
+            let y = 62. + i as f32 * 35.;
             let selected = i == self.settings_cat;
-            let hover = self.pointer.is_some_and(|(a,b)| a >= 18. && a <= 160. && b >= y && b <= y + 34.);
+            let hover = self.pointer.is_some_and(|(a,b)| a >= 18. && a <= 160. && b >= y && b <= y + 31.);
             if selected || hover {
-                p.fill(18., y, 142., 34., 8., if selected { 0x1c1d22 } else { 0x111115 });
+                p.fill(18., y, 142., 31., 8., if selected { 0x1c1d22 } else { 0x111115 });
             }
-            p.outline_icon(icon, 30., y + 8., 16., if selected { 0xefeff3 } else { 0x777782 });
-            p.text(label, 56., y + 7., 103., 22., 11.5, if selected { FG } else { MUTED }, selected);
+            p.outline_icon(icon, 30., y + 7., 15., if selected { 0xefeff3 } else { 0x777782 });
+            p.text(label, 56., y + 6., 103., 20., 11.5, if selected { FG } else { MUTED }, selected);
             if self.focused.as_ref() == Some(&Action::SettingsCategory(i)) {
-                p.stroke(18., y, 142., 34., 8., ACCENT, 1.);
+                p.stroke(18., y, 142., 31., 8., ACCENT, 1.);
             }
-            self.st_hit(18., y, 142., 34., Action::SettingsCategory(i), true);
+            self.st_hit(18., y, 142., 31., Action::SettingsCategory(i), true);
         }
-        let category = self.settings_cat.min(6);
+        let category = self.settings_cat.min(7);
         if !(category == 0 && self.settings_subpage_privacy) {
             p.text(cats[category].0, 196., 66., 346., 25., 17., FG, false);
             p.text(cats[category].2, 196., 92., 346., 16., 10.5, MUTED, false);
@@ -114,6 +115,7 @@ impl Shell{
             3 => self.settings_audio(p),
             4 => self.settings_reminders(p),
             5 => self.settings_mods(p),
+            6 => self.settings_widget(p),
             _ => self.settings_update(p),
         }
         {
@@ -361,12 +363,53 @@ impl Shell{
             0x0d|0x20=>{let key=popup.key;let i=popup.cursor;if let Some((value,_))=self.settings_options(key).get(i){self.action(Action::SettingsValue(key,*value));}},0x1b=>self.settings_popup=None,0x09=>{self.settings_popup=None;self.invalidate();return false},_=>return false}
             self.invalidate();return true
         }
-        match key{0x21=>{self.scroll_settings(-168.);true},0x22=>{self.scroll_settings(168.);true},0x1b=>{self.action(Action::Back);true},0x20=>{if let Some(action)=self.focused.clone(){self.action(action);}true},0x26|0x28|0x24|0x23 if self.focused.as_ref().is_none_or(|a|matches!(a,Action::SettingsCategory(..)))=>{let cat=match key{0x24=>0,0x23=>6,0x26=>self.settings_cat.saturating_sub(1),_=>(self.settings_cat+1).min(6)};self.action(Action::SettingsCategory(cat));true},_=>false}
+        match key{0x21=>{self.scroll_settings(-168.);true},0x22=>{self.scroll_settings(168.);true},0x1b=>{self.action(Action::Back);true},0x20=>{if let Some(action)=self.focused.clone(){self.action(action);}true},0x26|0x28|0x24|0x23 if self.focused.as_ref().is_none_or(|a|matches!(a,Action::SettingsCategory(..)))=>{let cat=match key{0x24=>0,0x23=>7,0x26=>self.settings_cat.saturating_sub(1),_=>(self.settings_cat+1).min(7)};self.action(Action::SettingsCategory(cat));true},_=>false}
     }
     fn draw_settings_popup(&mut self,p:&mut Painter,popup:&SettingsPopup){unsafe{
         let options=self.settings_options(popup.key);let h=options.len()as f32*26.+8.;let top=if popup.y+34.+h<=self.height-12.{popup.y+34.}else{(popup.y-h-4.).max(56.)};let x=popup.x;let w=popup.width;
         p.fill(x-3.,top-3.,w+6.,h+6.,9.,0x09090c);p.fill(x,top,w,h,7.,0x1c1c23);p.stroke(x,top,w,h,7.,0x3a3a45,1.);
         for (i,(v,label)) in options.iter().enumerate(){let y=top+4.+i as f32*26.;let hover=self.pointer.is_some_and(|(a,b)|a>=x&&a<=x+w&&b>=y&&b<=y+26.);if hover||i==popup.cursor{p.fill(x+3.,y,w-6.,25.,4.,0x30303b);}p.text(label,x+8.,y+5.,w-16.,18.,11.,FG,false);self.st_hit(x+2.,y,w-4.,26.,Action::SettingsValue(popup.key,*v),true);}
+    }}
+
+    fn settings_widget(&mut self, p: &mut Painter) { unsafe {
+        let en = self.settings.language == "en";
+        self.st_row_compact(
+            p,
+            116.,
+            if en { "Clock" } else { "Jam" },
+            if en { "macOS analog clock pinned to desktop" } else { "Jam analog macOS nempel di desktop" },
+        );
+        self.st_toggle(p, 512., 127., self.settings.widget_clock_enabled, Action::Toggle("widget_clock"), true);
+
+        let mat_mode = crate::glass::MaterialMode::from_str(&self.settings.effective_presentation().material);
+        let mat_name = match mat_mode {
+            crate::glass::MaterialMode::Solid => t("material.solid", &self.settings.language),
+            crate::glass::MaterialMode::Lite => t("material.lite", &self.settings.language),
+            crate::glass::MaterialMode::Adaptive => t("material.adaptive", &self.settings.language),
+        };
+        let color_name = if self.ui_light() {
+            t("color.light", &self.settings.language)
+        } else {
+            t("color.dark", &self.settings.language)
+        };
+        let style_summary = format!("{mat_name} · {color_name}");
+        self.st_row_compact(
+            p,
+            162.,
+            if en { "Theme sync" } else { "Mengikuti tema" },
+            &style_summary,
+        );
+        if self.settings.widget_clock_enabled {
+            self.st_button(
+                p,
+                if en { "Reset position" } else { "Reset posisi" },
+                432.,
+                167.,
+                110.,
+                Action::Toggle("widget_clock_reset"),
+                true,
+            );
+        }
     }}
 
     fn settings_update(&mut self, p: &mut Painter) { unsafe {

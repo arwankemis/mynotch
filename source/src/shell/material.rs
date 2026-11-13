@@ -181,8 +181,25 @@ impl Shell {
     }
 
     /// Called after Material or Gelap/Terang changed in Settings: live, no restart.
+    pub(super) fn sync_widget_clock(&self) {
+        if self.preview {
+            return;
+        }
+        let mode = MaterialMode::from_str(&self.settings.effective_presentation().material);
+        super::widget_clock::sync_widget_clock(
+            self.hwnd,
+            self.settings.widget_clock_enabled,
+            mode,
+            self.ui_light(),
+            self.settings.software_renderer,
+            self.settings.widget_clock_x,
+            self.settings.widget_clock_y,
+        );
+    }
+
     pub(super) fn glass_settings_changed(&mut self) {
         self.sync_glass();
+        self.sync_widget_clock();
         self.invalidate();
     }
 }

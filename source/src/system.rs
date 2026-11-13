@@ -214,57 +214,101 @@ static OSD_HWND: AtomicIsize = AtomicIsize::new(0);
 static OSD_TRIGGERED: AtomicBool = AtomicBool::new(false);
 static OSD_HIDDEN: AtomicBool = AtomicBool::new(false);
 
-fn find_volume_osd() -> Option<HWND> {
+fn is_osd_candidate_window(style: u32, ex_style: u32, osd_w: i32, osd_h: i32) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WS_CAPTION, WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_THICKFRAME,
+    };
+    if osd_w <= 0 || osd_h <= 0 || osd_w > 1000 || osd_h > 400 {
+        return false;
+    }
+    // Reject normal/resizable/child windows; the system volume/brightness OSD is an
+    // undecorated topmost tool overlay.
+    if (style & (WS_CHILD.0 | WS_THICKFRAME.0)) != 0 || (style & WS_CAPTION.0) == WS_CAPTION.0 {
+        return false;
+    }
+    (ex_style & (WS_EX_TOPMOST.0 | WS_EX_TOOLWINDOW.0)) == (WS_EX_TOPMOST.0 | WS_EX_TOOLWINDOW.0)
+}
+
+fn osd_needs_minimize(visible: bool, iconic: bool) -> bool {
+    visible && !iconic
+}
+
+fn osd_candidate_area(hwnd: HWND) -> Option<i64> {
     use windows::Win32::Foundation::RECT;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowRect};
-    use windows::core::{w, PCWSTR};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongW, GetWindowRect, GWL_EXSTYLE, GWL_STYLE, IsWindow,
+    };
     unsafe {
-        let mut pick: Option<(i64, HWND)> = None;
-        let mut after = None;
+        if !IsWindow(Some(hwnd)).as_bool() {
+            return None;
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return None;
+        }
+        let (osd_w, osd_h) = (rect.right - rect.left, rect.bottom - rect.top);
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        if !is_osd_candidate_window(style, ex_style, osd_w, osd_h) {
+            return None;
+        }
+        Some(osd_w as i64 * osd_h as i64)
+    }
+}
+
+fn find_osd_host(
+    parent_class: windows::core::PCWSTR,
+    child_class: windows::core::PCWSTR,
+) -> Option<HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowExW;
+    use windows::core::PCWSTR;
+    let mut pick: Option<(i64, HWND)> = None;
+    let mut after: Option<HWND> = None;
+    unsafe {
         loop {
-            let Ok(outer) = FindWindowExW(None, after, w!("XamlExplorerHostIslandWindow"), PCWSTR::null()) else { break };
+            let Ok(outer) = FindWindowExW(None, after, parent_class, PCWSTR::null()) else {
+                break;
+            };
             after = Some(outer);
-            if FindWindowExW(Some(outer), None, w!("Windows.UI.Composition.DesktopWindowContentBridge"), PCWSTR::null()).is_err() {
+            if FindWindowExW(Some(outer), None, child_class, PCWSTR::null()).is_err() {
                 continue;
             }
-            let mut rect = RECT::default();
-            if GetWindowRect(outer, &mut rect).is_err() {
+            // The OSD is a small pill; skip the full-screen islands used by Task Switching/Start
+            // and reject decorated/non-topmost shell islands.
+            let Some(area) = osd_candidate_area(outer) else {
                 continue;
-            }
-            let (osd_w, osd_h) = (rect.right - rect.left, rect.bottom - rect.top);
-            // The OSD is a small pill; skip the full-screen islands used by Task Switching/Start.
-            if osd_w <= 0 || osd_h <= 0 || osd_w > 1000 || osd_h > 400 {
-                continue;
-            }
-            let area = osd_w as i64 * osd_h as i64;
+            };
             if pick.is_none_or(|(best, _)| area < best) {
                 pick = Some((area, outer));
             }
         }
-        if let Some((_, window)) = pick {
-            return Some(window);
-        }
-        let mut after = None;
-        loop {
-            let Ok(outer) = FindWindowExW(None, after, w!("NativeHWNDHost"), PCWSTR::null()) else { break };
-            after = Some(outer);
-            if FindWindowExW(Some(outer), None, w!("DirectUIHWND"), PCWSTR::null()).is_err() {
-                continue;
-            }
-            // Same pill bounds as the Windows 11 path: a full-screen NativeHWNDHost
-            // (another shell surface) must never be minimized as if it were the OSD.
-            let mut rect = RECT::default();
-            if GetWindowRect(outer, &mut rect).is_err() {
-                continue;
-            }
-            let (osd_w, osd_h) = (rect.right - rect.left, rect.bottom - rect.top);
-            if osd_w <= 0 || osd_h <= 0 || osd_w > 1000 || osd_h > 400 {
-                continue;
-            }
-            return Some(outer);
-        }
-        None
     }
+    pick.map(|(_, window)| window)
+}
+
+fn find_volume_osd() -> Option<HWND> {
+    use windows::core::w;
+    find_osd_host(
+        w!("XamlExplorerHostIslandWindow"),
+        w!("Windows.UI.Composition.DesktopWindowContentBridge"),
+    )
+    .or_else(|| find_osd_host(w!("NativeHWNDHost"), w!("DirectUIHWND")))
+}
+
+fn hide_osd_window(window: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsIconic, IsWindowVisible, SW_SHOWMINNOACTIVE, ShowWindow,
+    };
+    unsafe {
+        let visible = IsWindowVisible(window).as_bool();
+        let iconic = IsIconic(window).as_bool();
+        if osd_needs_minimize(visible, iconic) {
+            // Use SW_SHOWMINNOACTIVE instead of SW_MINIMIZE so hiding the OSD never activates
+            // another top-level window or cancels an in-progress drag/modal loop elsewhere.
+            let _ = ShowWindow(window, SW_SHOWMINNOACTIVE);
+        }
+    }
+    OSD_HIDDEN.store(true, Ordering::Relaxed);
 }
 
 /// Creating the OSD once at startup means the host exists before the first hardware key, so it
@@ -287,16 +331,12 @@ fn trigger_and_hide_osd_async() {
     std::thread::sleep(std::time::Duration::from_millis(250));
     if let Some(found) = find_volume_osd() {
         OSD_HWND.store(found.0 as isize, Ordering::Relaxed);
-        unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
-            let _ = ShowWindow(found, SW_MINIMIZE);
-        }
-        OSD_HIDDEN.store(true, Ordering::Relaxed);
+        hide_osd_window(found);
     }
 }
 
 pub fn set_volume_osd_hidden(hidden: bool) {
-    use windows::Win32::UI::WindowsAndMessaging::{IsWindow, ShowWindow, SW_HIDE, SW_MINIMIZE, SW_RESTORE};
+    use windows::Win32::UI::WindowsAndMessaging::{IsWindow, ShowWindow, SW_HIDE, SW_RESTORE};
     unsafe {
         if !hidden {
             if !OSD_HIDDEN.swap(false, Ordering::Relaxed) {
@@ -315,8 +355,14 @@ pub fn set_volume_osd_hidden(hidden: bool) {
             return;
         }
         let stored = OSD_HWND.load(Ordering::Relaxed);
-        let mut window = if stored != 0 && IsWindow(Some(HWND(stored as *mut _))).as_bool() {
-            Some(HWND(stored as *mut _))
+        let mut window = if stored != 0 {
+            let cached = HWND(stored as *mut _);
+            if osd_candidate_area(cached).is_some() {
+                Some(cached)
+            } else {
+                OSD_HWND.store(0, Ordering::Relaxed);
+                None
+            }
         } else {
             None
         };
@@ -337,8 +383,7 @@ pub fn set_volume_osd_hidden(hidden: bool) {
             }
         }
         if let Some(window) = window {
-            let _ = ShowWindow(window, SW_MINIMIZE);
-            OSD_HIDDEN.store(true, Ordering::Relaxed);
+            hide_osd_window(window);
         }
     }
 }
@@ -641,6 +686,32 @@ mod tests {
         assert!(snap.gpu_watts.unwrap() > 10.0);
         assert!(snap.total_ac_watts.unwrap() > snap.total_dc_watts.unwrap());
         assert!(snap.hourly_cost_idr.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_osd_candidate_window_filtering() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WS_CAPTION, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+            WS_THICKFRAME,
+        };
+        let valid_ex = WS_EX_TOPMOST.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
+        assert!(is_osd_candidate_window(WS_POPUP.0, valid_ex, 260, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0, valid_ex, 0, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0, valid_ex, 1200, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0, valid_ex, 260, 500));
+        assert!(!is_osd_candidate_window(WS_CHILD.0, valid_ex, 260, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0 | WS_CAPTION.0, valid_ex, 260, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0 | WS_THICKFRAME.0, valid_ex, 260, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0, WS_EX_TOPMOST.0, 260, 72));
+        assert!(!is_osd_candidate_window(WS_POPUP.0, WS_EX_TOOLWINDOW.0, 260, 72));
+    }
+
+    #[test]
+    fn test_osd_needs_minimize_only_when_visible_and_not_iconic() {
+        assert!(osd_needs_minimize(true, false));
+        assert!(!osd_needs_minimize(true, true));
+        assert!(!osd_needs_minimize(false, false));
+        assert!(!osd_needs_minimize(false, true));
     }
 }
 
